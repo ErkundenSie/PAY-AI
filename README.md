@@ -4,13 +4,13 @@
 > 注册 OpenAI 账号 → 走 0 元 Stripe Checkout → PayPal 支付占位 → 拉取 OAuth 协议 token → 自动入库出货。  
 > 全流程后台管理、CDK 兑换、子进程并发、Playwright Stealth + 反指纹方案。
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Node](https://img.shields.io/badge/Node-%3E%3D20-339933?logo=node.js&logoColor=white)
-![MySQL](https://img.shields.io/badge/MySQL-8.0%2B-4479A1?logo=mysql&logoColor=white)
-![Playwright](https://img.shields.io/badge/Playwright-1.59-2EAD33?logo=playwright&logoColor=white)
-![Status](https://img.shields.io/badge/status-experimental-orange)
+[License: MIT](LICENSE)
+Node
+MySQL
+Playwright
+Status
 
-仓库：<https://github.com/432539/plus_gopay_gptp-plus>
+仓库：[https://github.com/432539/plus_gopay_gptp-plus](https://github.com/432539/plus_gopay_gptp-plus)
 
 ---
 
@@ -18,7 +18,7 @@
 
 > 后台「任务管理」页面：实时进度、状态徽章、Token 摘要、批量操作。
 
-![后台任务管理](docs/images/admin-tasks.png)
+后台任务管理
 
 ---
 
@@ -74,9 +74,9 @@
 
 每个任务由父进程 `product_activator` 调度，分三段子进程：
 
-1. **`register_openai.js`** —— 注册 OpenAI 账号，拿到 `access_token`
-2. **`index.js`** —— 用该 token 创建 0 元 Plus 订单，跑 Stripe Hosted Checkout，跳到 PayPal 走授权
-3. **`oauth_login.js`** —— 支付成功后用注册邮箱重新登录，取出 `refresh_token`，写回成品库
+1. `**register_openai.js**` —— 注册 OpenAI 账号，拿到 `access_token`
+2. `**index.js**` —— 用该 token 创建 0 元 Plus 订单，跑 Stripe Hosted Checkout，跳到 PayPal 走授权
+3. `**oauth_login.js**` —— 支付成功后用注册邮箱重新登录，取出 `refresh_token`，写回成品库
 
 任意一段失败都会被 `analyzeProcessOutput` 分类（如 `手机号被拒` / `代理超时` / `PayPal风控驳回` / ...），父进程根据分类决定**禁用资产、换号重试、还是终止整批**。
 
@@ -85,11 +85,13 @@
 ## 主要特性
 
 ### 1) 资产池 + 状态机
+
 - 手机号 / 银行卡 / 邮箱、代理 IP 全部入库管理
 - 任务级 `lock` + `release` 防止并发抢同一个号
 - 出错时自动 `is_active=0, status='已报废'`，避免反复重试坏资产
 
 ### 2) 反指纹 / 反风控
+
 - **Stealth Plugin** + 自定义 `addInitScript`：精修 `navigator.webdriver / plugins / userAgentData / canvas / WebGL` 等 30+ 指纹点
 - **同一内核全程一致**：UA 与 `userAgentData.brands` 强制对齐，避免 hCaptcha invisible 检出
 - **支持真 Chrome / Edge channel**：`CHROMIUM_CHANNEL=chrome` 或 `=msedge`
@@ -97,27 +99,33 @@
 - **PayPal 字段 fast 填充**：模拟密码管理器粘贴节奏，反制「键盘事件过长」打分
 
 ### 3) 多渠道邮箱
+
 - **Cloudflare temp_email** 协议（多域名随机选 + 失败黑名单）
 - **Microsoft Outlook IMAP / XOAUTH2** 邮箱池
 - **OpenAI 自有随机域名** 三选一，可在后台动态切换
 
 ### 4) 智能重试
-| 错误类型 | 处理 |
-|---|---|
-| `OpenAI 鉴权服务异常` | 换代理 + 同号重试 |
-| `手机号被拒/收不到验证码` | **永久禁用手机号**，换号重试 |
-| `银行卡被拒` | 永久禁用银行卡，换卡重试 |
-| `PayPal/Stripe redirect_status=failed` | 换号重试 |
-| `PayPal 仅渲染欢迎页` | 自动 `reload` 2 次，再判定为致命 |
-| `资产池枯竭` | 终止整批，等待补货 |
+
+
+| 错误类型                                   | 处理                     |
+| -------------------------------------- | ---------------------- |
+| `OpenAI 鉴权服务异常`                        | 换代理 + 同号重试             |
+| `手机号被拒/收不到验证码`                         | **永久禁用手机号**，换号重试       |
+| `银行卡被拒`                                | 永久禁用银行卡，换卡重试           |
+| `PayPal/Stripe redirect_status=failed` | 换号重试                   |
+| `PayPal 仅渲染欢迎页`                        | 自动 `reload` 2 次，再判定为致命 |
+| `资产池枯竭`                                | 终止整批，等待补货              |
+
 
 ### 5) 支付成功多重判定
+
 - URL 跳到 `chatgpt.com` ✓
 - Stripe 标准回调 `redirect_status=succeeded` ✓
 - `redirect_status=failed/canceled` → **立即失败**，不傻等 60s
 - `paypal.com/checkoutweb/genericError` → **立即识别为风控**
 
 ### 6) 实时运行日志
+
 - 后台「运行日志」页面环形缓冲，可按 jobKey 过滤
 - 子进程 stdout/stderr 全程透传 + 关键行进度条解析（如 `[结账] 等待 PayPal...` → 90%）
 
@@ -127,11 +135,13 @@
 
 ### 1. 准备环境
 
-| 组件 | 版本 |
-|---|---|
-| **Node.js** | ≥ 20.x（Playwright 1.59 要求） |
-| **MySQL** | ≥ 8.0 |
-| **OS** | Linux / Windows / macOS 均可，Linux 跑 headless 需要 `libgbm1 libnss3 libxkbcommon0` 等（用 `npx playwright install --with-deps` 一键装） |
+
+| 组件          | 版本                                                                                                                           |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Node.js** | ≥ 20.x（Playwright 1.59 要求）                                                                                                   |
+| **MySQL**   | ≥ 8.0                                                                                                                        |
+| **OS**      | Linux / Windows / macOS 均可，Linux 跑 headless 需要 `libgbm1 libnss3 libxkbcommon0` 等（用 `npx playwright install --with-deps` 一键装） |
+
 
 ### 2. 拉代码 & 装依赖
 
@@ -153,6 +163,7 @@ cp .env.example .env
 ```
 
 `.env` 至少要填：
+
 ```
 DB_PASSWORD=<your-mysql-password>
 DB_NAME=plus_papay
@@ -182,7 +193,7 @@ http://localhost:3000
 MySQL => root@127.0.0.1:3306/plus_papay
 ```
 
-打开 <http://localhost:3000/admin> 用 `ADMIN_PASSWORD` 登录即可。
+打开 [http://localhost:3000/admin](http://localhost:3000/admin) 用 `ADMIN_PASSWORD` 登录即可。
 
 ### 5. 第一次跑一单
 
@@ -238,20 +249,22 @@ MySQL => root@127.0.0.1:3306/plus_papay
 
 ## 接口
 
-完整 REST API 见 [`API_DOC.md`](API_DOC.md)（项目自带）。摘要：
+完整 REST API 见 `[API_DOC.md](API_DOC.md)`（项目自带）。摘要：
 
-| 用途 | Method + Path | 鉴权 |
-|---|---|---|
-| 用户兑换 CDK | `POST /api/redeem-product` | 无 |
-| 查询 CDK 状态 | `GET  /api/cdk/query?cdk=...` | 无 |
-| 后台登录 | `POST /api/admin/login` | 密码 |
-| 后台数据全量 | `GET  /api/admin/data` | Bearer |
-| 创建批量任务 | `POST /api/admin/products/generate` | Bearer |
-| 终止任务 | `POST /api/admin/products/generate-stop` | Bearer |
-| 实时日志 | `GET  /api/admin/runtime-logs?after=...` | Bearer |
-| 邮箱池 CRUD | `/api/admin/pool-emails(/...)` | Bearer |
-| 代理批量测试 | `POST /api/admin/proxy/test` | Bearer |
-| 配置读写 | `GET/POST /api/admin/config` | Bearer |
+
+| 用途        | Method + Path                            | 鉴权     |
+| --------- | ---------------------------------------- | ------ |
+| 用户兑换 CDK  | `POST /api/redeem-product`               | 无      |
+| 查询 CDK 状态 | `GET /api/cdk/query?cdk=...`             | 无      |
+| 后台登录      | `POST /api/admin/login`                  | 密码     |
+| 后台数据全量    | `GET /api/admin/data`                    | Bearer |
+| 创建批量任务    | `POST /api/admin/products/generate`      | Bearer |
+| 终止任务      | `POST /api/admin/products/generate-stop` | Bearer |
+| 实时日志      | `GET /api/admin/runtime-logs?after=...`  | Bearer |
+| 邮箱池 CRUD  | `/api/admin/pool-emails(/...)`           | Bearer |
+| 代理批量测试    | `POST /api/admin/proxy/test`             | Bearer |
+| 配置读写      | `GET/POST /api/admin/config`             | Bearer |
+
 
 ---
 
@@ -313,8 +326,7 @@ A: 这两个是子进程文件，每次任务 `fork` 时重新加载；只有 `s
 
 如果这个项目对你有帮助，欢迎请作者喝杯咖啡 ☕
 
-<p align="center">
-  <img src="docs/images/sponsor.png" alt="赞赏码" width="240" />
-</p>
+
 
 > 把你的赞赏码图片保存到 `docs/images/sponsor.png` 即可显示。
+
