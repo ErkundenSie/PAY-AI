@@ -1,0 +1,12 @@
+node_modules
+.git
+.env
+.env.*
+!.env.example
+debug_screenshots
+product_files
+data/browser-pool
+*.sql.gz
+.DS_Store
+.vscode
+.idea

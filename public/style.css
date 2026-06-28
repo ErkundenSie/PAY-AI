@@ -247,7 +247,8 @@ select:focus {
     box-shadow: var(--shadow-focus);
 }
 
-#tokenInput {
+#tokenInput,
+#sessionInput {
     padding-bottom: 50px;
     min-height: 120px;
 }
@@ -826,3 +827,592 @@ a:hover {
 [style*="border-bottom: 1px solid rgba(255,255,255,0.05)"] { border-bottom-color: var(--divider) !important; }
 [style*="border-top: 1px solid rgba(255, 255, 255, 0.05)"] { border-top-color: var(--divider) !important; }
 [style*="border-top: 1px solid rgba(255,255,255,0.05)"] { border-top-color: var(--divider) !important; }
+
+/* ============ 自助充值中心（仿 cdk.98-xj.com 布局） ============ */
+body.recharge-page {
+    display: block;
+    min-height: 100vh;
+    background:
+        radial-gradient(at 10% 0%, rgba(37, 99, 235, 0.12) 0, transparent 42%),
+        radial-gradient(at 90% 8%, rgba(14, 165, 233, 0.10) 0, transparent 40%),
+        linear-gradient(180deg, #eef4ff 0%, var(--bg-page) 38%, #f8fafc 100%);
+}
+
+.page-shell {
+    width: min(720px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 40px 0 56px;
+    animation: fadeIn 0.45s ease;
+}
+
+.site-hero {
+    text-align: center;
+    margin-bottom: 28px;
+}
+
+.hero-eyebrow {
+    display: inline-block;
+    margin-bottom: 12px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: rgba(37, 99, 235, 0.10);
+    color: var(--primary);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+}
+
+.site-hero h1 {
+    font-size: clamp(28px, 5vw, 36px);
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 10px;
+}
+
+.hero-subtitle {
+    max-width: 560px;
+    margin: 0 auto 18px;
+    color: var(--text-dim);
+    font-size: 15px;
+    line-height: 1.65;
+}
+
+.feature-badges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+}
+
+.feature-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: var(--shadow-sm);
+}
+
+.feature-badge svg {
+    width: 15px;
+    height: 15px;
+    color: var(--primary);
+}
+
+.recharge-card {
+    background: var(--surface);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-xl);
+    padding: 28px 28px 24px;
+    box-shadow: var(--shadow-lg);
+}
+
+.card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.card-head h2 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.card-head p {
+    color: var(--text-dim);
+    font-size: 13px;
+}
+
+.flow-badge {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--surface-soft);
+    color: var(--text-dim);
+    border: 1px solid var(--glass-border);
+}
+
+.flow-badge.pending { background: #f1f5f9; color: #64748b; }
+.flow-badge.cdk_ok { background: var(--info-soft); color: #0369a1; border-color: #bae6fd; }
+.flow-badge.running { background: var(--primary-soft); color: var(--primary); border-color: #bfdbfe; }
+.flow-badge.success { background: var(--success-soft); color: #047857; border-color: #a7f3d0; }
+.flow-badge.failed,
+.flow-badge.manual { background: var(--error-soft); color: #b91c1c; border-color: #fecaca; }
+
+.stepper {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 20px;
+    padding: 14px 16px;
+    border-radius: var(--radius);
+    background: var(--surface-soft);
+    border: 1px solid var(--divider);
+}
+
+.step-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.step-num {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #e2e8f0;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.step-item.active .step-num {
+    background: var(--primary);
+    color: #fff;
+}
+
+.step-item.done .step-num {
+    background: var(--success);
+    color: #fff;
+}
+
+.step-item.active,
+.step-item.done {
+    color: var(--text-main);
+}
+
+.step-line {
+    width: 36px;
+    height: 2px;
+    background: #e2e8f0;
+    margin: 0 8px;
+    flex-shrink: 0;
+}
+
+.notice-banner {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 12px 14px;
+    margin-bottom: 20px;
+    border-radius: var(--radius);
+    background: var(--warning-soft);
+    border: 1px solid #fde68a;
+}
+
+.notice-banner svg {
+    width: 18px;
+    height: 18px;
+    color: #d97706;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.notice-banner p {
+    margin: 0;
+    color: #92400e;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.field-label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.field-hint {
+    margin-top: -8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+}
+
+.cdk-confirmed {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--success-soft);
+    border: 1px solid #a7f3d0;
+    font-size: 13px;
+    color: #065f46;
+}
+
+.cdk-confirmed code {
+    background: rgba(255, 255, 255, 0.7);
+}
+
+.btn-primary {
+    background: var(--primary);
+    color: #fff;
+}
+
+.btn-lg {
+    padding: 14px 20px;
+    font-size: 15px;
+}
+
+button.is-loading .btn-text {
+    opacity: 0.85;
+}
+
+.task-progress-text {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.5;
+}
+
+.query-result-card {
+    text-align: left;
+    background: var(--surface-soft);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    padding: 4px 14px;
+}
+
+.query-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--divider);
+    font-size: 14px;
+}
+
+.query-row:last-child {
+    border-bottom: none;
+}
+
+.query-row span {
+    color: var(--text-dim);
+}
+
+.query-row strong {
+    color: var(--text-main);
+    font-weight: 600;
+}
+
+.status-processing {
+    color: var(--warning) !important;
+}
+
+.faq-panel {
+    margin-top: 20px;
+    padding: 14px 16px;
+    border-radius: var(--radius);
+    background: var(--surface);
+    border: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    box-shadow: var(--shadow-sm);
+}
+
+.faq-panel summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-main);
+    list-style: none;
+}
+
+.faq-panel summary::-webkit-details-marker {
+    display: none;
+}
+
+.faq-panel ul {
+    margin: 12px 0 0;
+    padding-left: 18px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-dim);
+}
+
+.recharge-page .public-runtime-panel {
+    position: static;
+    transform: none;
+    width: 100%;
+    margin-top: 20px;
+}
+
+@media (max-width: 640px) {
+    .page-shell {
+        width: calc(100% - 20px);
+        padding: 24px 0 40px;
+    }
+
+    .recharge-card {
+        padding: 20px 16px;
+    }
+
+    .card-head {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .step-label {
+        font-size: 12px;
+    }
+
+    .step-line {
+        width: 20px;
+    }
+}
+
+/* ============ 套餐说明 / 发票助手 ============ */
+.plan-showcase {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.plan-card {
+    background: var(--surface);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    box-shadow: var(--shadow-sm);
+}
+
+.plan-card.highlight {
+    border-color: #bfdbfe;
+    background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+}
+
+.plan-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.plan-card h3 {
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.plan-card p {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-dim);
+}
+
+.plan-tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #f1f5f9;
+    color: #64748b;
+    font-weight: 600;
+}
+
+.plan-tag.pro {
+    background: var(--primary-soft);
+    color: var(--primary);
+}
+
+.region-hint {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 20px;
+}
+
+.feature-badge.feature-link {
+    text-decoration: none;
+    color: var(--text-secondary);
+    transition: border-color 0.2s, color 0.2s;
+}
+
+.feature-badge.feature-link:hover {
+    color: var(--primary);
+    border-color: #bfdbfe;
+}
+
+.plan-confirmed {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--primary-soft);
+    border: 1px solid #bfdbfe;
+    font-size: 13px;
+    color: #1e3a8a;
+}
+
+.plan-confirmed strong {
+    font-weight: 700;
+}
+
+.compact-hero {
+    margin-bottom: 20px;
+}
+
+.back-home-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    color: var(--text-dim);
+    text-decoration: none;
+}
+
+.back-home-link:hover {
+    color: var(--primary);
+}
+
+.subscription-card .guide-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin: 20px 0;
+}
+
+.guide-step {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.guide-step-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.guide-step h3 {
+    font-size: 15px;
+    margin-bottom: 4px;
+}
+
+.guide-step p {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-dim);
+}
+
+.subscription-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.subscription-query-section {
+    margin-top: 4px;
+}
+
+.subscription-field-hint {
+    margin-top: 10px;
+    margin-bottom: 14px;
+}
+
+.subscription-query-actions {
+    margin-top: 0;
+}
+
+.subscription-query-actions button {
+    width: 100%;
+}
+
+button.is-loading {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+button.is-loading .loader {
+    display: block;
+}
+
+.subscription-result {
+    margin-top: 18px;
+}
+
+.subscription-result-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.subscription-result-head h2 {
+    font-size: 16px;
+    margin: 0;
+}
+
+.subscription-billing-actions {
+    margin-top: 14px;
+}
+
+.subscription-guide-panel {
+    margin-top: 22px;
+    padding: 14px 16px;
+    border-radius: var(--radius);
+    background: var(--surface-soft);
+    border: 1px solid var(--glass-border);
+}
+
+.subscription-guide-panel summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-main);
+    margin-bottom: 0;
+}
+
+.subscription-guide-panel[open] summary {
+    margin-bottom: 12px;
+}
+
+.action-link-btn {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+@media (max-width: 768px) {
+    .plan-showcase {
+        grid-template-columns: 1fr;
+    }
+}

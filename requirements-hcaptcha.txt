@@ -1,0 +1,10 @@
+# hCaptcha 视觉求解器 Python 依赖（Docker / 裸机共用）
+# CPU 版 PyTorch，避免 GPU 镜像体积膨胀
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+transformers
+opencv-python-headless
+numpy
+pillow
+requests
+playwright>=1.40,<2

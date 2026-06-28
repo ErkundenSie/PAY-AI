@@ -1,12 +1,14 @@
 {
-  "name": "plus-papay",
+  "name": "kc-gpt-pay",
   "version": "1.0.0",
-  "description": "ChatGPT Plus 自动化开通工具（PayPal 通道）：注册 → 0 元 Stripe Checkout → PayPal 支付 → 协议 token 入库",
+  "description": "ChatGPT Plus 自动化开通工具（Stripe 信用卡直付）：注册 → Stripe Checkout → 信用卡卡池支付 → 协议 token 入库",
   "license": "MIT",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "start:headful": "cross-env HEADFUL=1 node server.js"
+    "start:headful": "cross-env HEADFUL=1 node server.js",
+    "test": "vitest --run",
+    "test:watch": "vitest"
   },
   "engines": {
     "node": ">=20"
@@ -21,15 +23,22 @@
     "jsonwebtoken": "^9.0.3",
     "mailparser": "^3.9.8",
     "mysql2": "^3.15.2",
+    "otplib": "12.0.1",
     "path": "^0.12.7",
     "playwright": "^1.59.1",
     "playwright-extra": "^4.3.6",
     "playwright-stealth": "^0.0.1",
     "proxy-agent": "^8.0.1",
+    "proxy-chain": "^2.7.1",
     "puppeteer-core": "^24.42.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "uuid": "^14.0.0",
     "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "fast-check": "^4.8.0",
+    "vitest": "^4.1.9"
   }
 }

@@ -4,148 +4,168 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FLYGPT PLUS | 自动化开通系统</title>
+    <title>ChatGPT 订阅自动开通 | KC ChatGPT PLUS</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 
-<body>
-    <div class="background-blobs">
-        <div class="blob blob-1"></div>
-        <div class="blob blob-2"></div>
-    </div>
-    <section id="publicRuntimeCard" class="public-runtime-panel load-low">
-        <div class="public-runtime-layout">
-            <div class="public-runtime-title">前台并发槽位信息</div>
-            <div id="publicForegroundSlots" class="public-runtime-value">0/0</div>
-            <div id="publicForegroundSlotsMeta" class="public-runtime-meta">当前空闲，前台槽位状态正常</div>
-            <div id="publicForegroundSlotGrid" class="public-slot-grid"></div>
-        </div>
-    </section>
-
-    <main class="glass-container">
-        <div class="main-title">FLYGPT PLUS</div>
-        <nav class="tab-nav">
-            <button class="tab-btn active" data-tab="redeem">CDK 兑换</button>
-            <button class="tab-btn" data-tab="query">CDK 查询</button>
-        </nav>
-
-        <!-- 兑换板块 -->
-        <div id="redeemSection">
-            <!-- 步骤一 -->
-            <div id="step1">
-                <header>
-                    <div class="logo">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path
-                                d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
-                            </path>
-                        </svg>
-                    </div>
-                    <h1>CDK 兑换</h1>
-                    <p>请输入您的激活码以进行兑换</p>
-                </header>
-                <section class="input-group">
-                    <input type="text" id="cdkInput" placeholder="请输入您的兑换码" maxlength="32">
-                    <button id="redeemBtn"><span class="btn-text">下一步</span>
-                        <div class="loader"></div>
-                    </button>
-                </section>
+<body class="recharge-page">
+    <div class="page-shell">
+        <header class="site-hero">
+            <div class="hero-eyebrow">Instant AI Top-Ups</div>
+            <h1>ChatGPT 订阅自动开通</h1>
+            <p class="hero-subtitle">通过官方 Checkout 流程自助开通 KC ChatGPT PLUS，兑换卡密后粘贴 Session 即可自动完成支付开通。</p>
+            <div class="feature-badges">
+                <span class="feature-badge"><i data-lucide="shield-check"></i> 官方结账</span>
+                <span class="feature-badge"><i data-lucide="zap"></i> 极速开通</span>
+                <span class="feature-badge"><i data-lucide="rotate-ccw"></i> 失败可回滚</span>
+                <a href="/subscription" class="feature-badge feature-link"><i data-lucide="receipt"></i> 发票助手</a>
             </div>
+        </header>
 
-            <!-- 步骤二 (自助激活) -->
-            <div id="step2" style="display: none;">
-                <section class="input-group" style="margin-top: 10px;">
-                    <div class="textarea-wrapper">
-                        <a href="https://chatgpt.com/api/auth/session" target="_blank"
-                            class="get-token-btn-floating">获取Token</a>
-                        <textarea id="tokenInput" placeholder="在此粘贴全选复制的代码，系统将自动提取 Token" rows="4"></textarea>
-                    </div>
-                    <button id="startBtn" class="btn-primary"><span class="btn-text">确认并启动自动化开通</span>
-                        <div class="loader"></div>
-                    </button>
-                    <button id="backToStep1" class="btn-secondary">返回重新输入 CDK</button>
-                </section>
-            </div>
-
-            <!-- 步骤二 (成品号兑换) -->
-            <div id="stepProduct" style="display: none;">
-                <header>
-                    <div class="logo product-logo">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2">
-                            <path
-                                d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
-                            </path>
-                            <polyline points="7.5 4.21 12 6.81 16.5 4.21"></polyline>
-                            <polyline points="7.5 19.79 7.5 14.6 12 12 16.5 14.6 16.5 19.79"></polyline>
-                            <polyline points="12 22 12 12"></polyline>
-                        </svg>
-                    </div>
-                    <h1>成品号兑换</h1>
-                    <p>您正在兑换成品账号，点击下方按钮确认领取</p>
-                </header>
-                <div id="productCdkDisplay" style="margin-bottom: 20px;"></div>
-                <section class="input-group">
-                    <button id="confirmProductBtn" class="btn-primary"
-                        style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
-                        <span class="btn-text">立即领取账号</span>
-                        <div class="loader"></div>
-                    </button>
-                    <button id="backToStep1FromProduct" class="btn-secondary">返回</button>
-                </section>
-            </div>
-        </div>
-
-        <!-- 查询板块 -->
-        <div id="querySection" style="display: none;">
-            <header>
-                <div class="logo query-logo">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="11" cy="11" r="8"></circle>
-                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                    </svg>
+        <section class="plan-showcase">
+            <article class="plan-card">
+                <div class="plan-card-head">
+                    <h3>ChatGPT Plus</h3>
+                    <span class="plan-tag">标准版</span>
                 </div>
-                <h1>CDK 查询</h1>
-                <p>输入激活码即可实时查询 CDK 状态与记录</p>
-            </header>
-            <section class="input-group">
-                <input type="text" id="queryInput" placeholder="请输入要查询的激活码" maxlength="32">
-                <button id="queryBtn"><span class="btn-text">立即查询</span>
-                    <div class="loader"></div>
-                </button>
-            </section>
-        </div>
+                <p>适合日常使用：GPT-5.5、高级数据分析、DALL·E 等 Plus 权益，按月订阅。</p>
+            </article>
+            <article class="plan-card highlight">
+                <div class="plan-card-head">
+                    <h3>Pro 5x</h3>
+                    <span class="plan-tag pro">高用量</span>
+                </div>
+                <p>在 Pro 基础上提供约 <strong>5 倍</strong> 的消息/推理额度，适合重度个人用户与创作者。</p>
+            </article>
+            <article class="plan-card">
+                <div class="plan-card-head">
+                    <h3>Pro 20x</h3>
+                    <span class="plan-tag pro">旗舰</span>
+                </div>
+                <p>最高约 <strong>20 倍</strong> Pro 用量上限，适合团队主力账号、开发测试与高并发场景。</p>
+            </article>
+        </section>
+        <p id="paymentRegionHint" class="region-hint">当前账单地区：菲律宾，结算币种：PHP</p>
 
-        <div id="taskProgress" class="task-progress" style="display: none;">
-            <div class="task-progress-header">
-                <span id="taskProgressText" style="display: none;">开通进度</span>
-                <b id="taskProgressPercent">0%</b>
+        <main class="recharge-card">
+            <div class="card-head">
+                <div>
+                    <h2>卡密兑换</h2>
+                    <p>按步骤完成自助开通</p>
+                </div>
+                <span id="flowStatusBadge" class="flow-badge pending">待开始</span>
             </div>
-            <div class="task-progress-track">
-                <div id="taskProgressBar" class="task-progress-bar"></div>
+
+            <div class="stepper" id="flowStepper">
+                <div class="step-item active" data-step="1">
+                    <span class="step-num">1</span>
+                    <span class="step-label">输入卡密</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step-item" data-step="2">
+                    <span class="step-num">2</span>
+                    <span class="step-label">提交 Session</span>
+                </div>
             </div>
-        </div>
-        <div id="statusMessage" class="status-message"></div>
-    </main>
+
+            <div class="notice-banner">
+                <i data-lucide="info"></i>
+                <p>ChatGPT Plus 自助开通：提交后系统将自动打开官方 Checkout 页面并完成订阅开通，无需提供账号密码。一卡一充，3-5分钟开通完毕，如遇到卡住，请联系客服进行处理。</p>
+            </div>
+
+            <nav class="tab-nav">
+                <button class="tab-btn active" data-tab="redeem">兑换开通</button>
+                <button class="tab-btn" data-tab="query">查询状态</button>
+            </nav>
+
+            <div id="redeemSection">
+                <div id="step1">
+                    <label class="field-label" for="cdkInput">输入您的 Plus 充值码</label>
+                    <section class="input-group">
+                        <input type="text" id="cdkInput" placeholder="请输入卡密 / CDK" maxlength="32">
+                        <button id="redeemBtn" class="btn-primary"><span class="btn-text">兑换卡密</span>
+                            <div class="loader"></div>
+                        </button>
+                    </section>
+                </div>
+
+                <div id="step2" style="display: none;">
+                    <div id="redeemCdkInfo" class="cdk-confirmed" style="display:none;"></div>
+                    <div id="redeemPlanInfo" class="plan-confirmed" style="display:none;"></div>
+                    <label class="field-label" for="tokenInput">粘贴完整 Session JSON</label>
+                    <section class="input-group">
+                        <div class="textarea-wrapper">
+                            <a href="https://chatgpt.com/api/auth/session" target="_blank"
+                                class="get-token-btn-floating">获取 Session</a>
+                            <textarea id="tokenInput" placeholder="打开上方链接，全选复制完整 JSON 粘贴到此处（保留 user、expires、accessToken 等全部字段）" rows="5"></textarea>
+                        </div>
+                        <button id="startBtn" class="btn-primary btn-lg"><span class="btn-text">确认并启动自动化开通</span>
+                            <div class="loader"></div>
+                        </button>
+                        <p class="field-hint">必须点击「确认并启动」才会执行自动化；仅粘贴不会自动运行。</p>
+                        <button id="backToStep1" class="btn-secondary">返回重新输入卡密</button>
+                    </section>
+                </div>
+            </div>
+
+            <div id="querySection" style="display: none;">
+                <label class="field-label" for="queryInput">输入卡密查询状态</label>
+                <section class="input-group">
+                    <input type="text" id="queryInput" placeholder="请输入要查询的激活码" maxlength="32">
+                    <button id="queryBtn" class="btn-primary"><span class="btn-text">查询状态</span>
+                        <div class="loader"></div>
+                    </button>
+                </section>
+            </div>
+
+            <div id="taskProgress" class="task-progress" style="display: none;">
+                <div class="task-progress-header">
+                    <span>开通进度</span>
+                    <b id="taskProgressPercent">0%</b>
+                </div>
+                <div class="task-progress-track">
+                    <div id="taskProgressBar" class="task-progress-bar"></div>
+                </div>
+                <p id="taskProgressText" class="task-progress-text"></p>
+            </div>
+            <div id="statusMessage" class="status-message"></div>
+        </main>
+
+        <details class="faq-panel">
+            <summary>常见问题 / 安全说明</summary>
+            <ul>
+                <li>Session 仅用于本次官方结账，不会保存您的账号密码。</li>
+                <li>开通失败时卡密会自动回滚，可更换账号或稍后重试。</li>
+                <li>若长时间停留在「开通中」，可在「查询状态」查看进度。</li>
+            </ul>
+        </details>
+
+        <aside id="publicRuntimeCard" class="public-runtime-panel load-low">
+            <div class="public-runtime-layout">
+                <div class="public-runtime-title">前台并发</div>
+                <div id="publicForegroundSlots" class="public-runtime-value">0/0</div>
+                <div id="publicForegroundSlotsMeta" class="public-runtime-meta">当前空闲</div>
+                <div id="publicForegroundSlotGrid" class="public-slot-grid"></div>
+            </div>
+        </aside>
+    </div>
 
     <script>
         const step1 = document.getElementById('step1');
         const step2 = document.getElementById('step2');
-        const stepProduct = document.getElementById('stepProduct');
         const cdkInput = document.getElementById('cdkInput');
         const tokenInput = document.getElementById('tokenInput');
         const redeemBtn = document.getElementById('redeemBtn');
         const startBtn = document.getElementById('startBtn');
-        const confirmProductBtn = document.getElementById('confirmProductBtn');
         const statusMsg = document.getElementById('statusMessage');
         const queryBtn = document.getElementById('queryBtn');
         const queryInput = document.getElementById('queryInput');
         const redeemSection = document.getElementById('redeemSection');
         const querySection = document.getElementById('querySection');
         const backToStep1 = document.getElementById('backToStep1');
-        const backToStep1FromProduct = document.getElementById('backToStep1FromProduct');
         const taskProgress = document.getElementById('taskProgress');
         const taskProgressBar = document.getElementById('taskProgressBar');
         const taskProgressPercent = document.getElementById('taskProgressPercent');
@@ -154,18 +174,39 @@
         const publicForegroundSlots = document.getElementById('publicForegroundSlots');
         const publicForegroundSlotGrid = document.getElementById('publicForegroundSlotGrid');
         const publicForegroundSlotsMeta = document.getElementById('publicForegroundSlotsMeta');
+        const flowStatusBadge = document.getElementById('flowStatusBadge');
+        const flowStepper = document.getElementById('flowStepper');
         const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
         let taskProgressValue = 0;
         let activationLocked = false;
         let publicRuntimeTimer = null;
 
-        function buildImapLink(imapKey) {
-            const key = String(imapKey || '').trim();
-            if (!key) {
-                return '';
+        const PLAN_LABELS = {
+            plus: 'ChatGPT Plus',
+            pro_5x: 'ChatGPT Pro 5x',
+            pro_20x: 'ChatGPT Pro 20x'
+        };
+
+        function updateFlowUI(step, status = 'pending') {
+            if (flowStatusBadge) {
+                const labels = {
+                    pending: '待开始',
+                    cdk_ok: '待提交 Session',
+                    running: '开通中',
+                    success: '已完成',
+                    failed: '失败',
+                    manual: '需人工'
+                };
+                flowStatusBadge.textContent = labels[status] || labels.pending;
+                flowStatusBadge.className = `flow-badge ${status}`;
             }
-            const href = `https://imap.chiyiyi.cloud/?key=${encodeURIComponent(key)}`;
-            return `<a href="${href}" target="_blank" rel="noopener noreferrer" style="color: var(--accent); font-family: monospace; text-decoration: none;">${key}</a>`;
+            if (flowStepper) {
+                flowStepper.querySelectorAll('.step-item').forEach((el) => {
+                    const n = Number(el.getAttribute('data-step'));
+                    el.classList.toggle('active', n === step);
+                    el.classList.toggle('done', n < step);
+                });
+            }
         }
 
         function decodeJwtPart(part) {
@@ -240,13 +281,11 @@
         function setActivationLock(locked) {
             activationLocked = Boolean(locked);
             backToStep1.disabled = activationLocked;
-            backToStep1FromProduct.disabled = activationLocked;
             tabButtons.forEach((btn) => {
                 btn.disabled = activationLocked;
             });
         }
 
-        // Tab 切换逻辑
         tabButtons.forEach(btn => {
             btn.addEventListener('click', () => {
                 if (activationLocked) {
@@ -267,9 +306,6 @@
             });
         });
 
-
-
-        // 查询逻辑
         queryBtn.addEventListener('click', async () => {
             const cdk = queryInput.value.trim();
             if (!cdk) return showStatus('请输入激活码', 'error');
@@ -278,60 +314,21 @@
             statusMsg.style.display = 'none';
 
             try {
-                const response = await fetch(`/api/cdk/query?cdk=${cdk}`);
+                const response = await fetch(`/api/cdk/query?cdk=${encodeURIComponent(cdk)}`);
                 const data = await response.json();
                 if (data.success) {
                     const statusText = String(data.data.status || (data.data.usedAt ? '已使用' : '未使用'));
                     const isProcessing = statusText === '开通中';
                     const isUsed = statusText === '已使用';
-                    const statusColor = isProcessing ? '#f59e0b' : (isUsed ? '#f87171' : '#10b981');
-                    const typeText = data.data.type === '成品' ? '成品激活码' : '自助激活码';
+                    const statusClass = isProcessing ? 'processing' : (isUsed ? 'used' : 'unused');
                     const resultHtml = `
-                        <div class="query-result-card" style="text-align: left; background: rgba(255,255,255,0.03); padding: 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); margin-top: 10px;">
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 8px;">
-                                <span style="color: var(--text-dim);">CDK 类型</span>
-                                <span style="color: ${data.data.type === '成品' ? '#10b981' : '#818cf8'}; font-weight: 600;">${typeText}</span>
-                            </div>
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 8px;">
-                                <span style="color: var(--text-dim);">当前状态</span>
-                                <span style="color: ${statusColor}; font-weight: 600;">${statusText}</span>
-                            </div>
-                            ${isUsed ? `
-                            <div style="display: flex; justify-content: space-between;">
-                                <span style="color: var(--text-dim);">使用时间</span>
-                                <span style="color: var(--text-main);">${data.data.usedAt}</span>
-                            </div>
-                            ` : ''}
-                            ${(data.data.type === '成品' && isUsed && data.data.imapKey) ? `
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;">
-                                <span style="color: var(--text-dim);">IMAP KEY</span>
-                                ${buildImapLink(data.data.imapKey)}
-                            </div>
-                            ` : ''}
-                            ${(data.data.type === '成品' && isUsed && (data.data.sub2apiAvailable || data.data.cpaAvailable)) ? `
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;">
-                                <span style="color: var(--text-dim);">下载凭证</span>
-                                <div style="display: flex; gap: 8px;">
-                                    ${data.data.sub2apiAvailable ? `<button id="queryDownloadSub2apiBtn" class="copy-btn-mini" style="min-width: 72px; height: 28px; padding: 2px 10px; font-size: 11px; line-height: 1;">sub2api</button>` : ''}
-                                    ${data.data.cpaAvailable ? `<button id="queryDownloadCpaBtn" class="copy-btn-mini" style="min-width: 48px; height: 28px; padding: 2px 10px; font-size: 11px; line-height: 1;">cpa</button>` : ''}
-                                </div>
-                            </div>
-                            ` : ''}
+                        <div class="query-result-card">
+                            <div class="query-row"><span>CDK 类型</span><strong>自助激活码</strong></div>
+                            <div class="query-row"><span>当前状态</span><strong class="status-${statusClass}">${statusText}</strong></div>
+                            ${isUsed ? `<div class="query-row"><span>使用时间</span><strong>${data.data.usedAt || '-'}</strong></div>` : ''}
                         </div>
                     `;
                     showStatus(resultHtml, isUsed ? 'error' : 'success');
-                    const queryDownloadSub2apiBtn = document.getElementById('queryDownloadSub2apiBtn');
-                    if (queryDownloadSub2apiBtn) {
-                        queryDownloadSub2apiBtn.addEventListener('click', () => {
-                            window.location.href = `/api/cdk/download?cdk=${encodeURIComponent(cdk)}&kind=sub2api`;
-                        });
-                    }
-                    const queryDownloadCpaBtn = document.getElementById('queryDownloadCpaBtn');
-                    if (queryDownloadCpaBtn) {
-                        queryDownloadCpaBtn.addEventListener('click', () => {
-                            window.location.href = `/api/cdk/download?cdk=${encodeURIComponent(cdk)}&kind=cpa`;
-                        });
-                    }
                 } else {
                     showStatus(data.message, 'error');
                 }
@@ -341,43 +338,95 @@
                 toggleLoading(queryBtn, false);
             }
         });
+
         let verifiedCdk = '';
         const START_DEFAULT_TEXT = '确认并启动自动化开通';
-        const START_PENDING_TEXT = '已使用';
-        const START_FAILED_TEXT = '未使用';
+        const START_PENDING_TEXT = '开通中...';
+        const START_FAILED_TEXT = '重新尝试';
         const START_SUCCESS_TEXT = '激活成功';
 
-        tokenInput.addEventListener('input', () => {
-            const content = tokenInput.value.trim();
+        function parseSessionJsonInput(rawValue) {
+            const content = String(rawValue || '').trim();
+            if (!content) {
+                return null;
+            }
             if (!content.startsWith('{')) {
-                if (!content) {
-                    return;
+                return null;
+            }
+            try {
+                const data = JSON.parse(content);
+                if (data?.accessToken || data?.access_token || data?.user) {
+                    return data;
                 }
-                const result = validateAccessToken(content);
+            } catch (_) {
+                return null;
+            }
+            return null;
+        }
+
+        function extractAccessTokenFromInput(rawValue) {
+            const session = parseSessionJsonInput(rawValue);
+            if (session) {
+                return String(session.accessToken || session.access_token || '').trim();
+            }
+            const content = String(rawValue || '').trim();
+            const jwtMatch = content.match(/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
+            if (jwtMatch) {
+                return jwtMatch[0];
+            }
+            return content;
+        }
+
+        function validateSessionInput(rawValue, options = {}) {
+            const { silent = false } = options;
+            const content = String(rawValue || '').trim();
+            if (!content) {
+                return { valid: false, message: '请粘贴完整 Session JSON', session: '', token: '' };
+            }
+
+            const session = parseSessionJsonInput(content);
+            if (!session) {
+                const message = '请粘贴完整 Session JSON（从 chatgpt.com/api/auth/session 复制，不要只粘贴 accessToken）';
+                if (!silent) showStatus(message, 'error');
+                return { valid: false, message, session: '', token: '' };
+            }
+
+            const token = String(session.accessToken || session.access_token || '').trim();
+            if (!token) {
+                const message = 'Session JSON 中缺少 accessToken 字段';
+                if (!silent) showStatus(message, 'error');
+                return { valid: false, message, session: content, token: '' };
+            }
+
+            const tokenResult = validateAccessToken(token);
+            const email = session.user?.email || tokenResult.email || '';
+            const result = {
+                ...tokenResult,
+                session: content,
+                token,
+                email
+            };
+
+            if (!silent) {
                 if (result.valid) {
-                    showStatus(result.email ? `AccessToken 校验通过：${result.email}` : result.message, 'success');
+                    showStatus(email ? `Session 有效：${email}` : 'Session 校验通过', 'success');
                 } else {
                     showStatus(result.message, 'error');
                 }
-                return;
             }
+            return result;
+        }
 
-            try {
-                const data = JSON.parse(content);
-                if (data && data.accessToken) {
-                    tokenInput.value = data.accessToken;
-                    const result = validateAccessToken(data.accessToken);
-                    if (result.valid) {
-                        showStatus(result.email ? `解析成功，Token 有效：${result.email}` : '解析成功：已自动提取 AccessToken', 'success');
-                    } else {
-                        showStatus(result.message, 'error');
-                    }
-                } else {
-                    showStatus('JSON 结构错误：未找到 accessToken 字段，请确保复制了完整页面', 'error');
-                }
-            } catch (error) {
-                showStatus('无效的 JSON 格式', 'error');
-            }
+        function applyTokenInput(rawValue, options = {}) {
+            return validateSessionInput(rawValue, options);
+        }
+
+        tokenInput.addEventListener('input', () => {
+            applyTokenInput(tokenInput.value.trim());
+        });
+
+        tokenInput.addEventListener('paste', () => {
+            setTimeout(() => applyTokenInput(tokenInput.value.trim()), 0);
         });
 
         redeemBtn.addEventListener('click', async () => {
@@ -398,7 +447,6 @@
 
                 if (data.success) {
                     verifiedCdk = cdk;
-                    const cdkType = data.data?.type || '自助';
                     const isProcessing = data.data?.status === 'processing';
 
                     if (isProcessing && data.data?.jobKey) {
@@ -406,41 +454,30 @@
                         activeJobKey = data.data.jobKey;
                         setActivationLock(true);
                         showProgress();
-                        setProgress(3, '');
+                        setProgress(3, '正在恢复任务进度...');
+                        updateFlowUI(2, 'running');
                         showStatus(data.data?.message || '检测到当前 CDK 正在开通中，正在恢复任务进度...', 'success');
                         step1.style.display = 'none';
-                        step2.style.display = 'none';
-                        stepProduct.style.display = 'none';
-                        if (cdkType === '成品') {
-                            trackProductTask(data.data.jobKey);
-                        } else {
-                            initWebSocket(data.data.jobKey);
-                        }
+                        step2.style.display = 'block';
+                        initWebSocket(data.data.jobKey);
                         return;
                     }
 
-                    if (cdkType === '成品') {
-                        step1.style.display = 'none';
-                        stepProduct.style.display = 'block';
-                        document.getElementById('productCdkDisplay').innerHTML = `
-                            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); padding: 12px; border-radius: 12px; margin-bottom: 16px;">
-                                <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 4px;">激活码</div>
-                                <code style="font-size: 16px; color: #fff;">${cdk}</code>
-                            </div>
-                        `;
-                    } else {
-                        step1.style.display = 'none';
-                        step2.style.display = 'block';
+                    step1.style.display = 'none';
+                    step2.style.display = 'block';
+                    updateFlowUI(2, 'cdk_ok');
 
-                        // Add a display for CDK info in step 2
-                        let infoDiv = document.getElementById('redeemCdkInfo');
-                        if (!infoDiv) {
-                            infoDiv = document.createElement('div');
-                            infoDiv.id = 'redeemCdkInfo';
-                            infoDiv.style.marginBottom = '15px';
-                            step2.prepend(infoDiv);
-                        }
-                        infoDiv.innerHTML = `<div><code style="font-size:16px;">${cdk}</code></div>`;
+                    let infoDiv = document.getElementById('redeemCdkInfo');
+                    if (infoDiv) {
+                        infoDiv.style.display = 'block';
+                        infoDiv.innerHTML = `<span>已验证卡密</span><code>${cdk}</code>`;
+                    }
+                    const planDiv = document.getElementById('redeemPlanInfo');
+                    const planType = data.data?.plan_type || 'plus';
+                    const planLabel = data.data?.plan_label || PLAN_LABELS[planType] || PLAN_LABELS.plus;
+                    if (planDiv) {
+                        planDiv.style.display = 'block';
+                        planDiv.innerHTML = `<span>套餐类型</span><strong>${planLabel}</strong>`;
                     }
                     statusMsg.style.display = 'none';
                 } else {
@@ -460,243 +497,14 @@
             resetRedeemFlow();
         });
 
-        backToStep1FromProduct.addEventListener('click', () => {
-            if (activationLocked) {
-                return;
-            }
-            resetRedeemFlow();
-        });
-
-        confirmProductBtn.addEventListener('click', async () => {
-            if (!verifiedCdk) return;
-
-            toggleLoading(confirmProductBtn, true);
-            statusMsg.style.display = 'none';
-
-            try {
-                const response = await fetch('/api/redeem-product', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ cdk: verifiedCdk })
-                });
-                const data = await response.json();
-
-                if (data.success && data.jobKey) {
-                    trackProductTask(data.jobKey);
-                } else {
-                    showStatus(data.message || '兑换失败，请稍后再试', 'error');
-                    toggleLoading(confirmProductBtn, false);
-                }
-            } catch (error) {
-                showStatus('网络请求失败', 'error');
-                toggleLoading(confirmProductBtn, false);
-            }
-        });
-
-        function trackProductTask(jobKey) {
-            // 设置初始状态与自助开通一致
-            activeJobKey = jobKey;
-            taskCompleted = false;
-            setActivationLock(true);
-            toggleLoading(confirmProductBtn, true);
-
-            // 显示进度条 (使用全局 taskProgress)
-            taskProgress.style.display = 'block';
-            setProgress(5, '正在初始化任务...');
-
-            let productSocket = null;
-            let productHeartbeatInterval = null;
-            let productHeartbeatTimeout = null;
-            let productReconnectTimer = null;
-
-            function clearProductHeartbeat() {
-                clearInterval(productHeartbeatInterval);
-                clearTimeout(productHeartbeatTimeout);
-                productHeartbeatInterval = null;
-                productHeartbeatTimeout = null;
-            }
-
-            function cleanupProductSocket() {
-                clearProductHeartbeat();
-                clearTimeout(productReconnectTimer);
-                productReconnectTimer = null;
-                if (productSocket) {
-                    try {
-                        productSocket.close();
-                    } catch (_) { }
-                }
-                productSocket = null;
-            }
-
-            function scheduleProductHeartbeatTimeout() {
-                clearTimeout(productHeartbeatTimeout);
-                productHeartbeatTimeout = setTimeout(() => {
-                    if (productSocket && !taskCompleted && activeJobKey === jobKey) {
-                        console.warn('Product WS heartbeat timeout, reconnecting...');
-                        try {
-                            productSocket.close();
-                        } catch (_) { }
-                    }
-                }, WS_HEARTBEAT_TIMEOUT_MS);
-            }
-
-            function startProductHeartbeat() {
-                clearProductHeartbeat();
-                scheduleProductHeartbeatTimeout();
-                productHeartbeatInterval = setInterval(() => {
-                    if (!productSocket || productSocket.readyState !== WebSocket.OPEN) {
-                        return;
-                    }
-                    try {
-                        productSocket.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
-                        scheduleProductHeartbeatTimeout();
-                    } catch (error) {
-                        console.error('Product WS ping failed:', error);
-                    }
-                }, WS_HEARTBEAT_INTERVAL_MS);
-            }
-
-            function connectProductSocket() {
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                productSocket = new WebSocket(`${protocol}//${window.location.host}`);
-
-                productSocket.onopen = () => {
-                    clearTimeout(productReconnectTimer);
-                    productReconnectTimer = null;
-                    productSocket.send(JSON.stringify({ type: 'subscribe', jobKey }));
-                    startProductHeartbeat();
-                };
-
-                productSocket.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        if (data.type === 'pong') {
-                            scheduleProductHeartbeatTimeout();
-                            return;
-                        }
-                        if (data.jobKey !== jobKey) return;
-
-                        scheduleProductHeartbeatTimeout();
-
-                        const progress = data.progress || 0;
-                        const message = data.message || '';
-                        const status = data.status || 'running';
-
-                        if (status === 'success') {
-                            taskCompleted = true;
-                            cleanupProductSocket();
-                            setActivationLock(false);
-                            setProgress(100, '', 'success');
-
-                            const result = data.result;
-                            const successHtml = `
-                            <div style="text-align: left; animation: slideUp 0.4s ease-out;">
-                                <div style="font-size: 18px; color: #10b981; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg> 成品号开通成功
-                                </div>
-                                <div style="margin-bottom: 12px; background: rgba(255,255,255,0.03); padding: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);">
-                                    <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 4px;">交付邮箱</div>
-                                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                                        <code style="color: #fff; font-size: 14px;">${result.email}</code>
-                                        <button class="copy-btn-mini" onclick="copyTextToClipboard('${result.email}')">复制</button>
-                                    </div>
-                                </div>
-                                ${result.imapKey ? `
-                                <div style="margin-bottom: 12px; background: rgba(255,255,255,0.03); padding: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);">
-                                    <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 4px;">IMAP KEY</div>
-                                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
-                                        ${buildImapLink(result.imapKey)}
-                                        <button class="copy-btn-mini" onclick="copyTextToClipboard('${result.imapKey}')">复制</button>
-                                    </div>
-                                </div>
-                                ` : ''}
-                                <div style="margin-bottom: 20px; font-size: 13px; color: var(--text-dim); line-height: 1.6;">
-                                    账号已成功开通 Plus 并提取协议数据。
-                                </div>
-                                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                                    <button id="downloadSubBtn" class="btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); flex: 1; min-width: 180px;">
-                                        <span class="btn-text">下载 sub2api</span>
-                                    </button>
-                                    ${result.cpaFile ? `
-                                    <button id="downloadCpaBtn" class="btn-primary" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); flex: 1; min-width: 140px;">
-                                        <span class="btn-text">下载 cpa</span>
-                                    </button>
-                                    ` : ''}
-                                </div>
-                            </div>
-                        `;
-                            stepProduct.style.display = 'none';
-                            showStatus(successHtml, 'success');
-
-                            document.getElementById('downloadSubBtn').addEventListener('click', () => {
-                                window.location.href = `/api/download-sub2api/${result.sub2apiFile}`;
-                            });
-                            const downloadCpaBtn = document.getElementById('downloadCpaBtn');
-                            if (downloadCpaBtn) {
-                                downloadCpaBtn.addEventListener('click', () => {
-                                    window.location.href = `/api/download-cpa/${result.cpaFile}`;
-                                });
-                            }
-                        } else if (status === 'failed' || status === 'maintenance') {
-                            taskCompleted = true;
-                            cleanupProductSocket();
-                            setActivationLock(false);
-                            setProgress(100, '', 'error');
-                            showStatus(message || '创建失败，请稍后重试', 'error');
-                            toggleLoading(confirmProductBtn, false);
-                        } else {
-                            // 更新进度
-                            setProgress(progress, message);
-                        }
-                    } catch (e) {
-                        console.error('WS Error:', e);
-                    }
-                };
-
-                productSocket.onclose = () => {
-                    clearProductHeartbeat();
-                    productSocket = null;
-                    if (activeJobKey === jobKey && !taskCompleted) {
-                        showStatus('连接中断，正在重连...', 'error');
-                        clearTimeout(productReconnectTimer);
-                        productReconnectTimer = setTimeout(connectProductSocket, 3000);
-                    }
-                };
-
-                productSocket.onerror = (error) => {
-                    console.error('Product WS Error:', error);
-                };
-            }
-
-            connectProductSocket();
-        }
-
-        async function copyTextToClipboard(text) {
-            try {
-                if (navigator.clipboard && window.isSecureContext) {
-                    await navigator.clipboard.writeText(text);
-                } else {
-                    const input = document.createElement('textarea');
-                    input.value = text;
-                    document.body.appendChild(input);
-                    input.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(input);
-                }
-                alert('已复制到剪贴板');
-            } catch (err) {
-                console.error('复制失败', err);
-            }
-        }
-
         let socket = null;
         let reconnectTimer = null;
-        let activeJobKey = '';
-        let taskCompleted = false;
         let socketHeartbeatInterval = null;
         let socketHeartbeatTimeout = null;
-        const WS_HEARTBEAT_INTERVAL_MS = 5000;
-        const WS_HEARTBEAT_TIMEOUT_MS = 12000;
+        let activeJobKey = '';
+        let taskCompleted = false;
+        const WS_HEARTBEAT_INTERVAL_MS = 15000;
+        const WS_HEARTBEAT_TIMEOUT_MS = 45000;
 
         function clearSocketHeartbeat() {
             clearInterval(socketHeartbeatInterval);
@@ -709,10 +517,7 @@
             clearTimeout(socketHeartbeatTimeout);
             socketHeartbeatTimeout = setTimeout(() => {
                 if (socket && activeJobKey && !taskCompleted) {
-                    console.warn('Task WS heartbeat timeout, reconnecting...');
-                    try {
-                        socket.close();
-                    } catch (_) { }
+                    try { socket.close(); } catch (_) { }
                 }
             }, WS_HEARTBEAT_TIMEOUT_MS);
         }
@@ -738,9 +543,7 @@
             reconnectTimer = null;
             clearSocketHeartbeat();
             if (socket) {
-                try {
-                    socket.close();
-                } catch (_) { }
+                try { socket.close(); } catch (_) { }
             }
             socket = null;
             activeJobKey = '';
@@ -751,44 +554,46 @@
             closeTaskSocket();
             taskCompleted = false;
             setActivationLock(false);
-
-            // 恢复所有按钮状态
             toggleLoading(redeemBtn, false);
             toggleLoading(startBtn, false);
-            toggleLoading(confirmProductBtn, false);
             redeemBtn.disabled = false;
             startBtn.disabled = false;
-            confirmProductBtn.disabled = false;
-
-            // 重置文案
             setButtonText(startBtn, START_DEFAULT_TEXT);
-            setButtonText(confirmProductBtn, '确认领取账号');
-
             step2.style.display = 'none';
-            stepProduct.style.display = 'none';
             step1.style.display = 'block';
             cdkInput.value = '';
             tokenInput.value = '';
             verifiedCdk = '';
-
             taskProgress.style.display = 'none';
             hideProgress();
-
+            updateFlowUI(1, 'pending');
+            const infoDiv = document.getElementById('redeemCdkInfo');
+            if (infoDiv) {
+                infoDiv.style.display = 'none';
+                infoDiv.innerHTML = '';
+            }
+            const planDiv = document.getElementById('redeemPlanInfo');
+            if (planDiv) {
+                planDiv.style.display = 'none';
+                planDiv.innerHTML = '';
+            }
             if (!preserveStatus) {
                 statusMsg.style.display = 'none';
             }
         }
 
-        function applyTaskState(data, source = 'update') {
+        function applyTaskState(data) {
             const progress = Number(data.progress);
             const status = String(data.status || 'running');
             const message = String(data.message || '');
+            const forceProgress = data.type === 'snapshot';
 
             if (status === 'success') {
                 taskCompleted = true;
                 closeTaskSocket();
                 setActivationLock(false);
-                setProgress(100, '', 'success');
+                setProgress(100, message || '激活成功', 'success', { force: true });
+                updateFlowUI(2, 'success');
                 showStatus(message || '激活成功！', 'success');
                 setButtonText(startBtn, START_SUCCESS_TEXT);
                 toggleLoading(startBtn, false);
@@ -796,25 +601,30 @@
                 return;
             }
 
-            if (status === 'failed' || status === 'maintenance') {
+            if (status === 'failed' || status === 'maintenance' || status === 'manual') {
                 taskCompleted = true;
                 closeTaskSocket();
                 setActivationLock(false);
-                setProgress(100, '', 'error');
+                const failPct = Number.isFinite(progress) && progress > 0 ? progress : Math.max(taskProgressValue, 1);
+                setProgress(failPct, message || '开通失败', 'error', { force: true });
+                updateFlowUI(2, status === 'manual' ? 'manual' : 'failed');
                 showStatus(
                     status === 'maintenance'
                         ? (message || '系统维护中')
-                        : (message || '激活失败，请更换账号重试'),
+                        : status === 'manual'
+                            ? (message || '需要人工操作，请联系管理员处理')
+                            : (message || '激活失败，请更换账号重试'),
                     'error'
                 );
                 setButtonText(startBtn, START_FAILED_TEXT);
                 toggleLoading(startBtn, false);
+                startBtn.disabled = false;
                 return;
             }
 
-            // 正在开通中
+            updateFlowUI(2, 'running');
             if (Number.isFinite(progress)) {
-                setProgress(progress, '');
+                setProgress(progress, message || '正在开通中...', 'running', { force: forceProgress });
                 if (message) {
                     showStatus(message, 'success');
                 }
@@ -837,7 +647,6 @@
             socket = new WebSocket(`${protocol}//${window.location.host}`);
 
             socket.onopen = () => {
-                console.log('WebSocket Connected');
                 clearTimeout(reconnectTimer);
                 socket.send(JSON.stringify({ type: 'subscribe', jobKey }));
                 startSocketHeartbeat();
@@ -855,7 +664,7 @@
                     }
                     scheduleSocketHeartbeatTimeout();
                     if (data.type === 'snapshot' || data.type === 'progress' || data.type === 'status') {
-                        applyTaskState(data, data.type);
+                        applyTaskState(data);
                     }
                 } catch (e) {
                     console.error('WS Message Error:', e);
@@ -863,10 +672,8 @@
             };
 
             socket.onclose = () => {
-                console.log('WebSocket Disconnected');
                 clearSocketHeartbeat();
                 socket = null;
-                // 只有在任务还未结束时才尝试重连
                 if (activeJobKey && !taskCompleted) {
                     clearTimeout(reconnectTimer);
                     reconnectTimer = setTimeout(() => initWebSocket(activeJobKey), 3000);
@@ -879,12 +686,12 @@
         }
 
         startBtn.addEventListener('click', async () => {
-            const token = tokenInput.value.trim();
-            if (!token) return showStatus('请输入 AccessToken', 'error');
+            const rawSession = tokenInput.value.trim();
+            const sessionCheck = validateSessionInput(rawSession);
+            if (!sessionCheck.session) return showStatus(sessionCheck.message || '请粘贴完整 Session JSON', 'error');
             if (!verifiedCdk) return showStatus('请先验证 CDK', 'error');
-            const tokenCheck = validateAccessToken(token);
-            if (!tokenCheck.valid) {
-                return showStatus(tokenCheck.message, 'error');
+            if (!sessionCheck.valid) {
+                return showStatus(sessionCheck.message, 'error');
             }
 
             setButtonText(startBtn, START_PENDING_TEXT);
@@ -896,33 +703,42 @@
             clearTimeout(reconnectTimer);
 
             statusMsg.style.display = 'none';
+            resetProgressState();
             showProgress();
-            setProgress(3, '');
+            setProgress(3, '正在启动自动化...', 'running', { force: true });
+            updateFlowUI(2, 'running');
 
             try {
                 const response = await fetch('/api/run-process', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token, cdk: verifiedCdk })
+                    body: JSON.stringify({
+                        session: sessionCheck.session,
+                        cdk: verifiedCdk
+                    })
                 });
                 const data = await response.json();
 
                 if (data.success && data.jobKey) {
-                    setProgress(8, '');
+                    setProgress(8, '任务已启动，正在开通中...');
                     showStatus('任务已启动，正在为您开通中...', 'success');
                     initWebSocket(data.jobKey);
                 } else {
                     hideProgress();
+                    updateFlowUI(2, 'failed');
                     showStatus(data.message || '启动失败', 'error');
                     setButtonText(startBtn, START_FAILED_TEXT);
                     toggleLoading(startBtn, false);
+                    startBtn.disabled = false;
                     setActivationLock(false);
                 }
             } catch (error) {
                 hideProgress();
+                updateFlowUI(2, 'failed');
                 showStatus('网络连接失败，请重试', 'error');
                 setButtonText(startBtn, START_FAILED_TEXT);
                 toggleLoading(startBtn, false);
+                startBtn.disabled = false;
                 setActivationLock(false);
             }
         });
@@ -948,28 +764,36 @@
             }
         }
 
+        function resetProgressState() {
+            taskProgressValue = 0;
+            taskProgressBar.style.width = '0%';
+            taskProgressBar.classList.remove('error');
+            taskProgressPercent.textContent = '0%';
+            if (taskProgressText) {
+                taskProgressText.textContent = '';
+            }
+        }
+
         function showProgress() {
             taskProgress.style.display = 'block';
         }
 
         function hideProgress() {
             taskProgress.style.display = 'none';
-            taskProgressValue = 0;
-            taskProgressBar.style.width = '0%';
-            taskProgressBar.classList.remove('error');
-            taskProgressPercent.textContent = '0%';
+            resetProgressState();
         }
 
-        function setProgress(percent, label = '', type = 'running') {
-            const maxAllowed = type === 'success' ? 100 : 99;
+        function setProgress(percent, label = '', type = 'running', options = {}) {
+            const force = Boolean(options.force);
+            const maxAllowed = (type === 'success' || type === 'error') ? 100 : 99;
             const requested = Math.max(0, Math.min(maxAllowed, Math.round(percent)));
-            const next = requested < taskProgressValue ? taskProgressValue : requested;
+            const next = (!force && requested < taskProgressValue) ? taskProgressValue : requested;
             taskProgressValue = next;
             taskProgressBar.style.width = `${next}%`;
             taskProgressPercent.textContent = `${next}%`;
-            // 文本标签强制隐藏
-            taskProgressText.style.display = 'none';
-            taskProgressText.textContent = label;
+            if (taskProgressText) {
+                taskProgressText.textContent = label || '';
+            }
             taskProgressBar.classList.toggle('error', type === 'error');
         }
 
@@ -988,16 +812,16 @@
             const safeActive = Math.max(0, Math.min(safeMax, Number(active) || 0));
             const usageRate = safeMax > 0 ? (safeActive / safeMax) : 0;
             let loadClass = 'load-low';
-            let loadText = '当前空闲，前台槽位状态正常';
+            let loadText = '当前空闲';
 
             if (usageRate >= 0.8) {
                 loadClass = 'load-high';
-                loadText = '前台槽位占用较高，请注意并发压力';
+                loadText = '并发占用较高';
             } else if (usageRate >= 0.6) {
                 loadClass = 'load-mid';
-                loadText = '前台槽位占用过半，接近繁忙状态';
+                loadText = '并发占用过半';
             } else if (safeActive > 0) {
-                loadText = '前台槽位运行中，当前负载正常';
+                loadText = '运行中';
             }
 
             publicRuntimeCard.classList.remove('load-low', 'load-mid', 'load-high');
@@ -1025,9 +849,22 @@
             } catch (_) { }
         }
 
+        async function loadPaymentRegionHint() {
+            const hint = document.getElementById('paymentRegionHint');
+            if (!hint) return;
+            try {
+                const res = await fetch('/api/public/payment-region');
+                const data = await res.json();
+                if (data.success) {
+                    hint.textContent = `当前账单地区：${data.label || data.region}，结算币种：${data.currency || 'USD'}`;
+                }
+            } catch (_) { }
+        }
+
+        updateFlowUI(1, 'pending');
+        loadPaymentRegionHint();
         loadPublicRuntime();
         publicRuntimeTimer = setInterval(loadPublicRuntime, 3000);
-
         lucide.createIcons();
     </script>
 </body>

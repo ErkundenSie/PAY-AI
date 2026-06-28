@@ -7,25 +7,33 @@ const os = require('os');
 const WebSocket = require('ws');
 const axios = require('axios');
 const store = require('./mysql-store');
-const { listRecentEmailsForAdmin } = require('./pool-email-imap');
 const runtimeLog = require('./runtime-log');
-const { initializeImapAuth, getImapAuthHeaders } = require('./imap-auth');
+const { REGION_CONFIG, isSupportedRegion, getPlanTypeLabel } = require('./region-config');
+const taxFreeAddress = require('./tax-free-address');
+const { testProxyUrl, normalizeProxyLines } = require('./proxy-pool');
+const { extractSessionPreview, extractAccessTokenFromRaw, parseSessionJson, extractEmailFromSession } = require('./session-auth');
+const { notifyTelegramEvent, notifyAdminSecurityEvent, sendTelegramLoginCode, sendTelegramTest, isCardPoolExhaustedIssue } = require('./telegram-notify');
+const adminAuth = require('./admin-auth');
+const { buildAdminLoginUrl, buildAdminPanelUrl } = require('./admin-paths');
+const { buildHcaptchaEnvFromConfig } = require('./hcaptcha-runtime');
+const { checkHcaptchaSolverHealth, testVlmConnectivity, listSolverLogFiles, readSolverLogTail } = require('./hcaptcha-solver');
+const { testCaptchaPlatformConnectivity, normalizeCaptchaPlatformApiUrl, resolveCaptchaPlatformCredentials } = require('./captcha-platform');
+const browserPool = require('./browser-pool');
+const { buildWorkerRuntimeEnv } = require('./browser-runtime');
+const { querySubscriptionBySession, validateSessionTokenForQuery, cancelAutoRenew, resumeAutoRenew } = require('./subscription-check');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const ADMIN_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
-const ADMIN_REFRESH_AFTER_MS = 60 * 60 * 1000;
-const PROCESS_IDLE_TIMEOUT_MS = 60 * 1000;
-const MAX_PROCESS_ATTEMPTS = 10;
+const ADMIN_TOKEN_TTL_MS = adminAuth.ADMIN_TOKEN_TTL_MS;
+const ADMIN_REFRESH_AFTER_MS = adminAuth.ADMIN_REFRESH_AFTER_MS;
+const PROCESS_IDLE_TIMEOUT_MS = Number(process.env.PROCESS_IDLE_TIMEOUT_MS) || (3 * 60 * 1000);
+const MAX_PROCESS_ATTEMPTS = Number(process.env.MAX_PROCESS_ATTEMPTS) || 1;
 const WS_HEARTBEAT_PING_TYPE = 'ping';
 const WS_HEARTBEAT_PONG_TYPE = 'pong';
-const ACCESS_DEACTIVATED_MESSAGES_URL = 'https://imap.chiyiyi.cloud/api/admin/access-deactivated-messages';
-const ACCESS_DEACTIVATED_SYNC_KEY = 'access_deactivated_messages_last_since';
+const ACCESS_DEACTIVATED_MESSAGES_URL = '';
+const ACCESS_DEACTIVATED_SYNC_KEY = '';
 const ACCESS_DEACTIVATED_SYNC_COOLDOWN_MS = 30 * 1000;
-const ADMIN_TOKEN_SECRET = process.env.ADMIN_TOKEN_SECRET || crypto
-    .createHash('sha256')
-    .update(`web_redeem:${process.cwd()}:admin-token-secret`)
-    .digest('hex');
+const ADMIN_TOKEN_SECRET = process.env.ADMIN_TOKEN_SECRET || adminAuth.resolveAdminTokenSecret();
 
 // 追踪活跃的子进程，防止产生僵尸进程
 const activeProcesses = new Set();
@@ -37,46 +45,21 @@ function cleanupProcesses() {
         }
         activeProcesses.clear();
     }
+    browserPool.shutdownBrowserPool().catch((error) => {
+        console.warn(`[BrowserPool] 关闭失败: ${error.message}`);
+    });
 }
 
 // WebSocket 客户端映射: jobKey -> Set<WebSocket>
 const taskClients = new Map();
 const TERMINAL_TASK_STATUSES = new Set(['success', 'failed', 'maintenance']);
 const activeForegroundJobs = new Set();
-const activeBackgroundJobs = new Set();
-
-/** 后台成品批量生产：job_key -> 停止回调（将批次 aborted 置 true） */
-const adminGenerationStopHandlers = new Map();
-
-function registerAdminGenerationStop(jobKey, fn) {
-    adminGenerationStopHandlers.set(String(jobKey), fn);
-}
-
-function unregisterAdminGenerationStop(jobKey) {
-    adminGenerationStopHandlers.delete(String(jobKey));
-}
-
-function requestAdminGenerationStop(jobKey) {
-    const fn = adminGenerationStopHandlers.get(String(jobKey));
-    if (typeof fn !== 'function') {
-        return false;
-    }
-    try {
-        fn();
-    } catch (_) {
-        /* ignore */
-    }
-    return true;
-}
 
 let systemMetricsCache = {
     ts: 0,
     data: null,
     promise: null
 };
-let accessDeactivatedSyncPromise = null;
-let accessDeactivatedLastSyncAt = 0;
-let accessDeactivatedSyncTimer = null;
 
 function reserveForegroundSlot(slotKey) {
     activeForegroundJobs.add(String(slotKey));
@@ -86,20 +69,75 @@ function releaseForegroundSlot(slotKey) {
     activeForegroundJobs.delete(String(slotKey));
 }
 
-function reserveBackgroundSlot(slotKey) {
-    activeBackgroundJobs.add(String(slotKey));
-}
-
-function releaseBackgroundSlot(slotKey) {
-    activeBackgroundJobs.delete(String(slotKey));
-}
-
 function getTotalActiveJobs() {
-    return activeForegroundJobs.size + activeBackgroundJobs.size;
+    return activeForegroundJobs.size;
 }
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getSystemMetrics() {
+    const now = Date.now();
+    if (systemMetricsCache.data && now - systemMetricsCache.ts < 3000) {
+        return systemMetricsCache.data;
+    }
+    if (systemMetricsCache.promise) {
+        return systemMetricsCache.promise;
+    }
+
+    systemMetricsCache.promise = (async () => {
+        const totalMem = os.totalmem();
+        const freeMem = os.freemem();
+        const usedMem = totalMem - freeMem;
+        const cpuCount = Math.max(1, (os.cpus() || []).length);
+        const load = Number(os.loadavg()[0] || 0);
+        const cpuPercent = Math.min(100, Math.round((load / cpuCount) * 100));
+
+        let disk = {
+            percent: 0,
+            usedText: '0.0G',
+            totalText: '0.0G',
+            drive: '/'
+        };
+        try {
+            const dfOut = execFileSync('df', ['-kP', '/'], { encoding: 'utf8' });
+            const lines = dfOut.trim().split('\n');
+            if (lines.length >= 2) {
+                const parts = lines[1].trim().split(/\s+/);
+                const total = Number(parts[1] || 0) * 1024;
+                const used = Number(parts[2] || 0) * 1024;
+                disk = {
+                    percent: total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0,
+                    usedText: `${(used / (1024 ** 3)).toFixed(1)}G`,
+                    totalText: `${(total / (1024 ** 3)).toFixed(1)}G`,
+                    drive: parts[5] || '/'
+                };
+            }
+        } catch (_) { /* ignore */ }
+
+        const data = {
+            cpu: {
+                percent: cpuPercent,
+                text: `负载 ${load.toFixed(2)} / ${cpuCount} 核`
+            },
+            memory: {
+                percent: totalMem > 0 ? Math.round((usedMem / totalMem) * 100) : 0,
+                text: `${(usedMem / (1024 ** 3)).toFixed(1)}G/${(totalMem / (1024 ** 3)).toFixed(1)}G`
+            },
+            disk,
+            uptime: { seconds: Math.floor(os.uptime()) }
+        };
+        systemMetricsCache.data = data;
+        systemMetricsCache.ts = Date.now();
+        systemMetricsCache.promise = null;
+        return data;
+    })().catch((error) => {
+        systemMetricsCache.promise = null;
+        throw error;
+    });
+
+    return systemMetricsCache.promise;
 }
 
 function getClientIp(req) {
@@ -169,564 +207,6 @@ function parseFlexibleTimestamp(value) {
     return null;
 }
 
-function collectMessageEmails(message) {
-    const emails = new Set();
-
-    const addEmail = (value) => {
-        const normalized = String(value || '').trim().toLowerCase();
-        if (normalized && normalized.includes('@')) {
-            emails.add(normalized);
-        }
-    };
-
-    addEmail(message?.targetRecipient);
-
-    const recipientList = String(message?.recipientList || '');
-    const matches = recipientList.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig) || [];
-    for (const email of matches) {
-        addEmail(email);
-    }
-
-    return [...emails];
-}
-
-async function syncAccessDeactivatedProductStatuses(force = false) {
-    const now = Date.now();
-    if (!force && accessDeactivatedSyncPromise) {
-        return accessDeactivatedSyncPromise;
-    }
-    if (!force && (now - accessDeactivatedLastSyncAt) < ACCESS_DEACTIVATED_SYNC_COOLDOWN_MS) {
-        return { skipped: true, reason: 'cooldown' };
-    }
-
-    accessDeactivatedSyncPromise = (async () => {
-        const previousSinceValue = await store.getAppConfigValue(ACCESS_DEACTIVATED_SYNC_KEY, '');
-        const previousSinceTs = parseFlexibleTimestamp(previousSinceValue);
-        const params = {};
-        if (previousSinceTs) {
-            params.since = String(previousSinceTs);
-        }
-
-        try {
-            const response = await axios.get(ACCESS_DEACTIVATED_MESSAGES_URL, {
-                headers: await getImapAuthHeaders(),
-                params,
-                timeout: 30000
-            });
-
-            const messages = Array.isArray(response?.data?.messages) ? response.data.messages : [];
-            const emailSet = new Set();
-            let latestMessageTs = previousSinceTs;
-
-            for (const message of messages) {
-                for (const email of collectMessageEmails(message)) {
-                    emailSet.add(email);
-                }
-                const messageTs = parseFlexibleTimestamp(message?.date);
-                if (messageTs && (!latestMessageTs || messageTs > latestMessageTs)) {
-                    latestMessageTs = messageTs;
-                }
-            }
-
-            const affectedRows = await store.updateProductStatusByEmails([...emailSet], '封禁');
-            const nextSinceTs = latestMessageTs || now;
-            await store.setAppConfigValue(ACCESS_DEACTIVATED_SYNC_KEY, String(nextSinceTs));
-            accessDeactivatedLastSyncAt = Date.now();
-
-            if (messages.length > 0 || affectedRows > 0) {
-                console.log(`[AccessDeactivated] synced messages=${messages.length} matchedEmails=${emailSet.size} updatedProducts=${affectedRows} since=${previousSinceTs || 'all'} nextSince=${nextSinceTs}`);
-            }
-
-            return {
-                messagesCount: messages.length,
-                matchedEmails: emailSet.size,
-                updatedProducts: affectedRows,
-                previousSinceTs,
-                nextSinceTs
-            };
-        } catch (error) {
-            const isUnauthorized = Number(error?.response?.status || 0) === 401;
-            if (isUnauthorized) {
-                try {
-                    const retryResponse = await axios.get(ACCESS_DEACTIVATED_MESSAGES_URL, {
-                        headers: await getImapAuthHeaders(true),
-                        params,
-                        timeout: 30000
-                    });
-
-                    const retryMessages = Array.isArray(retryResponse?.data?.messages) ? retryResponse.data.messages : [];
-                    const retryEmailSet = new Set();
-                    let latestMessageTs = previousSinceTs;
-
-                    for (const message of retryMessages) {
-                        for (const email of collectMessageEmails(message)) {
-                            retryEmailSet.add(email);
-                        }
-                        const messageTs = parseFlexibleTimestamp(message?.date);
-                        if (messageTs && (!latestMessageTs || messageTs > latestMessageTs)) {
-                            latestMessageTs = messageTs;
-                        }
-                    }
-
-                    const affectedRows = await store.updateProductStatusByEmails([...retryEmailSet], '封禁');
-                    const nextSinceTs = latestMessageTs || now;
-                    await store.setAppConfigValue(ACCESS_DEACTIVATED_SYNC_KEY, String(nextSinceTs));
-                    accessDeactivatedLastSyncAt = Date.now();
-
-                    if (retryMessages.length > 0 || affectedRows > 0) {
-                        console.log(`[AccessDeactivated] synced after token refresh messages=${retryMessages.length} matchedEmails=${retryEmailSet.size} updatedProducts=${affectedRows} since=${previousSinceTs || 'all'} nextSince=${nextSinceTs}`);
-                    }
-
-                    return {
-                        messagesCount: retryMessages.length,
-                        matchedEmails: retryEmailSet.size,
-                        updatedProducts: affectedRows,
-                        previousSinceTs,
-                        nextSinceTs
-                    };
-                } catch (retryError) {
-                    console.error(`[AccessDeactivated] sync failed after token refresh: ${retryError.message}`);
-                    throw retryError;
-                }
-            }
-
-            console.error(`[AccessDeactivated] sync failed: ${error.message}`);
-            throw error;
-        } finally {
-            accessDeactivatedSyncPromise = null;
-        }
-    })();
-
-    return accessDeactivatedSyncPromise;
-}
-
-function scheduleAccessDeactivatedSync(delayMs = ACCESS_DEACTIVATED_SYNC_COOLDOWN_MS) {
-    if (accessDeactivatedSyncTimer) {
-        clearTimeout(accessDeactivatedSyncTimer);
-        accessDeactivatedSyncTimer = null;
-    }
-
-    accessDeactivatedSyncTimer = setTimeout(async () => {
-        try {
-            await ensureStoreReady();
-            await syncAccessDeactivatedProductStatuses(true);
-        } catch (error) {
-            console.error(`[AccessDeactivated] scheduled sync failed: ${error.message}`);
-        } finally {
-            scheduleAccessDeactivatedSync(ACCESS_DEACTIVATED_SYNC_COOLDOWN_MS);
-        }
-    }, Math.max(1000, Number(delayMs) || ACCESS_DEACTIVATED_SYNC_COOLDOWN_MS));
-}
-
-async function waitForAvailableActivationSlot(jobSet, maxConcurrentActivations, excludedSlotKeys = []) {
-    const excluded = new Set((excludedSlotKeys || []).map((item) => String(item)));
-    while (true) {
-        let occupied = 0;
-        for (const slot of jobSet) {
-            if (!excluded.has(String(slot))) {
-                occupied += 1;
-            }
-        }
-        if (occupied < Math.max(1, Number(maxConcurrentActivations) || 1)) {
-            return;
-        }
-        await sleep(1000);
-    }
-}
-
-function isFatalProductGenerationError(error) {
-    const message = String(error?.message || error || '');
-
-    // 这些是「换代理 / 换号能解决」的临时性问题，绝对不算致命，要让父进程重试
-    const transientRetry =
-        message.includes('OpenAI 鉴权服务异常')
-        || message.includes('代理或网络持续超时')
-        || message.includes('浏览器连接被代理多次关闭')
-        || message.includes('user_already_exists')
-        || message.includes('该邮箱已被注册')
-        || message.includes('个人资料表单校验失败');
-    if (transientRetry) {
-        return false;
-    }
-
-    const proxyFatal =
-        message.includes('代理连接失败')
-        || message.includes('代理认证失败')
-        || message.includes('代理响应异常')
-        || message.includes('代理不可用')
-        || message.includes('账号余额');
-    return message.includes('系统维护中')
-        || message.includes('余额不足')
-        || message.includes('资产池枯竭')
-        || proxyFatal
-        || message.includes('无法获取有效的 Access Token')
-        || message.includes('页面仍无法正常显示')
-        // 支付已成功但协议提取失败：终止整个 batch（避免再扣费），管理员后台手动补 RT 即可
-        || message.includes('支付已成功但协议提取失败')
-        || message.includes('支付已成功并占位入库');
-}
-
-function formatGigabytes(bytes) {
-    return `${(Math.max(0, Number(bytes) || 0) / (1024 ** 3)).toFixed(1)}G`;
-}
-
-function formatDuration(ms) {
-    const totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
-    const days = Math.floor(totalSeconds / 86400);
-    const hours = Math.floor((totalSeconds % 86400) / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-
-    if (days > 0) {
-        return `${days}天 ${hours}时 ${minutes}分`;
-    }
-    if (hours > 0) {
-        return `${hours}时 ${minutes}分 ${seconds}秒`;
-    }
-    if (minutes > 0) {
-        return `${minutes}分 ${seconds}秒`;
-    }
-    return `${seconds}秒`;
-}
-
-function getCpuTimesSnapshot() {
-    return os.cpus().map((cpu) => {
-        const times = cpu.times || {};
-        const idle = Number(times.idle || 0);
-        const total = Object.values(times).reduce((sum, value) => sum + Number(value || 0), 0);
-        return { idle, total };
-    });
-}
-
-async function getCpuUsagePercent(sampleMs = 200) {
-    const start = getCpuTimesSnapshot();
-    await sleep(sampleMs);
-    const end = getCpuTimesSnapshot();
-
-    let idleDiff = 0;
-    let totalDiff = 0;
-    for (let index = 0; index < Math.min(start.length, end.length); index += 1) {
-        idleDiff += Math.max(0, end[index].idle - start[index].idle);
-        totalDiff += Math.max(0, end[index].total - start[index].total);
-    }
-
-    if (totalDiff <= 0) {
-        return 0;
-    }
-
-    return Math.max(0, Math.min(100, Math.round((1 - (idleDiff / totalDiff)) * 100)));
-}
-
-function getDiskMetrics() {
-    const cwdRootWithSlash = path.parse(process.cwd()).root || 'C:\\';
-    const driveLetter = cwdRootWithSlash.replace(/[\\\/]+$/, '') || 'C:';
-    const buildDiskMetrics = (totalBytes, freeBytes) => {
-        const safeTotalBytes = Math.max(0, Number(totalBytes) || 0);
-        const safeFreeBytes = Math.max(0, Number(freeBytes) || 0);
-        const usedBytes = Math.max(0, safeTotalBytes - safeFreeBytes);
-        const percent = safeTotalBytes > 0
-            ? Math.max(0, Math.min(100, Math.round((usedBytes / safeTotalBytes) * 100)))
-            : 0;
-
-        return {
-            drive: driveLetter,
-            usedBytes,
-            totalBytes: safeTotalBytes,
-            percent,
-            usedText: formatGigabytes(usedBytes),
-            totalText: formatGigabytes(safeTotalBytes)
-        };
-    };
-
-    try {
-        if (typeof fs.statfsSync === 'function') {
-            const stats = fs.statfsSync(cwdRootWithSlash);
-            const blockSize = Math.max(0, Number(stats.bsize) || 0);
-            const totalBlocks = Math.max(0, Number(stats.blocks) || 0);
-            const freeBlocks = Math.max(0, Number(stats.bfree ?? stats.bavail) || 0);
-            const totalBytes = blockSize * totalBlocks;
-            const freeBytes = blockSize * freeBlocks;
-
-            if (totalBytes > 0) {
-                return buildDiskMetrics(totalBytes, freeBytes);
-            }
-        }
-    } catch (_) {
-    }
-
-    try {
-        const script = `(Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='${driveLetter}'" | Select-Object Size,FreeSpace) | ConvertTo-Json -Compress`;
-        const output = execFileSync('powershell', ['-NoProfile', '-Command', script], {
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
-            timeout: 4000
-        }).trim();
-
-        if (!output) {
-            return null;
-        }
-
-        const parsed = JSON.parse(output);
-        return buildDiskMetrics(parsed.Size, parsed.FreeSpace);
-    } catch (_) {
-        return null;
-    }
-}
-
-async function getSystemMetrics() {
-    const now = Date.now();
-    if (systemMetricsCache.data && (now - systemMetricsCache.ts) < 5000) {
-        return systemMetricsCache.data;
-    }
-    if (systemMetricsCache.promise) {
-        return systemMetricsCache.promise;
-    }
-
-    systemMetricsCache.promise = (async () => {
-        const totalMem = os.totalmem();
-        const freeMem = os.freemem();
-        const usedMem = Math.max(0, totalMem - freeMem);
-        const memoryPercent = totalMem > 0 ? Math.max(0, Math.min(100, Math.round((usedMem / totalMem) * 100))) : 0;
-        const cpuPercent = await getCpuUsagePercent();
-        const disk = getDiskMetrics();
-
-        const data = {
-            cpu: {
-                percent: cpuPercent,
-                text: `${cpuPercent}%`
-            },
-            memory: {
-                percent: memoryPercent,
-                usedBytes: usedMem,
-                totalBytes: totalMem,
-                usedText: formatGigabytes(usedMem),
-                totalText: formatGigabytes(totalMem),
-                text: `${formatGigabytes(usedMem)}/${formatGigabytes(totalMem)}`
-            },
-            disk: disk || {
-                drive: path.parse(process.cwd()).root.replace(/[\\\/]+$/, '') || 'C:',
-                percent: 0,
-                usedBytes: 0,
-                totalBytes: 0,
-                usedText: '0.0G',
-                totalText: '0.0G'
-            },
-            uptime: {
-                seconds: Math.max(0, Math.floor(process.uptime())),
-                text: formatDuration(process.uptime() * 1000)
-            }
-        };
-
-        systemMetricsCache = {
-            ts: Date.now(),
-            data,
-            promise: null
-        };
-
-        return data;
-    })().catch((error) => {
-        systemMetricsCache.promise = null;
-        throw error;
-    });
-
-    return systemMetricsCache.promise;
-}
-
-async function startAdminProductGenerationTask(count, options = {}) {
-    const targetCount = Math.max(1, Math.min(Number(count) || 1, 100));
-    const maxConcurrentActivations = await store.getMaxBackgroundConcurrent();
-    const workerCount = Math.min(targetCount, Math.max(1, maxConcurrentActivations));
-    const resumeFrom = options.resumeFrom || null;
-    const task = await store.createTaskLog({
-        tokenPreview: 'ADMIN_PRODUCT_GEN',
-        cdkCode: `ADMIN_PRODUCT_GEN:${targetCount}`,
-        status: 'running',
-        progress: 1
-    });
-
-    const itemProgress = new Map();
-    let completed = 0;
-    let successCount = 0;
-    let failedCount = 0;
-    let nextIndex = 1;
-    let lastError = '';
-    let lastProgress = 1;
-    let aborted = false;
-
-    registerAdminGenerationStop(task.jobKey, () => {
-        aborted = true;
-        logTask(task.jobKey, '管理员请求停止：本批次不再排队新的成品生产（当前正在执行的条次会尽快在步骤间隙退出）', 'warn');
-    });
-
-    const buildGenerationSummary = () => JSON.stringify({
-        kind: 'admin_product_generation',
-        targetCount,
-        completedCount: completed,
-        successCount,
-        failedCount,
-        workerCount,
-        aborted,
-        lastError,
-        resumedFromJobKey: resumeFrom?.jobKey || null,
-        resumedFromTargetCount: resumeFrom?.targetCount || null,
-        resumedFromCompletedCount: resumeFrom?.completedCount || null
-    });
-
-    const computeBatchProgress = () => {
-        const inFlightProgress = Array.from(itemProgress.values()).reduce((sum, value) => sum + Math.max(0, Math.min(99, Number(value) || 0)), 0);
-        const raw = ((completed * 100) + inFlightProgress) / targetCount;
-        return Math.max(lastProgress, Math.min(99, Math.floor(raw)));
-    };
-
-    const publishBatchProgress = async (message) => {
-        const progress = computeBatchProgress();
-        lastProgress = progress;
-        await store.updateTaskLog(task.jobKey, {
-            status: 'running',
-            message,
-            rawOutput: buildGenerationSummary(),
-            cdkCode: `ADMIN_PRODUCT_GEN:${targetCount}`,
-            progress
-        });
-        broadcastToTask(task.jobKey, {
-            type: 'progress',
-            jobKey: task.jobKey,
-            progress,
-            status: 'running',
-            message
-        });
-    };
-
-    logTask(task.jobKey, `🎬 后台成品生产启动  count=${targetCount}  workerCount=${workerCount}${resumeFrom ? `  resumeFrom=${resumeFrom.jobKey}` : ''}`);
-
-    (async () => {
-        const worker = async () => {
-            while (true) {
-                if (aborted) {
-                    return;
-                }
-                const currentIndex = nextIndex;
-                if (currentIndex > targetCount) {
-                    return;
-                }
-                nextIndex += 1;
-
-                const slotKey = `${task.jobKey}:item:${currentIndex}`;
-                itemProgress.set(currentIndex, 0);
-
-                try {
-                    let produced = false;
-                    let attempt = 0;
-
-                    while (!produced) {
-                        if (aborted) {
-                            return;
-                        }
-
-                        attempt += 1;
-                        itemProgress.set(currentIndex, 1);
-                        await publishBatchProgress(
-                            activeBackgroundJobs.size >= maxConcurrentActivations
-                                ? `第 ${currentIndex}/${targetCount} 个正在排队等待空闲并发槽位...`
-                                : `正在生产第 ${currentIndex}/${targetCount} 个成品号...`
-                        );
-
-                        await waitForAvailableActivationSlot(activeBackgroundJobs, maxConcurrentActivations);
-                        reserveBackgroundSlot(slotKey);
-
-                        try {
-                            await publishBatchProgress(`正在生产第 ${currentIndex}/${targetCount} 个成品号 (尝试 ${attempt})...`);
-                            const result = await startProductCreation('', async (progressData) => {
-                                itemProgress.set(currentIndex, Math.max(0, Math.min(99, Number(progressData.progress) || 0)));
-                                const itemMessage = progressData.message || `正在生产第 ${currentIndex}/${targetCount} 个成品号...`;
-                                await publishBatchProgress(`第 ${currentIndex}/${targetCount} 个: ${itemMessage}`);
-                            }, { jobKey: task.jobKey });
-
-                            if (result?.success) {
-                                await store.addProduct(result.email, result.sub2apiPath || result.sub2apiFile || '', null, null, result.imapKey || null);
-                                successCount += 1;
-                                produced = true;
-                                logTask(task.jobKey, `第 ${currentIndex}/${targetCount} 个成品号生产成功 email=${result.email}`);
-                            } else {
-                                throw new Error('未返回成功结果');
-                            }
-                        } catch (error) {
-                            lastError = error.message || '未知错误';
-                            if (isFatalProductGenerationError(error)) {
-                                failedCount += 1;
-                                aborted = true;
-                                logTask(task.jobKey, `第 ${currentIndex}/${targetCount} 个遇到致命错误，任务终止: ${lastError}`, 'error');
-                                throw error;
-                            }
-                            logTask(task.jobKey, `第 ${currentIndex}/${targetCount} 个非致命失败，准备重试: ${lastError}`, 'warn');
-                            itemProgress.set(currentIndex, 1);
-                            await publishBatchProgress(`第 ${currentIndex}/${targetCount} 个失败重试中: ${lastError}`);
-                            await sleep(3000);
-                        } finally {
-                            releaseBackgroundSlot(slotKey);
-                        }
-                    }
-                } finally {
-                    if (!aborted) {
-                        completed += 1;
-                        itemProgress.delete(currentIndex);
-                        await publishBatchProgress(
-                            completed >= targetCount
-                                ? '生产任务收尾中...'
-                                : `已完成 ${completed}/${targetCount}，继续生产剩余成品号...`
-                        );
-                    }
-                }
-            }
-        };
-
-        try {
-            await Promise.all(Array.from({ length: workerCount }, () => worker()));
-
-            const finalStatus = aborted || failedCount > 0 ? 'failed' : 'success';
-            const finalMessage = finalStatus === 'success'
-                ? `成功生产 ${successCount} 个成品号`
-                : `生产中止，已成功 ${successCount} 个${lastError ? `，原因：${lastError}` : ''}`;
-            const finalProgress = 100;
-
-            await store.updateTaskLog(task.jobKey, {
-                status: finalStatus,
-                message: finalMessage,
-                rawOutput: buildGenerationSummary(),
-                cdkCode: `ADMIN_PRODUCT_GEN:${targetCount}`,
-                progress: finalProgress
-            });
-            broadcastToTask(task.jobKey, {
-                type: 'status',
-                jobKey: task.jobKey,
-                progress: finalProgress,
-                status: finalStatus,
-                message: finalMessage
-            });
-        } catch (error) {
-            lastError = error.message || lastError || '未知错误';
-            const finalMessage = `后台成品生产异常: ${lastError}`;
-            await store.updateTaskLog(task.jobKey, {
-                status: 'failed',
-                message: finalMessage,
-                rawOutput: buildGenerationSummary(),
-                cdkCode: `ADMIN_PRODUCT_GEN:${targetCount}`,
-                progress: 100
-            });
-            broadcastToTask(task.jobKey, {
-                type: 'status',
-                jobKey: task.jobKey,
-                progress: 100,
-                status: 'failed',
-                message: finalMessage
-            });
-        } finally {
-            unregisterAdminGenerationStop(task.jobKey);
-        }
-    })();
-
-    return { task, workerCount, targetCount };
-}
 
 function broadcastToTask(jobKey, data) {
     const clients = taskClients.get(jobKey);
@@ -757,6 +237,15 @@ async function sendTaskSnapshot(ws, jobKey) {
         return;
     }
 
+    let storedMedia = { screenshots: [], videos: [] };
+    if (task.failure_screenshots) {
+        try {
+            const parsed = JSON.parse(task.failure_screenshots);
+            storedMedia = splitTaskMediaPaths(Array.isArray(parsed) ? parsed : []);
+        } catch (_) { /* ignore */ }
+    }
+    const media = extractTaskMediaFromOutput(task.raw_output || '');
+
     ws.send(JSON.stringify({
         type: 'snapshot',
         jobKey,
@@ -766,6 +255,8 @@ async function sendTaskSnapshot(ws, jobKey) {
         cdkCode: task.cdk_code || null,
         phone: task.phone || null,
         cardLast4: task.card_last4 || null,
+        screenshots: [...new Set([...storedMedia.screenshots, ...media.screenshots])],
+        videos: [...new Set([...storedMedia.videos, ...media.videos])],
         isTerminal: TERMINAL_TASK_STATUSES.has(task.status)
     }));
 }
@@ -795,9 +286,13 @@ function logTaskChunk(jobKey, attempt, source, chunk) {
         }
         runtimeLog.push({
             jobKey,
-            level: source === 'stderr' ? 'stderr' : 'stdout',
-            source: `spawn/a${attempt}/${source}`,
-            text: line
+            level: line.includes('CAPTCHA_LOG:') || line.includes('[Captcha/')
+                ? 'captcha'
+                : (source === 'stderr' ? 'stderr' : 'stdout'),
+            source: line.includes('CAPTCHA_LOG:') || line.includes('[Captcha/')
+                ? 'captcha'
+                : `spawn/a${attempt}/${source}`,
+            text: line.replace(/^CAPTCHA_LOG:\s*/, '')
         });
         console.log(`[Task ${jobKey}][Attempt ${attempt}][${source}] ${line}`);
     }
@@ -811,6 +306,63 @@ let storeReadyPromise = null;
 
 const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '15mb';
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
+
+let cachedAdminPaths = null;
+
+async function getCachedAdminPaths() {
+    if (cachedAdminPaths) {
+        return cachedAdminPaths;
+    }
+    await ensureStoreReady();
+    cachedAdminPaths = await store.getAdminPaths();
+    return cachedAdminPaths;
+}
+
+function invalidateAdminPathsCache() {
+    cachedAdminPaths = null;
+}
+
+function normalizeRequestPathname(pathname) {
+    return String(pathname || '/').replace(/\/+$/, '') || '/';
+}
+
+async function attachAdminPaths(payload) {
+    const paths = await getCachedAdminPaths();
+    return {
+        ...payload,
+        loginPath: buildAdminLoginUrl(paths),
+        panelPath: buildAdminPanelUrl(paths)
+    };
+}
+
+app.use((req, res, next) => {
+    if (req.method === 'GET' && ['/admin.html', '/admin-login.html'].includes(req.path)) {
+        return res.status(404).type('text/plain').send('Not Found');
+    }
+    next();
+});
+
+app.use(async (req, res, next) => {
+    if (req.method !== 'GET') {
+        return next();
+    }
+    try {
+        const paths = await getCachedAdminPaths();
+        const current = normalizeRequestPathname(req.path);
+        const loginUrl = normalizeRequestPathname(buildAdminLoginUrl(paths));
+        const panelUrl = normalizeRequestPathname(buildAdminPanelUrl(paths));
+        if (current === loginUrl) {
+            return res.sendFile(path.join(__dirname, 'public', 'admin-login.html'));
+        }
+        if (current === panelUrl) {
+            return res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+        }
+    } catch (_) {
+        // DB 尚未就绪时交给后续路由处理
+    }
+    return next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 function ensureStoreReady() {
@@ -827,6 +379,43 @@ function decodeJwtPart(part) {
     const normalized = String(part || '').replace(/-/g, '+').replace(/_/g, '/');
     const padded = normalized.padEnd(normalized.length + ((4 - normalized.length % 4) % 4), '=');
     return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+}
+
+function normalizeSessionToken(raw) {
+    return extractAccessTokenFromRaw(raw);
+}
+
+function normalizeSessionRaw(raw) {
+    const content = String(raw || '').trim();
+    if (!content.startsWith('{')) {
+        return '';
+    }
+    try {
+        const data = JSON.parse(content);
+        if (data?.accessToken || data?.access_token || data?.user) {
+            return content;
+        }
+    } catch (_) {
+        return '';
+    }
+    return '';
+}
+
+function buildStoredSessionPayload(rawSession, sessionJson, token) {
+    if (sessionJson) {
+        return normalizeSessionRaw(rawSession) || JSON.stringify(sessionJson);
+    }
+    if (rawSession.startsWith('{')) {
+        return rawSession;
+    }
+    if (token) {
+        return JSON.stringify({
+            accessToken: token,
+            user: null,
+            expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+        });
+    }
+    return rawSession;
 }
 
 function validateAccessToken(token) {
@@ -888,103 +477,31 @@ function validateAccessToken(token) {
     return { valid: true };
 }
 
-function encodeBase64Url(input) {
-    return Buffer.from(input)
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/g, '');
-}
+const verifyPassword = adminAuth.verifyPassword;
+const issueAdminToken = adminAuth.issueAdminToken;
+const verifyAdminToken = adminAuth.verifyAdminToken;
+const requireSecondaryAuth = adminAuth.createRequireSecondaryAuth(store, ensureStoreReady);
 
-function decodeBase64Url(input) {
-    const normalized = input
-        .replace(/-/g, '+')
-        .replace(/_/g, '/')
-        .padEnd(Math.ceil(input.length / 4) * 4, '=');
-    return Buffer.from(normalized, 'base64').toString('utf8');
-}
-
-function signTokenPayload(encodedPayload) {
-    return crypto
-        .createHmac('sha256', ADMIN_TOKEN_SECRET)
-        .update(encodedPayload)
-        .digest('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/g, '');
-}
-
-function safeEqualString(left, right) {
-    const leftBuffer = Buffer.from(String(left));
-    const rightBuffer = Buffer.from(String(right));
-    if (leftBuffer.length !== rightBuffer.length) {
-        return false;
-    }
-    return crypto.timingSafeEqual(leftBuffer, rightBuffer);
-}
-
-function createPasswordHash(password, salt) {
-    return crypto.scryptSync(String(password), salt, 64).toString('hex');
-}
-
-function verifyPassword(password, storedHash) {
-    const parts = String(storedHash || '').split('$');
-    if (parts.length !== 3 || parts[0] !== 'scrypt') {
-        return false;
-    }
-
-    const [, salt, expectedHash] = parts;
-    const actualHash = createPasswordHash(password, salt);
-    return safeEqualString(actualHash, expectedHash);
-}
-
-function issueAdminToken(passwordVersion) {
-    const now = Date.now();
-    const payload = {
-        sub: 'admin',
-        permissions: ['admin'],
-        pv: Math.max(1, Number(passwordVersion || 1)),
-        iat: now,
-        exp: now + ADMIN_TOKEN_TTL_MS
-    };
-    const encodedPayload = encodeBase64Url(JSON.stringify(payload));
-    const signature = signTokenPayload(encodedPayload);
-    return {
-        token: `${encodedPayload}.${signature}`,
-        payload
-    };
-}
-
-function verifyAdminToken(token) {
-    if (!token || typeof token !== 'string') {
-        return null;
-    }
-
-    const [encodedPayload, signature] = token.split('.');
-    if (!encodedPayload || !signature) {
-        return null;
-    }
-
-    const expectedSignature = signTokenPayload(encodedPayload);
-    if (!safeEqualString(signature, expectedSignature)) {
-        return null;
-    }
-
+async function logAdminSecurityEvent(event, meta = {}) {
     try {
-        const payload = JSON.parse(decodeBase64Url(encodedPayload));
-        if (!payload || payload.sub !== 'admin' || !Array.isArray(payload.permissions)) {
-            return null;
-        }
-        if (!payload.permissions.includes('admin')) {
-            return null;
-        }
-        if (!payload.exp || Date.now() >= Number(payload.exp)) {
-            return null;
-        }
-        return payload;
+        await ensureStoreReady();
+        await store.insertAdminLoginLog({
+            event,
+            adminEmail: meta.email || '',
+            ip: meta.ip || '',
+            userAgent: meta.userAgent || '',
+            fingerprint: meta.fingerprint || '',
+            detail: meta.detail || ''
+        });
     } catch (error) {
-        return null;
+        console.warn(`[AdminAuth] 登录日志写入失败: ${error.message}`);
     }
+}
+
+async function fireAdminSecurityNotification(event, payload = {}) {
+    notifyAdminSecurityEvent(store, event, payload).catch((error) => {
+        console.warn(`[AdminAuth] Telegram 通知失败: ${error.message}`);
+    });
 }
 
 function getBearerToken(req) {
@@ -1018,20 +535,150 @@ async function authenticateAdmin(req, res, next) {
     return next();
 }
 
+const CDK_PREFIX = 'KC-';
+const CDK_RANDOM_LENGTH = 15; // KC- + 15 = 18 位
+const CDK_CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 去掉易混淆 0/O/1/I/L
+
+function randomCdkSuffix(length = CDK_RANDOM_LENGTH) {
+    const bytes = crypto.randomBytes(length);
+    let out = '';
+    for (let i = 0; i < length; i += 1) {
+        out += CDK_CHARSET[bytes[i] % CDK_CHARSET.length];
+    }
+    return out;
+}
+
 function createCdks(count) {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     const results = new Set();
     const target = Math.max(1, Math.min(Number(count) || 1, 100));
 
     while (results.size < target) {
-        let cdk = '';
-        for (let i = 0; i < 12; i += 1) {
-            cdk += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        results.add(cdk);
+        results.add(`${CDK_PREFIX}${randomCdkSuffix()}`);
     }
 
     return [...results];
+}
+
+function extractScreenshotsFromOutput(output) {
+    const paths = new Set();
+    const text = String(output || '');
+    const patterns = [
+        /FAILURE_SCREENSHOT:\s*([^\s\n]+\.png)/g,
+        /SUCCESS_SCREENSHOT:\s*([^\s\n]+\.png)/g,
+        /LIVE_SCREENSHOT:\s*([^\s\n]+\.png)/g,
+        /截图已保存:\s*([^\s\n]+\.png)/g
+    ];
+    for (const pattern of patterns) {
+        let match = pattern.exec(text);
+        while (match) {
+            paths.add(match[1]);
+            match = pattern.exec(text);
+        }
+    }
+    return normalizeMediaPaths([...paths]);
+}
+
+function extractVideosFromOutput(output) {
+    const paths = new Set();
+    const text = String(output || '');
+    const pattern = /VIDEO_FILE:\s*([^\s\n]+\.webm)/g;
+    let match = pattern.exec(text);
+    while (match) {
+        paths.add(match[1]);
+        match = pattern.exec(text);
+    }
+    return normalizeMediaPaths([...paths]);
+}
+
+function normalizeMediaPaths(paths) {
+    return paths.map((filePath) => {
+        const normalized = String(filePath).replace(/\\/g, '/');
+        const marker = 'debug_screenshots/';
+        const idx = normalized.indexOf(marker);
+        if (idx >= 0) {
+            return normalized.slice(idx + marker.length);
+        }
+        return path.basename(normalized);
+    });
+}
+
+function extractTaskMediaFromOutput(output) {
+    return {
+        screenshots: extractScreenshotsFromOutput(output),
+        videos: extractVideosFromOutput(output)
+    };
+}
+
+function splitTaskMediaPaths(items) {
+    const list = Array.isArray(items) ? items : [];
+    const screenshots = [];
+    const videos = [];
+    for (const item of list) {
+        const rel = String(item || '').replace(/\\/g, '/');
+        if (!rel) continue;
+        if (/\.webm$/i.test(rel)) {
+            videos.push(rel);
+        } else {
+            screenshots.push(rel);
+        }
+    }
+    return { screenshots, videos };
+}
+
+function extractCheckoutUrlFromOutput(output) {
+    const match = String(output || '').match(/CHECKOUT_URL:\s*(https?\S+)/);
+    return match ? match[1].trim() : '';
+}
+
+function analyzeCheckoutDebugOutput(output, timedOut) {
+    const normalized = String(output || '');
+    const runtimeError = extractRuntimeErrorMessage(normalized);
+
+    if (normalized.includes('CHECKOUT_DEBUG_SUCCESS')) {
+        const checkoutUrl = extractCheckoutUrlFromOutput(normalized);
+        return {
+            status: 'success',
+            message: checkoutUrl ? `支付链接已生成: ${checkoutUrl}` : '支付链接调试成功',
+            checkoutUrl,
+            reachedPayment: Boolean(checkoutUrl),
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    const base = analyzeProcessOutput(output, timedOut);
+    if (base.status === 'retry') {
+        return {
+            ...base,
+            status: 'failed',
+            message: String(base.message || runtimeError || '支付链接调试失败').replace('，准备重试', '')
+        };
+    }
+    if (base.status === 'success') {
+        return {
+            status: 'failed',
+            message: runtimeError || '调试流程异常结束（未输出 CHECKOUT_DEBUG_SUCCESS）',
+            reachedPayment: false,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+    return base;
+}
+
+function extractCardLast4FromOutput(output) {
+    const text = String(output || '');
+    const reserved = text.match(/已预留卡片:\s*\.\.\.(\d{4})/);
+    if (reserved) {
+        return reserved[1];
+    }
+    const attempt = text.match(/ATTEMPT \d+ \| CARD (\d{4})/);
+    if (attempt) {
+        return attempt[1];
+    }
+    return null;
 }
 
 function buildRuntimeFailure(message, code, status = 'failed', extra = {}) {
@@ -1044,31 +691,149 @@ function buildRuntimeFailure(message, code, status = 'failed', extra = {}) {
     };
 }
 
+function extractRuntimeErrorMessage(output) {
+    const normalized = String(output || '');
+    const match = normalized.match(/❌ \[运行时错误\]:\s*(.+)/);
+    if (match) {
+        return match[1].trim();
+    }
+    const lines = normalized.split('\n').map((line) => line.trim()).filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+        if (lines[i].startsWith('Error:')) {
+            return lines[i].replace(/^Error:\s*/, '');
+        }
+    }
+    return '';
+}
+
 function analyzeProcessOutput(output, timedOut) {
     const normalized = String(output || '');
-    const reachedPaypal = normalized.includes('[步骤] 正在填写 PayPal 登录邮箱')
-        || normalized.includes('正在填写 PayPal 登录邮箱');
+    const runtimeError = extractRuntimeErrorMessage(normalized);
+    const reachedPayment = normalized.includes('[Stripe] Step')
+        || normalized.includes('正在使用 Stripe 信用卡')
+        || normalized.includes('Checkout 页面已打开')
+        || normalized.includes('chatgpt.com/checkout')
+        || normalized.includes('配置套餐')
+        || normalized.includes('定价页')
+        || normalized.includes('#pricing');
     const success = normalized.includes('PAYMENT_SUCCESS') || normalized.includes('最终校验：支付成功') || normalized.includes('支付成功');
 
     if (success) {
         return {
             status: 'success',
             message: '激活成功',
-            reachedPaypal: true,
+            reachedPayment: true,
             shouldRetry: false,
             deletePhone: false,
             deleteCard: false
         };
     }
 
-    if (normalized.includes('金额校验失败')
-        || normalized.includes('Missing PayPal approval URL / ba_token')
-        || normalized.includes('多次尝试后仍未获取到 PayPal 重定向 URL')
-        || normalized.includes('无法获取 PayPal 审批链接')) {
+    if (normalized.includes('金额校验失败')) {
         return {
             status: 'failed',
-            message: '该账号无激活权限,请更换账号重试',
-            reachedPaypal: false,
+            message: '支付金额校验失败，请检查账单地区与币种配置',
+            reachedPayment: false,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    if (normalized.includes('Session 未生效')
+        || normalized.includes('Google 登录')
+        || normalized.includes('Sign in with Google')) {
+        return {
+            status: 'failed',
+            message: runtimeError || 'Session 未在浏览器中生效，请粘贴完整 Session JSON（从 chatgpt.com/api/auth/session 全选复制）',
+            reachedPayment: false,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    if (normalized.includes('Session 无效')
+        || normalized.includes('Session 登录失败')
+        || normalized.includes('Session 响应异常')
+        || normalized.includes('缺少 AccessToken')) {
+        return {
+            status: 'failed',
+            message: runtimeError || 'Session 无效或已过期，请重新获取完整 Session JSON 后重试',
+            reachedPayment: false,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    if (normalized.includes('无法将定价页切换到目标地区')) {
+        return {
+            status: 'failed',
+            message: runtimeError || '定价页地区切换失败，已尝试 API Checkout；若仍失败请检查后台账单地区',
+            reachedPayment: false,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    if (normalized.includes('未找到') && normalized.includes('升级按钮')) {
+        return {
+            status: 'failed',
+            message: runtimeError || '定价页未找到对应套餐升级按钮，请确认账号可升级',
+            reachedPayment: false,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    if (normalized.includes('等待 Checkout 页面超时')) {
+        return {
+            status: 'failed',
+            message: runtimeError || '点击升级后未跳转到 Checkout 页面',
+            reachedPayment: false,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    if (normalized.includes('无法获取支付链接')
+        || normalized.includes('API 创建 Checkout 失败')
+        || normalized.includes('createCheckoutSession 失败')
+        || normalized.includes('无法打开 Checkout 页面')
+        || normalized.includes('订单创建失败')) {
+        return {
+            status: 'failed',
+            message: runtimeError || '无法创建官方 Checkout 订单，请检查账号是否已订阅、账单地区与币种是否匹配',
+            reachedPayment: false,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    if (normalized.includes('该账号无激活权限')
+        || normalized.includes('not_eligible')
+        || normalized.includes('Offer not found')) {
+        return {
+            status: 'failed',
+            message: '该账号不符合订阅条件（可能已订阅或地区不支持），请更换账号或调整后台账单地区',
+            reachedPayment: false,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    if (normalized.includes('Browser does not support socks5 proxy authentication')
+        || normalized.includes('socks5 proxy authentication')) {
+        return {
+            status: 'failed',
+            message: '代理配置错误：Playwright 不支持带账号密码的 SOCKS5，系统已自动中继；若仍失败请检查代理 URL 或改用 HTTP 代理',
+            reachedPayment: false,
             shouldRetry: false,
             deletePhone: false,
             deleteCard: false
@@ -1079,7 +844,7 @@ function analyzeProcessOutput(output, timedOut) {
         return {
             status: 'failed',
             message: '系统维护中,请联系管理员修复',
-            reachedPaypal,
+            reachedPayment,
             shouldRetry: false,
             deletePhone: false,
             deleteCard: false
@@ -1090,7 +855,7 @@ function analyzeProcessOutput(output, timedOut) {
         return {
             status: 'maintenance',
             message: '系统维护中,请联系管理员修复',
-            reachedPaypal,
+            reachedPayment,
             shouldRetry: false,
             deletePhone: false,
             deleteCard: false
@@ -1103,7 +868,7 @@ function analyzeProcessOutput(output, timedOut) {
         return {
             status: 'retry',
             message: '监测到致命拦截文字，准备重试',
-            reachedPaypal: true,
+            reachedPayment: true,
             shouldRetry: true,
             deletePhone: false,
             deleteCard: false
@@ -1114,9 +879,9 @@ function analyzeProcessOutput(output, timedOut) {
         return {
             status: 'retry',
             message: '手机号不可用，准备重试',
-            reachedPaypal,
+            reachedPayment,
             shouldRetry: true,
-            deletePhone: true,   // 手机号被拒 → 永久禁用，不再依赖 reachedPaypal
+            deletePhone: true,
             deleteCard: false
         };
     }
@@ -1127,54 +892,93 @@ function analyzeProcessOutput(output, timedOut) {
         return {
             status: 'retry',
             message: '短信异常：手机号不可用，已禁用该号，准备重试',
-            reachedPaypal,
+            reachedPayment,
             shouldRetry: true,
             deletePhone: true,
             deleteCard: false
         };
     }
 
-    if (normalized.includes('银行卡被拒绝')) {
-        return {
-            status: 'retry',
-            message: '银行卡异常，准备重试',
-            reachedPaypal,
-            shouldRetry: true,
-            deletePhone: false,
-            deleteCard: reachedPaypal
-        };
-    }
-
-    if (normalized.includes('支付结果检测失败')) {
-        return {
-            status: 'retry',
-            message: '支付检测失败，准备重试',
-            reachedPaypal: true,
-            shouldRetry: true,
-            deletePhone: false,
-            deleteCard: false
-        };
-    }
-
-    if (normalized.includes('支付失败 (stripe_redirect_failed)')
+    if (normalized.includes('银行卡被拒绝')
+        || normalized.includes('stripe_card_declined')
+        || normalized.includes('支付失败 (stripe_redirect_failed)')
         || normalized.includes('支付失败 (stripe_redirect_canceled)')
-        || normalized.includes('支付失败 (paypal_blocked)')) {
+        || normalized.includes('支付失败 (stripe_card_declined)')) {
         return {
-            status: 'retry',
-            message: 'PayPal/Stripe 端驳回支付，准备换号重试',
-            reachedPaypal: true,
-            shouldRetry: true,
+            status: 'manual',
+            message: '银行卡被拒绝或 Stripe 驳回，请查看截图后人工处理',
+            reachedPayment: true,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: true
+        };
+    }
+
+    if (normalized.includes('支付结果检测失败')
+        || normalized.includes('支付结果等待超时')) {
+        return {
+            status: 'manual',
+            message: '支付结果未确认，请查看截图后人工处理',
+            reachedPayment: true,
+            shouldRetry: false,
             deletePhone: false,
             deleteCard: false
         };
     }
 
-    if (normalized.includes('PayPal 未渲染创建账户表单')) {
+    if (normalized.includes('需要人工验证：触发 Cloudflare')
+        || normalized.includes('captcha_challenge_required')) {
         return {
-            status: 'retry',
-            message: 'PayPal 仅渲染欢迎页，已多次刷新仍无表单，准备同号重试',
-            reachedPaypal: false,
-            shouldRetry: true,
+            status: 'manual',
+            message: '触发 Cloudflare 人机验证（需勾选验证框），自动化无法可靠通过。请换住宅代理 IP，或 HEADFUL=1 有头模式人工勾选',
+            reachedPayment: true,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    if (normalized.includes('支付失败 (manual_intervention)')
+        || normalized.includes('manual_intervention')
+        || normalized.includes('需要人工操作')
+        || normalized.includes('人机验证')
+        || normalized.includes('Cloudflare/人机验证')
+        || normalized.includes('captcha_challenge')) {
+        return {
+            status: 'manual',
+            message: runtimeError || '需要人工操作：支付自动化失败，请查看失败截图',
+            reachedPayment: true,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    if (normalized.includes('支付失败 (payment_failed)')
+        || normalized.includes('支付失败 (card_pool_exhausted)')) {
+        return {
+            status: 'manual',
+            message: runtimeError || '支付失败，请查看运行日志与截图',
+            reachedPayment: true,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    // 已进入 Stripe/Checkout 支付流程后，任何失败都不再整单重试
+    if (reachedPayment && (
+        normalized.includes('支付失败')
+        || normalized.includes('❌ [支付失败]')
+        || normalized.includes('FAILURE_SCREENSHOT')
+        || normalized.includes('billing_address_not_filled')
+        || normalized.includes('账单地址未完整')
+    )) {
+        return {
+            status: 'manual',
+            message: runtimeError || '支付流程失败，请查看失败截图后人工处理',
+            reachedPayment: true,
+            shouldRetry: false,
             deletePhone: false,
             deleteCard: false
         };
@@ -1185,7 +989,7 @@ function analyzeProcessOutput(output, timedOut) {
         return {
             status: 'retry',
             message: '当前代理超时严重，已切换代理重试',
-            reachedPaypal: false,
+            reachedPayment: false,
             shouldRetry: true,
             deletePhone: false,
             deleteCard: false
@@ -1198,7 +1002,7 @@ function analyzeProcessOutput(output, timedOut) {
         return {
             status: 'retry',
             message: 'OpenAI 鉴权风控 (auth/error)，换代理 IP 重试',
-            reachedPaypal: false,
+            reachedPayment: false,
             shouldRetry: true,
             deletePhone: false,
             deleteCard: false
@@ -1210,7 +1014,7 @@ function analyzeProcessOutput(output, timedOut) {
         return {
             status: 'retry',
             message: '邮箱已被注册，自动换下一个邮箱重试',
-            reachedPaypal: false,
+            reachedPayment: false,
             shouldRetry: true,
             deletePhone: false,
             deleteCard: false
@@ -1220,27 +1024,36 @@ function analyzeProcessOutput(output, timedOut) {
     if (normalized.includes('该账号无激活权限,请更换账号重试')) {
         return {
             status: 'failed',
-            message: '该账号无激活权限,请更换账号重试',
-            reachedPaypal,
+            message: '该账号不符合订阅条件（可能已订阅或地区不支持），请更换账号或调整后台账单地区',
+            reachedPayment,
             shouldRetry: false,
             deletePhone: false,
             deleteCard: false
         };
     }
 
-    if (!reachedPaypal) {
+    if (normalized.includes('❌ [运行时错误]') || runtimeError) {
+        return {
+            status: 'failed',
+            message: runtimeError || '自动化执行失败，请查看运行日志',
+            reachedPayment,
+            shouldRetry: false,
+            deletePhone: false,
+            deleteCard: false
+        };
+    }
+
+    if (!reachedPayment) {
         const deepCheckoutFlow =
             normalized.includes('Stripe')
             || normalized.includes('pay.openai.com')
             || normalized.includes('Checkout')
-            || normalized.includes('[6] PayPal')
-            || normalized.includes('PayPal 自动化流程')
-            || normalized.includes('触发 PayPal');
+            || normalized.includes('正在打开 Stripe');
         if (deepCheckoutFlow) {
             return {
                 status: 'retry',
-                message: '已进入支付流程但未检测到 PayPal 登录步骤，准备重试',
-                reachedPaypal: false,
+                message: '已进入支付流程但未完成，准备重试',
+                reachedPayment: false,
                 shouldRetry: true,
                 deletePhone: false,
                 deleteCard: false
@@ -1248,8 +1061,8 @@ function analyzeProcessOutput(output, timedOut) {
         }
         return {
             status: 'failed',
-            message: '该账号无激活权限,请更换账号重试',
-            reachedPaypal,
+            message: runtimeError || '开通失败，请查看运行日志排查 Session、账单地区或卡池配置',
+            reachedPayment,
             shouldRetry: false,
             deletePhone: false,
             deleteCard: false
@@ -1258,20 +1071,24 @@ function analyzeProcessOutput(output, timedOut) {
 
     if (timedOut || normalized.includes("运行时错误")) {
         return {
-            status: 'failed',
-            message: '激活失败',
-            reachedPaypal,
-            shouldRetry: true,
+            status: reachedPayment ? 'manual' : 'failed',
+            message: reachedPayment
+                ? '支付流程超时或中断，请查看失败截图后人工处理'
+                : '激活失败',
+            reachedPayment,
+            shouldRetry: false,
             deletePhone: false,
             deleteCard: false
         };
     }
 
     return {
-        status: 'retry',
-        message: '激活失败，准备重试',
-        reachedPaypal,
-        shouldRetry: true,
+        status: reachedPayment ? 'manual' : 'failed',
+        message: reachedPayment
+            ? (runtimeError || '支付流程未完成，请查看失败截图后人工处理')
+            : (runtimeError || '开通失败，请查看运行日志'),
+        reachedPayment,
+        shouldRetry: false,
         deletePhone: false,
         deleteCard: false
     };
@@ -1282,53 +1099,20 @@ function getCheckoutProgress(output, status = 'running') {
     const markers = [
         ['正在检查代理连通性', 2],
         ['代理连接成功! 代理公网 IP', 5],
-        ['[1] 创建订单', 10],
-        ['✅ 订单创建成功', 15],
-        ['✅ 支付链接已生成', 20],
-        ['已创建支付页面，启动无活动监控', 24],
-        ['[6] PayPal 自动化流程开始', 28],
-        ['正在打开 Stripe Hosted Checkout 页面', 30],
-        ['Checkout 页面已打开，开始检查金额', 34],
-        ['当前页面金额', 36],
-        ['金额校验通过，确认是 0 元订单', 38],
-        ['正在定位 PayPal 支付选项', 40],
-        ['PayPal 支付选项已展开', 44],
-        ['正在填写 Stripe 账单基础信息', 48],
-        ['正在填写 Stripe 账单姓名', 49],
-        ['Stripe 账单姓名填写完成', 50],
-        ['正在填写 Stripe 街道地址', 50],
-        ['Stripe 街道地址填写完成', 51],
-        ['正在填写 Stripe 邮编', 51],
-        ['Stripe 邮编填写完成', 52],
-        ['正在填写 Stripe 城市', 52],
-        ['Stripe 城市填写完成', 53],
-        ['Stripe 账单基础信息填写完成', 54],
-        ['正在提交 Stripe Checkout', 56],
-        ['Stripe Checkout 已提交，等待 PayPal 页面响应', 60],
-        ['✅ [风控] 滑块验证处理成功。', 60],
-        ['正在等待 PayPal 创建账户按钮出现', 64],
-        ['准备点击创建账户', 68],
-        ['已点击创建账户，准备输入邮箱并继续', 70],
-        ['正在填写 PayPal 登录邮箱', 72],
-        ['已提交邮箱，进入支付信息填写页', 75],
-        ['正在填写详细账单信息', 80],
-        ['银行卡与身份信息填写完成', 84],
-        ['正在输入地址并处理联想', 88],
-        ['地址联想已选择', 90],
-        ['正在填写 PayPal 账户密码', 91],
-        ['PayPal 账户密码填写完成', 92],
-        ['正在提交创建账户协议', 93],
-        ['创建账户协议已提交', 94],
-        ['正在检查是否触发短信验证', 95],
-        ['已进入短信验证页面', 96],
-        ['等待短信验证码', 97],
-        ['验证码提取成功', 98],
-        ['短信验证码已输入', 98],
-        ['当前未触发短信验证，继续后续流程', 97],
-        ['正在等待最终确认按钮', 98],
-        ['发现最终确认按钮，正在点击', 99],
-        ['最终确认已提交，等待支付结果落地', 99],
-        ['最终校验：支付成功!', 100]
+        ['[1] 准备自助充值', 8],
+        ['Session 登录成功', 12],
+        ['正在通过 API 创建 Checkout', 20],
+        ['Checkout 页面已打开', 35],
+        ['CHECKOUT_DEBUG_SUCCESS', 100],
+        ['CHECKOUT_URL:', 95],
+        ['已打开 ChatGPT 定价页', 15],
+        ['[Stripe] Step 1', 45],
+        ['[Stripe] Step 6', 60],
+        ['[Stripe] Step 9', 80],
+        ['[Stripe] Step 10', 90],
+        ['正在使用 Stripe 信用卡卡池支付流程', 40],
+        ['最终校验：支付成功!', 100],
+        ['PAYMENT_SUCCESS', 100]
     ];
 
     let progress = 0;
@@ -1383,7 +1167,7 @@ function runCheckoutScript(jobKey, scriptPath, env, attempt = 1, onProgress = nu
             }
             idleTimer = setTimeout(() => {
                 timedOut = true;
-                output += '\n[TIMEOUT] 超过 1 分钟没有打印，任务终止。\n';
+                output += '\n[TIMEOUT] 超过 3 分钟没有打印，任务终止。\n';
                 logTask(jobKey, `attempt=${attempt} 超过 ${PROCESS_IDLE_TIMEOUT_MS / 1000} 秒无输出，终止子进程`, 'warn');
                 child.kill();
             }, PROCESS_IDLE_TIMEOUT_MS);
@@ -1394,7 +1178,7 @@ function runCheckoutScript(jobKey, scriptPath, env, attempt = 1, onProgress = nu
             output += text;
             logTaskChunk(jobKey, attempt, source, text);
             if (onProgress) {
-                onProgress(getCheckoutProgress(output)).catch((error) => console.error('[Progress Update Error]', error));
+                onProgress(getCheckoutProgress(output), output).catch((error) => console.error('[Progress Update Error]', error));
             }
             resetIdleTimer();
         };
@@ -1421,31 +1205,233 @@ function runCheckoutScript(jobKey, scriptPath, env, attempt = 1, onProgress = nu
 }
 
 app.get('/admin', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+    res.status(404).type('text/plain').send('Not Found');
 });
 
 app.get(['/admin-login', '/admin-login/', '/admin-login.html'], (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'admin-login.html'));
+    res.status(404).type('text/plain').send('Not Found');
 });
 
 app.post('/api/admin/login', async (req, res) => {
+    const email = adminAuth.normalizeEmail(req.body?.email);
     const password = String(req.body?.password || '');
+    const clientMeta = adminAuth.getClientMeta(req);
+
+    if (!email || !password) {
+        return res.status(400).json({ success: false, message: '请输入管理员邮箱和密码' });
+    }
+
+    const rate = adminAuth.checkLoginRateLimit(clientMeta.ip);
+    if (!rate.allowed) {
+        return res.status(429).json({
+            success: false,
+            message: `登录尝试过多，请 ${rate.retryAfterSec} 秒后再试`
+        });
+    }
 
     try {
         await ensureStoreReady();
         const authConfig = await store.getAdminAuthConfig();
-        if (!verifyPassword(password, authConfig.passwordHash)) {
-            return res.status(401).json({ success: false, message: '密码错误' });
+        const telegramSettings = await store.getTelegramConfig();
+        const emailOk = email === adminAuth.normalizeEmail(authConfig.email);
+        const passwordOk = verifyPassword(password, authConfig.passwordHash);
+
+        if (!emailOk || !passwordOk) {
+            adminAuth.recordLoginFailure(rate.key, rate.entry);
+            await logAdminSecurityEvent('login_failed', {
+                ...clientMeta,
+                email,
+                detail: '邮箱或密码错误'
+            });
+            fireAdminSecurityNotification('admin_login_failed', {
+                email,
+                ip: clientMeta.ip,
+                fingerprint: clientMeta.fingerprint,
+                userAgent: clientMeta.userAgent,
+                message: '邮箱或密码错误'
+            });
+            return res.status(401).json({ success: false, message: '邮箱或密码错误' });
         }
 
-        const { token, payload } = issueAdminToken(authConfig.passwordVersion);
+        adminAuth.clearLoginAttempts(rate.key);
+
+        const methods = adminAuth.resolveLogin2faMethods(authConfig, telegramSettings);
+        if (!adminAuth.is2faRequired(authConfig, telegramSettings)) {
+            const { token, payload } = issueAdminToken(authConfig.passwordVersion, authConfig.email);
+            await logAdminSecurityEvent('login_success', {
+                ...clientMeta,
+                email: authConfig.email,
+                detail: '密码登录（未启用二次验证）'
+            });
+            fireAdminSecurityNotification('admin_login_success', {
+                email: authConfig.email,
+                ip: clientMeta.ip,
+                fingerprint: clientMeta.fingerprint,
+                userAgent: clientMeta.userAgent,
+                method: 'password_only',
+                message: '后台登录成功（尚未启用 2FA）'
+            });
+            return res.json(await attachAdminPaths({
+                success: true,
+                token,
+                expiresAt: payload.exp,
+                issuedAt: payload.iat,
+                permissions: payload.permissions,
+                email: authConfig.email,
+                requires2fa: false,
+                setupRequired: true
+            }));
+        }
+
+        const challenge = adminAuth.issueLoginChallenge({
+            email: authConfig.email,
+            passwordVersion: authConfig.passwordVersion,
+            ip: clientMeta.ip,
+            fingerprint: clientMeta.fingerprint
+        });
+
         return res.json({
+            success: true,
+            requires2fa: true,
+            challengeToken: challenge.token,
+            methods,
+            defaultMethod: adminAuth.pickDefaultLogin2faMethod(methods, authConfig.login2faMode === 'either' ? '' : authConfig.login2faMode),
+            login2faMode: authConfig.login2faMode,
+            email: authConfig.email,
+            expiresAt: challenge.payload.exp
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/login/send-tg-code', async (req, res) => {
+    const challengeToken = String(req.body?.challengeToken || '').trim();
+    const challenge = adminAuth.verifyLoginChallenge(challengeToken);
+    if (!challenge) {
+        return res.status(401).json({ success: false, message: '登录会话已过期，请重新登录' });
+    }
+
+    try {
+        await ensureStoreReady();
+        const code = adminAuth.generateTelegramLoginCode();
+        adminAuth.storeTelegramLoginCode(challenge.cid, code);
+        const clientMeta = adminAuth.getClientMeta(req);
+        const sendResult = await sendTelegramLoginCode(store, code, {
+            email: challenge.email,
+            ip: clientMeta.ip || challenge.ip
+        });
+        if (!sendResult.ok) {
+            return res.status(400).json({ success: false, message: sendResult.error || 'Telegram 验证码发送失败' });
+        }
+        return res.json({ success: true, message: '验证码已发送到管理员 Telegram' });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/login/verify-2fa', async (req, res) => {
+    const challengeToken = String(req.body?.challengeToken || '').trim();
+    const method = String(req.body?.method || '').trim().toLowerCase();
+    const code = String(req.body?.code || '').trim();
+    const clientMeta = adminAuth.getClientMeta(req);
+    const challenge = adminAuth.verifyLoginChallenge(challengeToken);
+
+    if (!challenge) {
+        return res.status(401).json({ success: false, message: '登录会话已过期，请重新登录' });
+    }
+
+    if (!code) {
+        return res.status(400).json({ success: false, message: '请输入验证码' });
+    }
+
+    const rate = adminAuth.checkLoginRateLimit(`${clientMeta.ip}:2fa`);
+    if (!rate.allowed) {
+        return res.status(429).json({
+            success: false,
+            message: `验证尝试过多，请 ${rate.retryAfterSec} 秒后再试`
+        });
+    }
+
+    try {
+        await ensureStoreReady();
+        const authConfig = await store.getAdminAuthConfig();
+        const telegramSettings = await store.getTelegramConfig();
+        const methods = adminAuth.resolveLogin2faMethods(authConfig, telegramSettings);
+        if (!methods.includes(method)) {
+            return res.status(400).json({ success: false, message: '不支持的验证方式' });
+        }
+
+        let verified = false;
+        if (method === 'totp') {
+            verified = adminAuth.verifyTotpCode(authConfig.totpSecret, code);
+        } else if (method === 'telegram') {
+            const tgResult = adminAuth.verifyTelegramLoginCode(challenge.cid, code);
+            verified = tgResult.ok;
+            if (!verified) {
+                adminAuth.recordLoginFailure(rate.key, rate.entry);
+                await logAdminSecurityEvent('2fa_failed', {
+                    ...clientMeta,
+                    email: challenge.email,
+                    detail: `Telegram 验证码错误 (${tgResult.reason || 'invalid'})`
+                });
+                fireAdminSecurityNotification('admin_2fa_failed', {
+                    email: challenge.email,
+                    ip: clientMeta.ip,
+                    fingerprint: clientMeta.fingerprint,
+                    userAgent: clientMeta.userAgent,
+                    method: 'telegram',
+                    message: 'Telegram 验证码错误'
+                });
+                const message = tgResult.reason === 'expired'
+                    ? '验证码已过期，请重新获取'
+                    : 'Telegram 验证码错误';
+                return res.status(401).json({ success: false, message });
+            }
+        }
+
+        if (!verified) {
+            adminAuth.recordLoginFailure(rate.key, rate.entry);
+            await logAdminSecurityEvent('2fa_failed', {
+                ...clientMeta,
+                email: challenge.email,
+                detail: `${method} 验证码错误`
+            });
+            fireAdminSecurityNotification('admin_2fa_failed', {
+                email: challenge.email,
+                ip: clientMeta.ip,
+                fingerprint: clientMeta.fingerprint,
+                userAgent: clientMeta.userAgent,
+                method,
+                message: '二次验证失败'
+            });
+            return res.status(401).json({ success: false, message: '验证码错误' });
+        }
+
+        adminAuth.clearLoginAttempts(rate.key);
+        const { token, payload } = issueAdminToken(authConfig.passwordVersion, authConfig.email);
+        await logAdminSecurityEvent('login_success', {
+            ...clientMeta,
+            email: authConfig.email,
+            detail: `二次验证成功 (${method})`
+        });
+        fireAdminSecurityNotification('admin_login_success', {
+            email: authConfig.email,
+            ip: clientMeta.ip,
+            fingerprint: clientMeta.fingerprint,
+            userAgent: clientMeta.userAgent,
+            method,
+            message: '后台登录成功'
+        });
+
+        return res.json(await attachAdminPaths({
             success: true,
             token,
             expiresAt: payload.exp,
             issuedAt: payload.iat,
-            permissions: payload.permissions
-        });
+            permissions: payload.permissions,
+            email: authConfig.email
+        }));
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -1477,178 +1463,158 @@ app.post('/api/admin/runtime-logs/clear', authenticateAdmin, (req, res) => {
     }
 });
 
-/** 与 runtime-logs 相同：必须挂在 app.use('/api/admin', authenticateAdmin) 之前并单独鉴权，否则部分环境下该 POST 会 404 */
-app.post('/api/admin/products/generate-stop', authenticateAdmin, async (req, res) => {
-    try {
-        const jobKey = String(req.body?.jobKey || '').trim();
-        if (jobKey) {
-            const ok = requestAdminGenerationStop(jobKey);
-            return res.json({
-                success: true,
-                stopped: ok ? 1 : 0,
-                message: ok
-                    ? '已发送停止指令：本批次不再开始新的成品条次（当前条次会跑完当前步骤后退出）'
-                    : '未找到该 Job 的运行中批次，可能已结束或未在本进程启动'
-            });
-        }
 
-        const keys = [...adminGenerationStopHandlers.keys()];
-        let stopped = 0;
-        for (const key of keys) {
-            if (requestAdminGenerationStop(key)) {
-                stopped += 1;
-            }
-        }
-
-        return res.json({
-            success: true,
-            stopped,
-            message: stopped > 0
-                ? `已向 ${stopped} 个后台批次发送停止指令`
-                : '当前没有在本进程内登记的后台成品批量任务（若任务刚结束请在任务管理中刷新列表）'
-        });
-    } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
-    }
-});
-
-/** 代理批量测试：和 pool-emails 一样必须挂在 app.use 之前。
- *  支持 http(s) / socks5 / socks (走 proxy-agent 自动识别协议)。 */
+/** 代理批量测试：支持临时 URL 或已保存代理 ID；检测后可选写回 proxy_assets。 */
 app.post('/api/admin/proxy/test', authenticateAdmin, async (req, res) => {
     try {
-        const { ProxyAgent } = require('proxy-agent');
-        const proxies = Array.isArray(req.body?.proxies) ? req.body.proxies : [];
-        const cleaned = proxies.map((p) => String(p || '').trim()).filter(Boolean);
-        if (!cleaned.length) {
-            return res.status(400).json({ success: false, message: '未提供代理 URL' });
+        await ensureStoreReady();
+        const ids = Array.isArray(req.body?.ids)
+            ? req.body.ids.map((id) => Number(id)).filter((id) => id > 0)
+            : [];
+        const rawProxies = normalizeProxyLines(req.body?.proxies || []);
+        const persist = req.body?.persist !== false;
+
+        let targets = [];
+        if (ids.length) {
+            const saved = await store.listProxyAssets();
+            const map = new Map(saved.map((item) => [item.id, item]));
+            targets = ids.map((id) => {
+                const row = map.get(id);
+                return row ? { id, proxy_url: row.proxy_url } : null;
+            }).filter(Boolean);
+        } else {
+            targets = rawProxies.map((proxy_url) => ({ id: null, proxy_url }));
         }
-        if (cleaned.length > 50) {
+
+        if (!targets.length) {
+            return res.status(400).json({ success: false, message: '未提供代理 URL 或 ID' });
+        }
+        if (targets.length > 50) {
             return res.status(400).json({ success: false, message: '一次最多测试 50 条代理' });
         }
 
-        const PROBE_URLS = [
-            'https://api.ipify.org/?format=text',
-            'https://ifconfig.me/ip'
-        ];
-
-        const subst = (raw) => {
-            if (!/\{session\}/i.test(raw)) return raw;
-            const sid = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-            return raw.replace(/\{session\}/gi, sid);
-        };
-
-        const testOne = async (raw) => {
-            const proxyUrl = subst(raw);
-            const t0 = Date.now();
-            let agent;
-            try {
-                agent = new ProxyAgent({ getProxyForUrl: () => proxyUrl });
-            } catch (e) {
-                return { ok: false, error: `代理 URL 解析失败: ${e.message}`, latencyMs: Date.now() - t0 };
+        const results = await Promise.all(targets.map(async (target) => {
+            const result = await testProxyUrl(target.proxy_url);
+            if (persist && target.id) {
+                await store.updateProxyAssetCheck(target.id, result);
             }
-            let lastErr = '';
-            for (const probeUrl of PROBE_URLS) {
-                try {
-                    const r = await axios.get(probeUrl, {
-                        httpsAgent: agent,
-                        httpAgent: agent,
-                        proxy: false,
-                        timeout: 12000,
-                        validateStatus: () => true
-                    });
-                    if (r.status === 200) {
-                        const ip = String(r.data || '').trim().split(/\s+/)[0];
-                        return { ok: true, ip, latencyMs: Date.now() - t0, probedVia: probeUrl };
-                    }
-                    lastErr = `HTTP ${r.status} via ${probeUrl}`;
-                } catch (e) {
-                    lastErr = `${e.code || ''} ${e.message}`.trim();
-                }
-            }
-            return { ok: false, error: lastErr || '未知错误', latencyMs: Date.now() - t0 };
-        };
+            return {
+                id: target.id,
+                proxy_url: target.proxy_url,
+                ...result
+            };
+        }));
 
-        const results = await Promise.all(cleaned.map((p) => testOne(p)));
         return res.json({ success: true, results });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
 });
 
-/** 邮箱池：与 runtime-logs 相同，必须挂在 app.use('/api/admin', authenticateAdmin) 之前并单独鉴权，否则部分环境下会 404 */
-app.get('/api/admin/pool-emails', authenticateAdmin, async (req, res) => {
+
+// ─── External Card Pool Webhook (X-API-Key auth) ────────────────────────────
+app.post('/api/external/cards/push', async (req, res) => {
     try {
         await ensureStoreReady();
-        const items = await store.listPoolEmails();
-        res.json({ success: true, items });
+        const apiKey = String(req.headers['x-api-key'] || '').trim();
+        if (!apiKey) {
+            return res.status(401).json({ success: false, error: 'API Key 无效或缺失' });
+        }
+        const expectedKey = await store.getAppConfigValue('external_card_api_key', '');
+        if (!expectedKey || apiKey !== expectedKey) {
+            return res.status(401).json({ success: false, error: 'API Key 无效或缺失' });
+        }
+
+        const cards = Array.isArray(req.body?.cards) ? req.body.cards : [];
+        if (cards.length === 0) {
+            return res.status(400).json({ success: false, error: '缺少 cards 数组或为空' });
+        }
+        if (cards.length > 500) {
+            return res.status(400).json({ success: false, error: '单次导入上限 500 条' });
+        }
+
+        const result = await store.importCards(cards);
+        res.json({ success: true, ...result });
     } catch (error) {
+        if (error.message === '单次导入上限 500 条') {
+            return res.status(400).json({ success: false, error: error.message });
+        }
         res.status(500).json({ success: false, message: error.message });
     }
 });
 
-app.post('/api/admin/pool-emails/import', authenticateAdmin, async (req, res) => {
+/** 公开 API：必须挂在 app.use('/api/admin', authenticateAdmin) 之前，否则部分环境下会 404 */
+app.get('/api/public/admin-paths', async (req, res) => {
     try {
         await ensureStoreReady();
-        const text = String(req.body?.text ?? '');
-        const result = await store.bulkImportPoolEmails(text);
-        const parts = [`已写入或合并 ${result.applied} 条邮箱记录`];
-        if (result.oauthCount) {
-            parts.push(`其中 OAuth2 ${result.oauthCount} 条`);
-        }
-        if (result.skipped) {
-            parts.push(`跳过非法行 ${result.skipped} 行`);
-        }
-        res.json({
+        const paths = await store.getAdminPaths();
+        return res.json({
             success: true,
-            message: parts.join('，'),
-            applied: result.applied,
-            parsed: result.parsed,
-            oauthCount: result.oauthCount,
-            skipped: result.skipped
+            loginPath: paths.loginPath,
+            panelPath: paths.panelPath,
+            loginUrl: buildAdminLoginUrl(paths),
+            panelUrl: buildAdminPanelUrl(paths)
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 });
 
-app.delete('/api/admin/pool-emails/:id', authenticateAdmin, async (req, res) => {
+app.post('/api/public/subscription/check', async (req, res) => {
     try {
-        await ensureStoreReady();
-        await store.deletePoolEmail(Number(req.params.id));
-        res.json({ success: true, message: '邮箱记录已删除' });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-});
+        const rawSession = String(req.body?.session || req.body?.token || '').trim().replace(/^\uFEFF/, '');
+        if (!rawSession) {
+            return res.status(400).json({ success: false, message: '请粘贴 Session JSON 或 AccessToken' });
+        }
 
-app.get('/api/admin/pool-emails/:id/messages', authenticateAdmin, async (req, res) => {
-    try {
-        await ensureStoreReady();
-        const row = await store.getPoolEmailCredentials(Number(req.params.id));
-        if (!row) {
-            return res.status(400).json({ success: false, message: '邮箱不存在' });
+        const token = normalizeSessionToken(rawSession);
+        const tokenCheck = validateSessionTokenForQuery(token);
+        if (!tokenCheck.valid) {
+            return res.status(400).json({ success: false, message: tokenCheck.message });
         }
-        if (!row.refreshToken && !row.password) {
-            return res.status(400).json({ success: false, message: '邮箱未配置可用凭证 (OAuth2 / 密码)' });
-        }
-        const host = await store.getAppConfigValue('pool_email_imap_host', 'outlook.office365.com');
-        const includeJunk = String(await store.getAppConfigValue('pool_email_include_junk', '1')) === '1';
-        const messages = await listRecentEmailsForAdmin({
-            email: row.email,
-            password: row.password,
-            clientId: row.clientId,
-            refreshToken: row.refreshToken,
-            host: String(host || 'outlook.office365.com').trim() || 'outlook.office365.com',
-            includeJunk,
-            limit: Math.min(80, Math.max(5, Number(req.query.limit) || 40))
+
+        const timezoneOffsetMin = Number(req.body?.timezone_offset_min);
+        const result = await querySubscriptionBySession(token, {
+            timezoneOffsetMin: Number.isFinite(timezoneOffsetMin)
+                ? timezoneOffsetMin
+                : -new Date().getTimezoneOffset(),
+            email: extractEmailFromSession(rawSession) || tokenCheck.email || ''
         });
-        res.json({ success: true, messages });
+
+        if (!result.ok) {
+            return res.status(result.statusCode || 502).json({
+                success: false,
+                message: result.error || '查询订阅失败'
+            });
+        }
+
+        return res.json({ success: true, data: result.data });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({ success: false, message: error.message });
     }
 });
 
 app.use('/api/admin', authenticateAdmin);
+
+app.get('/subscription', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'subscription.html'));
+});
+
+app.get('/api/public/payment-region', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const regionCode = await store.getPaymentRegion();
+        const config = REGION_CONFIG[regionCode] || REGION_CONFIG.PH;
+        return res.json({
+            success: true,
+            region: regionCode,
+            currency: config.currency,
+            label: config.label
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
 
 app.get('/api/public/runtime', async (req, res) => {
     try {
@@ -1673,7 +1639,7 @@ app.get('/api/admin/session', (req, res) => {
     let payload = req.admin;
 
     if (shouldRefresh) {
-        const refreshed = issueAdminToken(req.admin.pv);
+        const refreshed = issueAdminToken(req.admin.pv, req.admin.email);
         refreshedToken = refreshed.token;
         payload = refreshed.payload;
     }
@@ -1684,25 +1650,542 @@ app.get('/api/admin/session', (req, res) => {
         token: refreshedToken,
         expiresAt: payload.exp,
         issuedAt: payload.iat,
-        permissions: payload.permissions
+        permissions: payload.permissions,
+        email: payload.email || ''
     });
+});
+
+app.get('/api/admin/security/status', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const authConfig = await store.getAdminAuthConfig();
+        const telegramSettings = await store.getTelegramConfig();
+        const paths = await store.getAdminPaths();
+        res.json({
+            success: true,
+            email: authConfig.email,
+            totpEnabled: authConfig.totpEnabled,
+            login2faMode: authConfig.login2faMode,
+            availableMethods: adminAuth.getAvailable2faMethods(authConfig, telegramSettings),
+            methods: adminAuth.resolveLogin2faMethods(authConfig, telegramSettings),
+            notifyAdminLogin: authConfig.notifyAdminLogin,
+            loginPath: paths.loginPath,
+            panelPath: paths.panelPath,
+            loginUrl: buildAdminLoginUrl(paths),
+            panelUrl: buildAdminPanelUrl(paths)
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.get('/api/admin/login-logs', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const limit = Number(req.query.limit) || 100;
+        const offset = Number(req.query.offset) || 0;
+        res.json({ success: true, ...(await store.listAdminLoginLogs(limit, offset)) });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.get('/api/admin/secondary/session', (req, res) => {
+    const token = String(req.headers['x-admin-secondary-token'] || '').trim();
+    const payload = adminAuth.verifySecondaryToken(token);
+    if (!payload) {
+        return res.json({ success: true, verified: false });
+    }
+    return res.json({
+        success: true,
+        verified: true,
+        expiresAt: payload.exp
+    });
+});
+
+app.post('/api/admin/verify-secondary', async (req, res) => {
+    const password = String(req.body?.password || '');
+    const clientMeta = adminAuth.getClientMeta(req);
+    if (!password) {
+        return res.status(400).json({ success: false, message: '请输入二级密码' });
+    }
+
+    try {
+        await ensureStoreReady();
+        const authConfig = await store.getAdminAuthConfig();
+        if (!verifyPassword(password, authConfig.secondaryPasswordHash)) {
+            await logAdminSecurityEvent('secondary_failed', {
+                ...clientMeta,
+                email: req.admin?.email || authConfig.email,
+                detail: '二级密码错误'
+            });
+            return res.status(401).json({ success: false, message: '二级密码错误' });
+        }
+
+        const { token, payload } = adminAuth.issueSecondaryToken(
+            authConfig.secondaryPasswordVersion,
+            clientMeta.ip
+        );
+        await logAdminSecurityEvent('secondary_success', {
+            ...clientMeta,
+            email: req.admin?.email || authConfig.email,
+            detail: '敏感模块解锁'
+        });
+        fireAdminSecurityNotification('admin_secondary_success', {
+            email: req.admin?.email || authConfig.email,
+            ip: clientMeta.ip,
+            fingerprint: clientMeta.fingerprint,
+            userAgent: clientMeta.userAgent,
+            message: '银行卡池/CDK/Session 模块已解锁'
+        });
+        return res.json({
+            success: true,
+            secondaryToken: token,
+            expiresAt: payload.exp
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/security/2fa-mode', async (req, res) => {
+    const mode = String(req.body?.mode || '').trim().toLowerCase();
+    try {
+        await ensureStoreReady();
+        const saved = await store.saveAdmin2faLoginMode(mode);
+        res.json({ success: true, login2faMode: saved, message: '登录验证方式已保存' });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/security/paths', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const saved = await store.saveAdminPaths({
+            loginPath: req.body?.loginPath,
+            panelPath: req.body?.panelPath
+        });
+        invalidateAdminPathsCache();
+        cachedAdminPaths = saved;
+        return res.json({
+            success: true,
+            loginPath: saved.loginPath,
+            panelPath: saved.panelPath,
+            loginUrl: buildAdminLoginUrl(saved),
+            panelUrl: buildAdminPanelUrl(saved),
+            message: '入口路径已更新，请使用新地址访问并收藏'
+        });
+    } catch (error) {
+        return res.status(400).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/2fa/setup', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const authConfig = await store.getAdminAuthConfig();
+        let secret = String(authConfig.totpSecret || '').trim();
+        if (!secret || authConfig.totpEnabled) {
+            secret = adminAuth.generateTotpSecret();
+            await store.saveAdminTotpConfig({ secret, enabled: false });
+        }
+        const otpauthUrl = adminAuth.getTotpUri(authConfig.email, secret);
+        res.json({
+            success: true,
+            secret,
+            otpauthUrl,
+            qrCodeUrl: `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(otpauthUrl)}`,
+            message: '请使用 Google Authenticator 扫码后输入验证码确认启用'
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/2fa/confirm', async (req, res) => {
+    const code = String(req.body?.code || '').trim();
+    if (!code) {
+        return res.status(400).json({ success: false, message: '请输入 Authenticator 验证码' });
+    }
+    try {
+        await ensureStoreReady();
+        const authConfig = await store.getAdminAuthConfig();
+        if (!authConfig.totpSecret) {
+            return res.status(400).json({ success: false, message: '请先发起 2FA 绑定' });
+        }
+        if (!adminAuth.verifyTotpCode(authConfig.totpSecret, code)) {
+            return res.status(400).json({ success: false, message: '验证码错误，请重试' });
+        }
+        await store.saveAdminTotpConfig({ secret: authConfig.totpSecret, enabled: true });
+        res.json({ success: true, message: 'Google Authenticator 已启用' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/2fa/disable', async (req, res) => {
+    const currentPassword = String(req.body?.currentPassword || '');
+    const code = String(req.body?.code || '').trim();
+    try {
+        await ensureStoreReady();
+        const authConfig = await store.getAdminAuthConfig();
+        if (!verifyPassword(currentPassword, authConfig.passwordHash)) {
+            return res.status(400).json({ success: false, message: '登录密码错误' });
+        }
+        if (authConfig.totpEnabled && !adminAuth.verifyTotpCode(authConfig.totpSecret, code)) {
+            return res.status(400).json({ success: false, message: 'Authenticator 验证码错误' });
+        }
+        await store.saveAdminTotpConfig({ secret: '', enabled: false });
+        res.json({ success: true, message: 'Google Authenticator 已关闭' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/change-secondary-password', async (req, res) => {
+    const currentPassword = String(req.body?.currentPassword || '');
+    const newPassword = String(req.body?.newPassword || '').trim();
+    if (!currentPassword) {
+        return res.status(400).json({ success: false, message: '请输入当前二级密码' });
+    }
+    if (newPassword.length < 6) {
+        return res.status(400).json({ success: false, message: '新二级密码至少 6 位' });
+    }
+    try {
+        await ensureStoreReady();
+        const authConfig = await store.getAdminAuthConfig();
+        if (!verifyPassword(currentPassword, authConfig.secondaryPasswordHash)) {
+            return res.status(400).json({ success: false, message: '当前二级密码错误' });
+        }
+        await store.updateAdminSecondaryPassword(newPassword);
+        res.json({ success: true, message: '二级密码已更新，敏感模块需重新验证' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.get('/api/admin/task-logs', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+        const tasks = await store.listAdminTaskLogs(limit);
+        res.json({ success: true, tasks });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
 });
 
 app.get('/api/admin/data', async (req, res) => {
     try {
         await ensureStoreReady();
-        await syncAccessDeactivatedProductStatuses();
         const data = await store.getAdminData();
         const system = await getSystemMetrics();
         data.runtime = {
             active_activation_jobs: getTotalActiveJobs(),
-            active_background_jobs: activeBackgroundJobs.size,
             active_foreground_jobs: activeForegroundJobs.size,
-            system
+            system,
+            browser_pool: browserPool.getStats()
         };
         res.json(data);
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.get('/api/admin/browser-pool', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const modeEnabled = await store.getBrowserPoolEnabled();
+        const system = await getSystemMetrics();
+        const memText = String(system?.memory?.text || '');
+        const memMatch = memText.match(/([\d.]+)G\/([\d.]+)G/);
+        const hostMemory = memMatch
+            ? { usedGb: Number(memMatch[1]), totalGb: Number(memMatch[2]) }
+            : null;
+        const pool = await browserPool.getDetailedStats(hostMemory);
+        res.json({
+            success: true,
+            pool,
+            mode: {
+                enabled: modeEnabled,
+                runtime: browserPool.getRuntimeEnabled(),
+                workerMode: modeEnabled ? 'pool' : 'standalone'
+            },
+            system,
+            foreground: {
+                activeJobs: getTotalActiveJobs(),
+                activeForegroundJobs: activeForegroundJobs.size
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/browser-pool/mode', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const enabled = req.body?.enabled === true
+            || req.body?.enabled === 1
+            || String(req.body?.enabled || '').trim() === '1';
+        await store.setBrowserPoolEnabled(enabled);
+        const info = await syncBrowserPoolModeFromStore();
+        res.json({
+            success: true,
+            message: enabled
+                ? `已切换为浏览器池模式（${info.size || 0} 个槽位）`
+                : '已切换为独立浏览器模式（每任务冷启动 Chromium）',
+            mode: {
+                enabled,
+                runtime: browserPool.getRuntimeEnabled(),
+                workerMode: enabled ? 'pool' : 'standalone'
+            },
+            pool: browserPool.getStats()
+        });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/browser-pool/reload', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const requestedSize = req.body?.size;
+        if (requestedSize != null) {
+            browserPool.setRuntimePoolSize(requestedSize);
+        }
+        const result = await browserPool.reloadBrowserPool(requestedSize);
+        res.json({
+            success: true,
+            message: `浏览器池已重载，当前 ${result.size} 个槽位`,
+            pool: browserPool.getStats()
+        });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+});
+
+app.get('/api/admin/sessions', requireSecondaryAuth, async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+        res.json(await store.listSessions({ limit }));
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.get('/api/admin/sessions/:jobKey', requireSecondaryAuth, async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const session = await store.getSessionByJobKey(req.params.jobKey);
+        if (!session) {
+            return res.status(404).json({ success: false, message: 'Session 记录不存在' });
+        }
+        res.json({ success: true, session });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/subscription/cancel-auto-renew', async (req, res) => {
+    try {
+        const rawSession = String(req.body?.session || req.body?.token || '').trim().replace(/^\uFEFF/, '');
+        if (!rawSession) {
+            return res.status(400).json({ success: false, message: '请粘贴 Session JSON 或 AccessToken' });
+        }
+
+        const token = normalizeSessionToken(rawSession);
+        const tokenCheck = validateSessionTokenForQuery(token);
+        if (!tokenCheck.valid) {
+            return res.status(400).json({ success: false, message: tokenCheck.message });
+        }
+
+        const timezoneOffsetMin = Number(req.body?.timezone_offset_min);
+        const result = await cancelAutoRenew(token, {
+            timezoneOffsetMin: Number.isFinite(timezoneOffsetMin)
+                ? timezoneOffsetMin
+                : -new Date().getTimezoneOffset(),
+            email: extractEmailFromSession(rawSession) || tokenCheck.email || ''
+        });
+
+        if (!result.ok) {
+            return res.status(result.statusCode || 502).json({
+                success: false,
+                message: result.error || '取消自动续费失败'
+            });
+        }
+
+        return res.json({ success: true, data: result.data });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/subscription/enable-auto-renew', async (req, res) => {
+    try {
+        const rawSession = String(req.body?.session || req.body?.token || '').trim().replace(/^\uFEFF/, '');
+        if (!rawSession) {
+            return res.status(400).json({ success: false, message: '请粘贴 Session JSON 或 AccessToken' });
+        }
+
+        const token = normalizeSessionToken(rawSession);
+        const tokenCheck = validateSessionTokenForQuery(token);
+        if (!tokenCheck.valid) {
+            return res.status(400).json({ success: false, message: tokenCheck.message });
+        }
+
+        const timezoneOffsetMin = Number(req.body?.timezone_offset_min);
+        const result = await resumeAutoRenew(token, {
+            timezoneOffsetMin: Number.isFinite(timezoneOffsetMin)
+                ? timezoneOffsetMin
+                : -new Date().getTimezoneOffset(),
+            email: extractEmailFromSession(rawSession) || tokenCheck.email || ''
+        });
+
+        if (!result.ok) {
+            return res.status(result.statusCode || 502).json({
+                success: false,
+                message: result.error || '开启自动续费失败'
+            });
+        }
+
+        return res.json({ success: true, data: result.data });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/subscription/batch-renewal-status', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const jobKeys = Array.isArray(req.body?.job_keys)
+            ? req.body.job_keys.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 50)
+            : [];
+        if (!jobKeys.length) {
+            return res.json({ success: true, data: {} });
+        }
+
+        const timezoneOffsetMin = Number(req.body?.timezone_offset_min);
+        const offset = Number.isFinite(timezoneOffsetMin)
+            ? timezoneOffsetMin
+            : -new Date().getTimezoneOffset();
+        const concurrency = 3;
+        const results = {};
+        let cursor = 0;
+
+        async function queryJobRenewalStatus(jobKey) {
+            const session = await store.getSessionByJobKey(jobKey);
+            if (!session?.session_payload) {
+                results[jobKey] = { ok: false, error: '无完整 Session' };
+                return;
+            }
+
+            const rawSession = String(session.session_payload || '').trim();
+            const token = normalizeSessionToken(rawSession);
+            const tokenCheck = validateSessionTokenForQuery(token);
+            if (!tokenCheck.valid) {
+                results[jobKey] = { ok: false, error: tokenCheck.message };
+                return;
+            }
+
+            const queryResult = await querySubscriptionBySession(token, {
+                timezoneOffsetMin: offset,
+                email: extractEmailFromSession(rawSession) || tokenCheck.email || ''
+            });
+            if (!queryResult.ok) {
+                results[jobKey] = { ok: false, error: queryResult.error || '查询失败' };
+                return;
+            }
+
+            const data = queryResult.data || {};
+            results[jobKey] = {
+                ok: true,
+                email: data.email || '',
+                autoRenew: data.autoRenew || '—',
+                autoRenewRaw: data.autoRenewRaw,
+                hasActiveSubscription: Boolean(data.hasActiveSubscription),
+                subscriptionChannel: data.subscriptionChannel || ''
+            };
+        }
+
+        async function worker() {
+            while (cursor < jobKeys.length) {
+                const index = cursor;
+                cursor += 1;
+                await queryJobRenewalStatus(jobKeys[index]);
+            }
+        }
+
+        await Promise.all(Array.from({ length: Math.min(concurrency, jobKeys.length) }, () => worker()));
+        return res.json({ success: true, data: results });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.get('/api/admin/screenshots', async (req, res) => {
+    try {
+        const rel = String(req.query.path || '').replace(/\\/g, '/').replace(/^\/+/, '');
+        if (!rel || rel.includes('..') || !rel.endsWith('.png')) {
+            return res.status(400).json({ success: false, message: '无效的截图路径' });
+        }
+        const root = path.join(__dirname, 'debug_screenshots');
+        let fullPath = path.join(root, rel);
+        if (!fullPath.startsWith(root) || !fs.existsSync(fullPath)) {
+            if (rel.startsWith('激活/')) {
+                const altPath = path.join(root, 'activation', rel.slice('激活/'.length));
+                if (altPath.startsWith(root) && fs.existsSync(altPath)) {
+                    fullPath = altPath;
+                }
+            }
+        }
+        if (!fullPath.startsWith(root) || !fs.existsSync(fullPath)) {
+            return res.status(404).json({ success: false, message: '截图不存在' });
+        }
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        return res.sendFile(fullPath);
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.get('/api/admin/video', async (req, res) => {
+    try {
+        const rel = String(req.query.path || '').replace(/\\/g, '/').replace(/^\/+/, '');
+        if (!rel || rel.includes('..') || !rel.endsWith('.webm')) {
+            return res.status(400).json({ success: false, message: '无效的录像路径' });
+        }
+        const root = path.join(__dirname, 'debug_screenshots');
+        const fullPath = path.join(root, rel);
+        if (!fullPath.startsWith(root) || !fs.existsSync(fullPath)) {
+            return res.status(404).json({ success: false, message: '录像不存在' });
+        }
+        res.setHeader('Content-Type', 'video/webm');
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        return res.sendFile(fullPath);
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.get('/api/admin/screenshots/:subdir/:filename', async (req, res) => {
+    try {
+        const subdir = path.basename(String(req.params.subdir || ''));
+        const filename = path.basename(String(req.params.filename || ''));
+        if (!subdir || !filename || !filename.endsWith('.png')) {
+            return res.status(400).json({ success: false, message: '无效的截图路径' });
+        }
+        const fullPath = path.join(__dirname, 'debug_screenshots', subdir, filename);
+        const root = path.join(__dirname, 'debug_screenshots');
+        if (!fullPath.startsWith(root) || !fs.existsSync(fullPath)) {
+            return res.status(404).json({ success: false, message: '截图不存在' });
+        }
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        return res.sendFile(fullPath);
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
     }
 });
 
@@ -1713,13 +2196,195 @@ app.delete('/api/admin/task-logs/:jobKey', async (req, res) => {
         if (!jobKey) {
             return res.status(400).json({ success: false, message: '缺少任务标识' });
         }
-        const { deleted } = await store.deleteTaskLogByJobKey(jobKey);
+        const { deleted, mediaDeleted } = await store.deleteTaskLogByJobKey(jobKey);
         if (!deleted) {
             return res.status(404).json({ success: false, message: '未找到该任务记录' });
         }
-        return res.json({ success: true, message: '任务记录已删除' });
+        return res.json({
+            success: true,
+            message: mediaDeleted > 0
+                ? `任务记录已删除，并清理 ${mediaDeleted} 个截图/录像文件`
+                : '任务记录已删除'
+        });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+function fireTelegramNotification(event, payload) {
+    notifyTelegramEvent(store, event, payload).catch((error) => {
+        console.error(`[Telegram] ${event} 通知失败:`, error.message);
+    });
+}
+
+function notifyTaskOutcome({ event, email, cdk, jobKey, message }) {
+    fireTelegramNotification(event, { email, cdk, jobKey, message });
+}
+
+app.post('/api/admin/telegram', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const body = req.body || {};
+        await store.saveTelegramConfig({
+            bot_token: body.bot_token,
+            admin_chat_id: body.admin_chat_id,
+            group_chat_id: body.group_chat_id,
+            notify_admin: Boolean(body.notify_admin),
+            notify_group: Boolean(body.notify_group),
+            on_success: Boolean(body.on_success),
+            on_failure: Boolean(body.on_failure),
+            on_card_pool_empty: Boolean(body.on_card_pool_empty)
+        });
+        res.json({ success: true, message: 'Telegram 通知配置已保存' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/telegram/test', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const result = await sendTelegramTest(store, req.body || {});
+        if (!result.success) {
+            return res.status(400).json({ success: false, message: result.message });
+        }
+        res.json({ success: true, message: result.message });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/hcaptcha', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const body = req.body || {};
+        await store.saveHcaptchaConfig({
+            enabled: Boolean(body.enabled),
+            vlm_api_key: body.vlm_api_key,
+            vlm_base_url: body.vlm_base_url,
+            vlm_model: body.vlm_model,
+            vlm_timeout: body.vlm_timeout,
+            solver_timeout: body.solver_timeout,
+            no_vlm: Boolean(body.no_vlm),
+            cdp_port: body.cdp_port,
+            captcha_platform_api_key: body.captcha_platform_api_key,
+            captcha_platform_api_url: body.captcha_platform_api_url,
+            captcha_platform_timeout: body.captcha_platform_timeout
+        });
+        res.json({ success: true, message: 'hCaptcha 求解器配置已保存' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/hcaptcha/test', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const cfg = await store.getHcaptchaConfig();
+        const { env } = buildHcaptchaEnvFromConfig(cfg);
+        const prevEnv = {};
+        for (const [key, value] of Object.entries(env)) {
+            prevEnv[key] = process.env[key];
+            process.env[key] = value;
+        }
+        try {
+            const status = await checkHcaptchaSolverHealth(cfg);
+            if (!status.ready) {
+                return res.status(400).json({ success: false, message: status.message, status });
+            }
+            res.json({ success: true, message: status.message, status });
+        } finally {
+            for (const [key, value] of Object.entries(prevEnv)) {
+                if (value === undefined) {
+                    delete process.env[key];
+                } else {
+                    process.env[key] = value;
+                }
+            }
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/hcaptcha/test-vlm', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const body = req.body || {};
+        const cfg = await store.getHcaptchaConfig();
+        const merged = {
+            ...cfg,
+            vlm_api_key: String(body.vlm_api_key || '').trim() || cfg.vlm_api_key,
+            vlm_base_url: String(body.vlm_base_url || '').trim() || cfg.vlm_base_url,
+            vlm_model: String(body.vlm_model || '').trim() || cfg.vlm_model,
+            vlm_timeout: body.vlm_timeout ?? cfg.vlm_timeout
+        };
+        const result = await testVlmConnectivity(merged);
+        if (!result.ok) {
+            return res.status(400).json({ success: false, ...result });
+        }
+        res.json({ success: true, ...result });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/hcaptcha/test-captcha-platform', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const body = req.body || {};
+        const cfg = await store.getHcaptchaConfig();
+        const merged = {
+            captcha_platform_api_key: String(body.captcha_platform_api_key || '').trim() || cfg.captcha_platform_api_key,
+            captcha_platform_api_url: String(body.captcha_platform_api_url || '').trim() || cfg.captcha_platform_api_url,
+            captcha_platform_timeout: body.captcha_platform_timeout ?? cfg.captcha_platform_timeout
+        };
+        const resolved = resolveCaptchaPlatformCredentials(
+            merged.captcha_platform_api_key,
+            merged.captcha_platform_api_url
+        );
+        merged.captcha_platform_api_url = resolved.apiUrl;
+        if (resolved.apiKey) {
+            await store.saveHcaptchaConfig({
+                ...cfg,
+                captcha_platform_api_key: resolved.apiKey,
+                captcha_platform_api_url: resolved.apiUrl,
+                captcha_platform_timeout: merged.captcha_platform_timeout
+            });
+        }
+        const result = await testCaptchaPlatformConnectivity({
+            apiKey: merged.captcha_platform_api_key,
+            apiUrl: merged.captcha_platform_api_url,
+            timeoutSec: merged.captcha_platform_timeout
+        });
+        if (!result.ok) {
+            return res.status(400).json({ success: false, ...result });
+        }
+        res.json({ success: true, ...result });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.get('/api/admin/hcaptcha/logs', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 15));
+        const listing = listSolverLogFiles(limit);
+        const file = String(req.query.file || '').trim();
+        if (file) {
+            const safeName = path.basename(file);
+            const target = listing.files.find((item) => item.name === safeName);
+            if (!target) {
+                return res.status(404).json({ success: false, message: '日志文件不存在' });
+            }
+            const lines = readSolverLogTail(target.path, 120);
+            return res.json({ success: true, file: safeName, lines, ...listing });
+        }
+        const captchaRuntime = runtimeLog.tail(200).filter((e) => e.source === 'captcha' || e.level === 'captcha');
+        res.json({ success: true, runtime: captchaRuntime.slice(-80), ...listing });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
@@ -1734,6 +2399,407 @@ app.post('/api/admin/config', async (req, res) => {
         }
         await store.saveConfig(nextConfig);
         res.json({ success: true, message: '所有资产配置已保存' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ─── Region Selector API ────────────────────────────────────────────────────
+
+app.get('/api/admin/region', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const regionCode = await store.getPaymentRegion();
+        const config = REGION_CONFIG[regionCode];
+        res.json({
+            success: true,
+            region: regionCode,
+            currency: config.currency,
+            label: config.label,
+            supported: REGION_CONFIG
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.put('/api/admin/region', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const regionCode = String(req.body?.region || '').toUpperCase();
+        if (!isSupportedRegion(regionCode)) {
+            return res.status(400).json({ success: false, error: '不支持的地区代码' });
+        }
+        const result = await store.setPaymentRegion(regionCode);
+        if (!result.success) {
+            return res.status(400).json({ success: false, error: result.error });
+        }
+        const config = REGION_CONFIG[regionCode];
+        res.json({
+            success: true,
+            region: regionCode,
+            currency: config.currency,
+            label: config.label
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ─── Checkout Link Debug API ────────────────────────────────────────────────
+
+app.get('/api/admin/checkout/plans', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const regionCode = await store.getPaymentRegion();
+        const config = REGION_CONFIG[regionCode] || REGION_CONFIG.PH;
+        res.json({
+            success: true,
+            plans: store.PLAN_NAME_MAP,
+            resolved: {
+                plus: store.resolvePlanName('plus'),
+                pro_5x: store.resolvePlanName('pro_5x'),
+                pro_20x: store.resolvePlanName('pro_20x')
+            },
+            region: regionCode,
+            currency: config.currency,
+            label: config.label
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/checkout/generate', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const body = req.body || {};
+        const rawSession = String(body.session || '').trim();
+        if (!rawSession) {
+            return res.status(400).json({ success: false, error: '请提供 Session JSON' });
+        }
+
+        const sessionJson = parseSessionJson(rawSession);
+        const token = normalizeSessionToken(rawSession);
+        if (!token) {
+            return res.status(400).json({ success: false, error: 'Session 无效，无法提取 accessToken' });
+        }
+        const tokenCheck = validateAccessToken(token);
+        if (!tokenCheck.valid) {
+            return res.status(400).json({ success: false, error: tokenCheck.message });
+        }
+
+        const planType = String(body.plan_type || 'plus').trim();
+        const planNameOverride = body.plan_name ? String(body.plan_name).trim() : '';
+        const resolvedPlanName = planNameOverride || store.resolvePlanName(planType);
+        const regionCode = String(body.country || body.region || await store.getPaymentRegion()).toUpperCase();
+        if (!isSupportedRegion(regionCode)) {
+            return res.status(400).json({ success: false, error: `不支持的地区: ${regionCode}` });
+        }
+
+        const storedSession = buildStoredSessionPayload(rawSession, sessionJson, token);
+        const email = extractEmailFromSession(sessionJson);
+        const task = await store.createTaskLog({
+            tokenPreview: extractSessionPreview(storedSession),
+            sessionPayload: storedSession,
+            cdkCode: '[checkout-debug]',
+            phone: null,
+            cardLast4: null,
+            status: 'running',
+            progress: 5
+        });
+
+        await store.updateTaskLog(task.jobKey, {
+            status: 'running',
+            message: `支付链接调试：${planType} / ${regionCode}`,
+            progress: 5
+        });
+
+        logTask(task.jobKey, `支付链接调试任务已创建 plan=${planType} plan_name=${resolvedPlanName} region=${regionCode} email=${email || '-'}`);
+        spawnCheckoutDebugWorker({
+            task,
+            token,
+            sessionRaw: storedSession,
+            planType,
+            region: regionCode,
+            planNameOverride: resolvedPlanName,
+            email
+        });
+
+        return res.json({
+            success: true,
+            jobKey: task.jobKey,
+            email: email || null,
+            message: '浏览器调试任务已启动，请查看下方运行日志'
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.get('/api/admin/checkout/status/:jobKey', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const jobKey = decodeURIComponent(String(req.params.jobKey || '').trim());
+        if (!jobKey) {
+            return res.status(400).json({ success: false, error: '缺少 jobKey' });
+        }
+        const task = await store.getTaskStatus(jobKey);
+        if (!task) {
+            return res.status(404).json({ success: false, error: '任务不存在' });
+        }
+        const checkoutUrl = extractCheckoutUrlFromOutput(task.raw_output || '');
+        let screenshots = [];
+        if (task.failure_screenshots) {
+            try {
+                const parsed = JSON.parse(task.failure_screenshots);
+                if (Array.isArray(parsed)) screenshots = parsed;
+            } catch (_) { /* ignore */ }
+        }
+        if (!screenshots.length) {
+            screenshots = extractScreenshotsFromOutput(task.raw_output || '');
+        }
+        const videos = extractVideosFromOutput(task.raw_output || '');
+        res.json({
+            success: true,
+            jobKey,
+            status: task.status,
+            message: task.message,
+            progress: Number(task.progress || 0),
+            checkout_url: checkoutUrl || null,
+            screenshots,
+            videos
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ─── Card Pool Management API ───────────────────────────────────────────────
+
+app.get('/api/admin/cards', requireSecondaryAuth, async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const rows = await store.runQuery(
+            `SELECT id, card_number, card_expiry, card_cvc, card_holder,
+                    payment_holder_name, payment_address_line1, payment_address_city,
+                    payment_address_state, payment_address_postal, payment_address_id,
+                    is_active, usage_count, last_used_at, status, cooldown_until
+             FROM card_assets
+             ORDER BY sort_order ASC, id ASC`
+        );
+        const cards = rows.map((row) => ({
+            id: row.id,
+            card_number: row.card_number || '',
+            card_expiry: row.card_expiry || '',
+            card_cvc: row.card_cvc || '',
+            last4: String(row.card_number || '').slice(-4),
+            card_holder: row.card_holder || '',
+            payment_holder_name: row.payment_holder_name || '',
+            payment_address_line1: row.payment_address_line1 || '',
+            payment_address_city: row.payment_address_city || '',
+            payment_address_state: row.payment_address_state || '',
+            payment_address_postal: row.payment_address_postal || '',
+            payment_address_id: row.payment_address_id || null,
+            is_active: Number(row.is_active || 0),
+            usage_count: Number(row.usage_count || 0),
+            last_used_at: row.last_used_at || null,
+            status: row.status || '正常',
+            cooldown_until: row.cooldown_until || null
+        }));
+        res.json({ success: true, cards });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/cards/import', requireSecondaryAuth, async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const cards = Array.isArray(req.body?.cards) ? req.body.cards : [];
+        if (cards.length === 0) {
+            return res.status(400).json({ success: false, error: '缺少 cards 数组或为空' });
+        }
+        if (cards.length > 500) {
+            return res.status(400).json({ success: false, error: '单次导入上限 500 条' });
+        }
+
+        const result = await store.importCards(cards);
+        res.json({ success: true, ...result });
+    } catch (error) {
+        if (error.message === '单次导入上限 500 条') {
+            return res.status(400).json({ success: false, error: error.message });
+        }
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.delete('/api/admin/cards/:id', requireSecondaryAuth, async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const cardId = Number(req.params.id);
+        if (!cardId || !Number.isFinite(cardId)) {
+            return res.status(400).json({ success: false, error: '无效的卡片 ID' });
+        }
+        const result = await store.runExecute(
+            `DELETE FROM card_assets WHERE id = ?`,
+            [cardId]
+        );
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, error: '卡片不存在' });
+        }
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ─── Proxy Pool CRUD API ────────────────────────────────────────────────────
+
+app.get('/api/admin/proxies', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const proxies = await store.listProxyAssets();
+        res.json({ success: true, proxies });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/proxies', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const input = req.body?.proxies ?? req.body?.proxy_url ?? req.body?.proxy ?? '';
+        const result = await store.addProxyAssets(input);
+        if (!result.success) {
+            return res.status(400).json(result);
+        }
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.put('/api/admin/proxies/:id', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const id = req.params.id;
+        if (Object.prototype.hasOwnProperty.call(req.body || {}, 'is_active')) {
+            const result = await store.setProxyAssetActive(id, Boolean(req.body.is_active));
+            if (!result.success) {
+                return res.status(404).json(result);
+            }
+            return res.json(result);
+        }
+        return res.status(400).json({ success: false, error: '缺少可更新字段' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/proxies/:id/test', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const row = await store.getProxyAssetById(req.params.id);
+        if (!row) {
+            return res.status(404).json({ success: false, error: '代理不存在' });
+        }
+        const result = await testProxyUrl(row.proxy_url);
+        await store.updateProxyAssetCheck(row.id, result);
+        res.json({ success: true, id: row.id, ...result });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.delete('/api/admin/proxies/:id', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const result = await store.deleteProxyAsset(req.params.id);
+        if (!result.success) {
+            return res.status(404).json(result);
+        }
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// ─── Tax-Free Address CRUD API ──────────────────────────────────────────────
+
+app.get('/api/admin/addresses', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const region = String(req.query?.region || '').toUpperCase();
+        if (!region) {
+            return res.status(400).json({ success: false, error: '缺少 region 参数' });
+        }
+        const addresses = await taxFreeAddress.listAddresses(region);
+        res.json({ success: true, addresses });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/addresses', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const result = await taxFreeAddress.createAddress(req.body);
+        if (!result.success) {
+            return res.status(400).json(result);
+        }
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/addresses/generate-random-us', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const count = Number(req.body?.count) || 10;
+        const result = await taxFreeAddress.batchGenerateUsAddresses(count);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.delete('/api/admin/addresses/unbound', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const region = String(req.query?.region || 'US').toUpperCase();
+        const result = await taxFreeAddress.clearUnboundAddresses(region);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.put('/api/admin/addresses/:id', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const id = req.params.id;
+        const result = await taxFreeAddress.updateAddress(id, req.body);
+        if (!result.success) {
+            const status = result.error === '地址模板不存在' ? 404 : 400;
+            return res.status(status).json(result);
+        }
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.delete('/api/admin/addresses/:id', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const id = req.params.id;
+        const result = await taxFreeAddress.deleteAddress(id);
+        if (!result.success) {
+            return res.status(404).json(result);
+        }
+        res.json(result);
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
@@ -1764,13 +2830,18 @@ app.post('/api/admin/change-password', async (req, res) => {
         }
 
         await store.updateAdminPassword(newPassword);
+        await logAdminSecurityEvent('password_changed', {
+            ...adminAuth.getClientMeta(req),
+            email: req.admin?.email || authConfig.email,
+            detail: '登录密码已修改'
+        });
         return res.json({ success: true, message: '密码修改成功，请重新登录' });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
 });
 
-app.get('/api/admin/cdks', async (req, res) => {
+app.get('/api/admin/cdks', requireSecondaryAuth, async (req, res) => {
     try {
         await ensureStoreReady();
         res.json(await store.listCdks());
@@ -1779,25 +2850,26 @@ app.get('/api/admin/cdks', async (req, res) => {
     }
 });
 
-app.post('/api/admin/cdks/generate', async (req, res) => {
+app.post('/api/admin/cdks/generate', requireSecondaryAuth, async (req, res) => {
     try {
         await ensureStoreReady();
         const count = req.body?.count;
-        const type = req.body?.type || '自助';
+        const planType = req.body?.plan_type || 'plus';
         const newCdks = createCdks(count);
-        const result = await store.insertCdks(newCdks, { type });
+        const result = await store.insertCdks(newCdks, { type: '自助', plan_type: planType });
         res.json({
             success: true,
-            message: `成功生成 ${newCdks.length} 个 ${type} CDK (数据库写入: ${result.insertedCount})`,
+            message: `成功生成 ${result.insertedCount} 个自助 CDK`,
             cdks: newCdks,
-            insertedCount: result.insertedCount
+            insertedCount: result.insertedCount,
+            plan_type: planType
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 });
 
-app.post('/api/admin/cdks/import', async (req, res) => {
+app.post('/api/admin/cdks/import', requireSecondaryAuth, async (req, res) => {
     const cdks = Array.isArray(req.body?.cdks) ? req.body.cdks : [];
     if (cdks.length === 0) {
         return res.status(400).json({ success: false, message: '请提供要导入的卡密' });
@@ -1805,7 +2877,8 @@ app.post('/api/admin/cdks/import', async (req, res) => {
 
     try {
         await ensureStoreReady();
-        const summary = await store.insertCdks(cdks);
+        const planType = req.body?.plan_type || 'plus';
+        const summary = await store.insertCdks(cdks, { plan_type: planType });
         res.json({
             success: true,
             message: `导入完成，新增 ${summary.insertedCount} 个，重复 ${summary.duplicateCount} 个`,
@@ -1816,7 +2889,7 @@ app.post('/api/admin/cdks/import', async (req, res) => {
     }
 });
 
-app.post('/api/admin/cdks/:cdk/ship', async (req, res) => {
+app.post('/api/admin/cdks/:cdk/ship', requireSecondaryAuth, async (req, res) => {
     try {
         await ensureStoreReady();
         const updated = await store.markCdkShipped(req.params.cdk);
@@ -1829,7 +2902,7 @@ app.post('/api/admin/cdks/:cdk/ship', async (req, res) => {
     }
 });
 
-app.delete('/api/admin/cdks/:cdk', async (req, res) => {
+app.delete('/api/admin/cdks/:cdk', requireSecondaryAuth, async (req, res) => {
     try {
         await ensureStoreReady();
         await store.deleteCdk(req.params.cdk);
@@ -1839,468 +2912,446 @@ app.delete('/api/admin/cdks/:cdk', async (req, res) => {
     }
 });
 
-// 成品号管理
-app.get('/api/admin/products', async (req, res) => {
+// ─── Billing Records API ─────────────────────────────────────────────────────
+
+app.get('/api/admin/billing', async (req, res) => {
     try {
         await ensureStoreReady();
-        await syncAccessDeactivatedProductStatuses();
-        res.json(await store.listProducts());
+        const filters = {};
+        if (req.query.start_date) filters.startDate = req.query.start_date;
+        if (req.query.end_date) filters.endDate = req.query.end_date;
+        if (req.query.card_last4) filters.cardLast4 = req.query.card_last4;
+        if (req.query.plan_type) filters.planType = req.query.plan_type;
+        if (req.query.status) filters.status = req.query.status;
+        const page = Math.max(1, Number(req.query.page) || 1);
+        const result = await store.listBillingRecords(filters, page, 20);
+        res.json({ success: true, ...result });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 });
 
-app.delete('/api/admin/products/:id', async (req, res) => {
+app.get('/api/admin/billing/export', async (req, res) => {
     try {
         await ensureStoreReady();
-        await store.deleteProduct(req.params.id);
-        res.json({ success: true, message: '成品号已删除' });
+        const filters = {};
+        if (req.query.start_date) filters.startDate = req.query.start_date;
+        if (req.query.end_date) filters.endDate = req.query.end_date;
+        if (req.query.card_last4) filters.cardLast4 = req.query.card_last4;
+        if (req.query.plan_type) filters.planType = req.query.plan_type;
+        if (req.query.status) filters.status = req.query.status;
+        const csv = await store.exportBillingRecordsCSV(filters);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename="billing_export.csv"');
+        res.send(csv);
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 });
 
-app.put('/api/admin/products/:id/status', async (req, res) => {
+app.get('/api/admin/billing/summary/:cardLast4', async (req, res) => {
     try {
         await ensureStoreReady();
-        const { status } = req.body;
-        if (!['正常', '封禁'].includes(status)) {
-            return res.status(400).json({ success: false, message: '无效的状态' });
-        }
-        await store.updateProductStatus(req.params.id, status);
-        res.json({ success: true, message: '状态已更新', status });
+        const cardLast4 = String(req.params.cardLast4 || '');
+        const summary = await store.getCardBillingSummary(cardLast4);
+        res.json({ success: true, ...summary });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 });
 
-function sanitizeExportFileName(name) {
-    return String(name || '')
-        .replace(/[\\/:*?"<>|]/g, '_')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-function buildCpaProductFileName(email, planType, accountId) {
-    const safePlanType = String(planType || 'plus').trim() || 'plus';
-    const safeEmail = String(email || '').trim();
-    const hashAccountId = accountId
-        ? crypto.createHash('sha256').update(String(accountId)).digest('hex').slice(0, 8)
-        : '';
-
-    return hashAccountId
-        ? `${safeEmail}-${safePlanType}-${hashAccountId}.json`
-        : `${safeEmail}-${safePlanType}.json`;
-}
-
-function resolveArtifactAbsolutePath(filePathValue) {
-    if (!filePathValue) {
-        return '';
-    }
-    return path.isAbsolute(filePathValue)
-        ? filePathValue
-        : path.join(__dirname, filePathValue);
-}
-
-function resolveNamedArtifactPath(kind, filename) {
-    const normalizedFileName = String(filename || '').trim();
-    if (!normalizedFileName) {
-        return '';
-    }
-
-    const preferredDir = path.join(__dirname, 'product_files', kind);
-    const preferredPath = path.join(preferredDir, normalizedFileName);
-    if (fs.existsSync(preferredPath)) {
-        return preferredPath;
-    }
-
-    const legacyRootPath = path.join(__dirname, 'product_files', normalizedFileName);
-    if (fs.existsSync(legacyRootPath)) {
-        return legacyRootPath;
-    }
-
-    return preferredPath;
-}
-
-function resolveProductArtifactInfo(downloadInfo) {
-    const sub2apiPath = resolveArtifactAbsolutePath(downloadInfo?.filePath || '');
-    const artifactInfo = {
-        email: String(downloadInfo?.email || '').trim(),
-        sub2apiPath: '',
-        sub2apiFileName: null,
-        cpaPath: '',
-        cpaFileName: null
-    };
-
-    if (!sub2apiPath || !fs.existsSync(sub2apiPath)) {
-        return artifactInfo;
-    }
-
-    artifactInfo.sub2apiPath = sub2apiPath;
-    artifactInfo.sub2apiFileName = path.basename(sub2apiPath);
-
-    try {
-        const payload = JSON.parse(fs.readFileSync(sub2apiPath, 'utf8'));
-        const entry = Array.isArray(payload?.accounts) ? payload.accounts[0] : null;
-        const email = artifactInfo.email || String(entry?.name || entry?.extra?.email || '').trim();
-        const planType = String(entry?.plan_type || 'plus').trim() || 'plus';
-        const accountId = String(entry?.credentials?.chatgpt_account_id || '').trim();
-        const cpaFileName = email ? `${email}.json` : '';
-        let cpaPath = cpaFileName ? path.join(__dirname, 'product_files', 'cpa', cpaFileName) : '';
-
-        if (cpaPath && !fs.existsSync(cpaPath) && email) {
-            const legacyCpaFileName = buildCpaProductFileName(email, planType, accountId);
-            cpaPath = path.join(__dirname, 'product_files', legacyCpaFileName);
-        }
-
-        artifactInfo.email = email;
-        if (cpaPath && fs.existsSync(cpaPath)) {
-            artifactInfo.cpaPath = cpaPath;
-            artifactInfo.cpaFileName = path.basename(cpaPath);
-        }
-    } catch (_) { }
-
-    return artifactInfo;
-}
-
-function sendJsonFileDownload(res, fullPath) {
-    const fileName = path.basename(fullPath);
-    res.setHeader('Content-Disposition', `attachment; filename=${fileName}`);
-    res.setHeader('Content-Type', 'application/json');
-    fs.createReadStream(fullPath).pipe(res);
-}
-
-async function buildProductExportFile(products, exportPrefix, options = {}) {
-    const mergedAccounts = [];
-
-    for (const product of products) {
-        if (!product.file_path) {
-            throw new Error(`成品号 ${product.email} 缺少配置文件`);
-        }
-
-        const fullPath = path.isAbsolute(product.file_path)
-            ? product.file_path
-            : path.join(__dirname, product.file_path);
-
-        if (!fs.existsSync(fullPath)) {
-            throw new Error(`成品号 ${product.email} 的配置文件不存在`);
-        }
-
-        const raw = fs.readFileSync(fullPath, 'utf8');
-        const payload = JSON.parse(raw);
-        const accounts = Array.isArray(payload?.accounts) ? payload.accounts : [];
-        mergedAccounts.push(...accounts);
-    }
-
-    const explicitFileName = String(options.fileName || '').trim();
-    const fileName = explicitFileName
-        ? sanitizeExportFileName(explicitFileName)
-        : `${sanitizeExportFileName(exportPrefix)}_${Date.now()}.json`;
-
-    return {
-        fileName,
-        fileBuffer: Buffer.from(JSON.stringify({
-            exported_at: new Date().toISOString(),
-            proxies: [],
-            accounts: mergedAccounts
-        }, null, 2), 'utf8')
-    };
-}
-
-app.post('/api/admin/products/export', async (req, res) => {
+app.delete('/api/admin/billing/failed', async (req, res) => {
     try {
         await ensureStoreReady();
-        const { ids } = req.body || {};
-        if (!Array.isArray(ids) || ids.length === 0) {
-            return res.status(400).json({ success: false, message: '请先选择要出库的成品号' });
-        }
-
-        const products = await store.listProducts();
-        const selectedProducts = ids
-            .map((id) => products.find((item) => String(item.id) === String(id)))
-            .filter(Boolean);
-
-        if (selectedProducts.length !== ids.length) {
-            return res.status(404).json({ success: false, message: '部分成品号不存在或已被删除' });
-        }
-
-        const { fileName, fileBuffer } = await buildProductExportFile(selectedProducts, '成品号批量出库');
-
-        for (const product of selectedProducts) {
-            await store.markProductShipped(product.id);
-        }
-
-        res.setHeader('Content-Disposition', `attachment; filename=${encodeURIComponent(fileName)}`);
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.send(fileBuffer);
+        const deleted = await store.deleteFailedBillingRecords();
+        res.json({ success: true, deleted });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 });
 
-app.get('/api/admin/products/:id/export', async (req, res) => {
+app.delete('/api/admin/billing/:id', async (req, res) => {
     try {
         await ensureStoreReady();
-        const targetId = String(req.params.id || '').trim();
-        if (!targetId) {
-            return res.status(400).send('Missing product id');
+        const id = Number(req.params.id);
+        if (!id) {
+            return res.status(400).json({ success: false, message: '无效的记录 ID' });
         }
-
-        const products = await store.listProducts();
-        const product = products.find((item) => String(item.id) === targetId);
-        if (!product) {
-            return res.status(404).send('Product not found');
+        const ok = await store.deleteBillingRecord(id);
+        if (!ok) {
+            return res.status(404).json({ success: false, message: '账单记录不存在' });
         }
-
-        const { fileName, fileBuffer } = await buildProductExportFile(
-            [product],
-            `成品号出库_${product.email}`,
-            { fileName: `${product.email}.json` }
-        );
-        await store.markProductShipped(product.id);
-
-        res.setHeader('Content-Disposition', `attachment; filename=${encodeURIComponent(fileName)}`);
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.send(fileBuffer);
+        res.json({ success: true });
     } catch (error) {
-        res.status(500).send(error.message);
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
-const { startProductCreation } = require('./product_activator');
 
-app.post('/api/admin/products/generate', async (req, res) => {
-    const count = Math.max(1, Math.min(Number(req.body?.count) || 1, 100));
-
-    try {
-        await ensureStoreReady();
-        const maintenanceModeState = await store.getMaintenanceModeState();
-        if (maintenanceModeState.enabled) {
-            return res.status(503).json({ success: false, message: '系统维护中，请稍后再试' });
-        }
-        const launched = await startAdminProductGenerationTask(count);
-
-        return res.json({
-            success: true,
-            jobKey: launched.task.jobKey,
-            workerCount: launched.workerCount,
-            message: `后台成品生产任务已启动，并发上限 ${launched.workerCount}`
-        });
-    } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+async function syncBrowserPoolModeFromStore() {
+    const enabled = await store.getBrowserPoolEnabled();
+    browserPool.setRuntimeEnabled(enabled);
+    if (!enabled) {
+        await browserPool.shutdownBrowserPool().catch(() => {});
+        return { enabled: false, initialized: false, size: 0, mode: 'standalone' };
     }
-});
+    const info = await browserPool.initBrowserPool();
+    return { ...info, mode: 'pool' };
+}
 
-app.post('/api/admin/products/resume', async (req, res) => {
-    try {
-        await ensureStoreReady();
-        const maintenanceModeState = await store.getMaintenanceModeState();
-        if (maintenanceModeState.enabled) {
-            return res.status(503).json({ success: false, message: '系统维护中，请稍后再试' });
-        }
-
-        const resumableTask = await store.getResumableAdminProductGeneration();
-        if (!resumableTask || resumableTask.remainingCount <= 0) {
-            return res.status(400).json({ success: false, message: '当前没有可继续生产的中断任务' });
-        }
-
-        const launched = await startAdminProductGenerationTask(resumableTask.remainingCount, {
-            resumeFrom: resumableTask
-        });
-
-        return res.json({
-            success: true,
-            jobKey: launched.task.jobKey,
-            workerCount: launched.workerCount,
-            resumedCount: resumableTask.remainingCount,
-            message: `已继续生产剩余 ${resumableTask.remainingCount} 个成品号`
-        });
-    } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+async function spawnWorkerWithBrowser({ jobKey, runtimeEnv, runScript }) {
+    const poolEnabled = browserPool.getRuntimeEnabled();
+    if (!poolEnabled) {
+        logTask(jobKey, '浏览器模式: 独立启动（后台已关闭浏览器池）');
+        return runScript(buildWorkerRuntimeEnv(runtimeEnv, null, 'standalone'));
     }
-});
-
-app.post('/api/redeem-product', async (req, res) => {
-    const cdk = String(req.body?.cdk || '').trim();
-    if (!cdk) {
-        return res.status(400).json({ success: false, message: '缺少 CDK' });
-    }
-
-    try {
-        await ensureStoreReady();
-        const maintenanceModeState = await store.getMaintenanceModeState();
-        if (maintenanceModeState.enabled) {
-            return res.status(503).json({ success: false, message: '系统维护中，请稍后再试' });
+    return browserPool.withBrowserSlot(jobKey, async (poolSlot) => {
+        if (poolSlot) {
+            logTask(jobKey, `浏览器模式: 池 slot=${poolSlot.slotId} ${poolSlot.cdpUrl}`);
+        } else {
+            logTask(jobKey, '浏览器模式: 池未就绪，回退独立启动');
         }
-        const maxConcurrentActivations = await store.getMaxConcurrentActivations();
-        if (activeForegroundJobs.size >= maxConcurrentActivations) {
-            return res.status(429).json({ success: false, message: '当前任务过多，请稍后再试' });
-        }
+        const mode = poolSlot ? 'pool' : 'standalone';
+        return runScript(buildWorkerRuntimeEnv(runtimeEnv, poolSlot, mode));
+    });
+}
 
-        // 验证 CDK 是否有效
-        const cdkDetails = await store.verifyCdkDetails(cdk);
-        if (!cdkDetails || cdkDetails.used_at || cdkDetails.type !== '成品') {
-            return res.status(403).json({ success: false, message: 'CDK 无效、已使用或非成品激活码' });
-        }
+function spawnCheckoutDebugWorker({ task, token, sessionRaw, planType, region, planNameOverride, email }) {
+    (async () => {
+        const checkoutScript = path.join(__dirname, 'index.js');
+        try {
+            const proxy = await store.getActiveProxy();
+            const hcaptchaCfg = await store.getHcaptchaConfig();
+            const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
+            const runtimeEnv = {
+                ...process.env,
+                ...hcaptchaEnv,
+                CHECKOUT_DEBUG_ONLY: '1',
+                CHECKOUT_MODE: 'api',
+                CHATGPT_TOKEN: token,
+                CHATGPT_SESSION_JSON: String(sessionRaw || '').startsWith('{') ? sessionRaw : '',
+                CDK_PLAN_TYPE: planType,
+                PAYMENT_REGION_OVERRIDE: region,
+                PLAN_NAME_OVERRIDE: planNameOverride || '',
+                CDK_CODE: '',
+                ACTIVATION_EMAIL: email || '',
+                PROXY: proxy
+            };
 
-        // 检查冷静期 (冷却时间)
-        if (cdkDetails.cooldown_until) {
-            const cooldownDate = new Date(cdkDetails.cooldown_until);
-            if (cooldownDate > new Date()) {
-                const diffMin = Math.ceil((cooldownDate - new Date()) / 60000);
-                return res.status(403).json({
-                    success: false,
-                    message: `该卡密连续尝试失败过多，请冷静 ${diffMin} 分钟后再试`
-                });
-            }
-        }
-
-        // 锁定 CDK
-        const lockSuccess = await store.markCdkUsed(cdk);
-        if (!lockSuccess) {
-            return res.status(403).json({ success: false, message: 'CDK 正在被他人使用' });
-        }
-
-        // 创建任务日志
-        const task = await store.createTaskLog({
-            tokenPreview: 'Auto-Register',
-            cdkCode: cdk,
-            status: 'running',
-            progress: 5
-        });
-
-        reserveForegroundSlot(task.jobKey);
-        logTask(task.jobKey, `成品号创建流程启动, CDK=${cdk}`);
-
-        // 异步启动流程
-        (async () => {
-            let shouldRollbackCdk = true;
-            try {
-                let lastProgress = 5;
-                const result = await startProductCreation(cdk, async (progressData) => {
-                    const nextProgress = Math.max(lastProgress, Math.min(100, Math.round(Number(progressData.progress) || 0)));
-                    lastProgress = nextProgress;
-                    await store.updateTaskLog(task.jobKey, {
-                        status: 'running',
-                        message: progressData.message || '成品号创建中',
-                        progress: nextProgress,
-                        phone: progressData.phone || null,
-                        cardLast4: progressData.cardLast4 || null
-                    });
-                    broadcastToTask(task.jobKey, {
-                        type: 'progress',
-                        jobKey: task.jobKey,
-                        progress: nextProgress,
-                        message: progressData.message,
-                        status: 'running',
-                        phone: progressData.phone || null,
-                        cardLast4: progressData.cardLast4 || null,
-                        cardExpiry: progressData.cardExpiry || null
-                    });
-                }, { jobKey: task.jobKey });
-
-                if (result.success) {
-                    shouldRollbackCdk = false;
-                    await store.resetCdkFailure(cdk); // 成功则重置失败计数和冷却
-                    await store.updateProductClaimedCdkByEmail(result.email, cdk);
-                    await store.markProductShippedByEmail(result.email, 1);
-                    await store.updateTaskLog(task.jobKey, {
-                        status: 'success',
-                        message: `成品号创建成功: ${result.email}`,
-                        progress: 100,
-                        rawOutput: JSON.stringify(result),
-                        phone: result.phone || null,
-                        cardLast4: result.cardLast4 || null
-                    });
-                    broadcastToTask(task.jobKey, {
-                        type: 'progress',
-                        jobKey: task.jobKey,
-                        progress: 100,
-                        status: 'success',
-                        message: '成品号创建完成！',
-                        phone: result.phone || null,
-                        cardLast4: result.cardLast4 || null,
-                        cardExpiry: result.cardExpiry || null,
-                        result: result
-                    });
-                }
-            } catch (error) {
-                console.error(`[ProductTask] Error:`, error);
-
-                if (shouldRollbackCdk) {
-                    await store.markCdkUnused(cdk);
-                    console.log(`[ProductTask] CDK ${cdk} 已回滚为未使用`);
-                }
-
-                // 如果是“无激活权限”导致的失败，记录失败次数
-                if (error.message.includes('无激活权限')) {
-                    const cooledDown = await store.recordCdkFailure(cdk);
-                    if (cooledDown) {
-                        console.log(`[ProductTask] CDK ${cdk} 已进入 10 分钟冷静期`);
+            logTask(task.jobKey, `启动 Playwright 浏览器 proxy=${proxy ? 'yes' : 'no'}`);
+            const run = await spawnWorkerWithBrowser({
+                jobKey: task.jobKey,
+                runtimeEnv,
+                runScript: (workerEnv) => runCheckoutScript(task.jobKey, checkoutScript, workerEnv, 1, async (progress) => {
+                    if (progress > 0) {
+                        await store.updateTaskLog(task.jobKey, {
+                            status: 'running',
+                            message: '浏览器调试进行中...',
+                            progress: Math.min(progress, 99)
+                        });
                     }
-                }
+                })
+            });
 
-                await store.updateTaskLog(task.jobKey, {
-                    status: 'failed',
-                    message: `创建失败: ${error.message}`,
-                    progress: 100
-                });
+            const analysis = analyzeCheckoutDebugOutput(run.output, run.timedOut);
+            const checkoutUrl = analysis.checkoutUrl || extractCheckoutUrlFromOutput(run.output);
+            const failureScreenshots = extractScreenshotsFromOutput(run.output);
+            const finalStatus = analysis.status || 'failed';
+            const finalProgress = finalStatus === 'success' ? 100 : Math.min(getCheckoutProgress(run.output, finalStatus), 99);
+            const finalMessage = finalStatus === 'success' && checkoutUrl
+                ? `支付链接: ${checkoutUrl}`
+                : (analysis.message || '支付链接调试失败');
+
+            await store.updateTaskLog(task.jobKey, {
+                status: finalStatus,
+                message: finalMessage,
+                rawOutput: run.output,
+                progress: finalProgress,
+                failureScreenshots
+            });
+
+            logTask(
+                task.jobKey,
+                `调试结束 status=${finalStatus} url=${checkoutUrl ? 'yes' : 'no'} screenshots=${failureScreenshots.length}`
+            );
+        } catch (error) {
+            console.error(`[Checkout Debug] ${task.jobKey}:`, error);
+            logTask(task.jobKey, `调试任务异常: ${error.message}`, 'error');
+            await store.updateTaskLog(task.jobKey, {
+                status: 'failed',
+                message: error.message,
+                progress: 0
+            });
+        }
+    })();
+}
+
+function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clientIp }) {
+    (async () => {
+        const checkoutScript = path.join(__dirname, 'index.js');
+        let finalRun = null;
+        const allOutputs = [];
+        let shouldRollbackCdk = true;
+        let lastProgress = 0;
+        const accountEmail = extractEmailFromSession(sessionRaw) || task.tokenPreview || '';
+
+        try {
+            for (let attempt = 1; attempt <= MAX_PROCESS_ATTEMPTS; attempt += 1) {
+                logTask(task.jobKey, `开始第 ${attempt}/${MAX_PROCESS_ATTEMPTS} 次尝试`);
+
+                const attemptProgress = normalizeTaskProgress(attempt > 1 ? 1 : 3, 'running', lastProgress);
                 broadcastToTask(task.jobKey, {
                     type: 'progress',
                     jobKey: task.jobKey,
-                    progress: 100,
-                    status: 'failed',
-                    message: `创建失败: ${error.message}`
+                    progress: attemptProgress,
+                    status: 'running',
+                    message: `正在进行第 ${attempt} 次尝试...`,
+                    cdkCode: cdk
                 });
-            } finally {
-                releaseForegroundSlot(task.jobKey);
+
+                const proxy = await store.getActiveProxy();
+                const hcaptchaCfg = await store.getHcaptchaConfig();
+                const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
+                const runtimeEnv = {
+                    ...process.env,
+                    ...hcaptchaEnv,
+                    JOB_KEY: task.jobKey,
+                    CHATGPT_TOKEN: token,
+                    CHATGPT_SESSION_JSON: String(sessionRaw || '').startsWith('{') ? sessionRaw : '',
+                    CDK_CODE: cdk,
+                    CDK_PLAN_TYPE: cdkDetails.plan_type || 'plus',
+                    PROXY: proxy
+                };
+
+                logTask(task.jobKey, `尝试 ${attempt} 启动自动化 proxy=${proxy ? 'yes' : 'no'}`);
+
+                const run = await spawnWorkerWithBrowser({
+                    jobKey: task.jobKey,
+                    runtimeEnv,
+                    runScript: (workerEnv) => runCheckoutScript(task.jobKey, checkoutScript, workerEnv, attempt, async (progress, liveOutput) => {
+                        if (progress > 0) {
+                            const runningProgress = normalizeTaskProgress(progress, 'running', lastProgress);
+                            lastProgress = runningProgress;
+                            const updatePayload = {
+                                status: 'running',
+                                message: '正在开通中',
+                                rawOutput: null,
+                                cdkCode: cdk,
+                                progress: runningProgress
+                            };
+                            if (liveOutput) {
+                                const liveMedia = extractTaskMediaFromOutput(liveOutput);
+                                const combined = [...liveMedia.screenshots, ...liveMedia.videos];
+                                if (combined.length) {
+                                    updatePayload.failureScreenshots = combined;
+                                }
+                            }
+                            await store.updateTaskLog(task.jobKey, updatePayload);
+                            broadcastToTask(task.jobKey, {
+                                type: 'progress',
+                                jobKey: task.jobKey,
+                                progress: runningProgress,
+                                status: 'running',
+                                message: '正在开通中',
+                                cdkCode: cdk,
+                                screenshots: liveOutput ? extractTaskMediaFromOutput(liveOutput).screenshots : undefined,
+                                videos: liveOutput ? extractTaskMediaFromOutput(liveOutput).videos : undefined
+                            });
+                        }
+                    })
+                });
+
+                const cardLast4 = extractCardLast4FromOutput(run.output);
+                allOutputs.push(`===== ATTEMPT ${attempt}${cardLast4 ? ` | CARD ${cardLast4}` : ''} =====\n${run.output}`);
+                finalRun = { ...run, output: allOutputs.join('\n\n') };
+
+                const currentStatus = run.analysis.status === 'success' ? 'success' : 'running';
+                const currentProgress = normalizeTaskProgress(
+                    getCheckoutProgress(run.output, currentStatus),
+                    currentStatus,
+                    lastProgress
+                );
+                lastProgress = currentProgress;
+                await store.updateTaskLog(task.jobKey, {
+                    status: currentStatus,
+                    message: currentStatus === 'success' ? '激活成功' : '正在开通中',
+                    rawOutput: finalRun.output,
+                    progress: currentProgress,
+                    cdkCode: cdk,
+                    cardLast4
+                });
+
+                broadcastToTask(task.jobKey, {
+                    type: 'progress',
+                    jobKey: task.jobKey,
+                    progress: currentProgress,
+                    status: currentStatus,
+                    message: currentStatus === 'success' ? '激活成功' : '正在开通中',
+                    cdkCode: cdk,
+                    cardLast4
+                });
+
+                if (!run.analysis.shouldRetry || attempt >= MAX_PROCESS_ATTEMPTS) {
+                    logTask(task.jobKey, `尝试 ${attempt} 结束，status=${run.analysis.status} shouldRetry=${run.analysis.shouldRetry}`);
+                    break;
+                }
+                logTask(task.jobKey, `尝试 ${attempt} 失败，准备重试`, 'warn');
             }
-        })();
 
-        return res.json({
-            success: true,
-            message: '成品号创建任务已启动',
-            jobKey: task.jobKey
-        });
-    } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
-    }
-});
+            const rawOutput = finalRun?.output || '';
+            const normalizedAnalysis = finalRun?.analysis?.status === 'retry'
+                ? { ...finalRun.analysis, status: 'failed', message: String(finalRun.analysis.message || '激活失败').replace('，准备重试', '') }
+                : finalRun?.analysis;
+            const finalStatus = normalizedAnalysis?.status || 'failed';
 
-app.get('/api/download-sub2api/:filename', async (req, res) => {
-    const filename = req.params.filename;
-    if (!filename || !/^[a-zA-Z0-9.@_-]+\.json$/.test(filename)) {
-        return res.status(400).send('Invalid filename');
-    }
+            const finalProgress = normalizeTaskProgress(finalStatus === 'success' ? 100 : lastProgress, finalStatus, lastProgress);
+            const taskMedia = extractTaskMediaFromOutput(rawOutput);
+            const failureScreenshots = [...taskMedia.screenshots, ...taskMedia.videos];
+            await store.updateTaskLog(task.jobKey, {
+                status: finalStatus,
+                message: normalizedAnalysis?.message || null,
+                rawOutput,
+                cdkCode: cdk,
+                progress: finalProgress,
+                failureScreenshots
+            });
 
-    const filePath = resolveNamedArtifactPath('sub2api', filename);
-    if (!fs.existsSync(filePath)) {
-        return res.status(404).send('File not found');
-    }
+            broadcastToTask(task.jobKey, {
+                type: 'status',
+                jobKey: task.jobKey,
+                status: finalStatus,
+                message: normalizedAnalysis?.message,
+                cdkCode: cdk,
+                progress: finalProgress,
+                screenshots: taskMedia.screenshots,
+                videos: taskMedia.videos
+            });
 
-    sendJsonFileDownload(res, filePath);
-});
+            logTask(
+                task.jobKey,
+                `任务结束 status=${finalStatus} progress=${finalProgress} message=${normalizedAnalysis?.message || ''}`
+            );
 
-app.get('/api/download-cpa/:filename', async (req, res) => {
-    const filename = req.params.filename;
-    if (!filename || !/^[a-zA-Z0-9.@_-]+\.json$/.test(filename)) {
-        return res.status(400).send('Invalid filename');
-    }
+            if (finalStatus === 'success') {
+                shouldRollbackCdk = false;
+                await store.resetCdkFailure(cdk);
+                if (clientIp) {
+                    await store.resetActivationAttemptFailure('ip', clientIp);
+                }
+                notifyTaskOutcome({
+                    event: 'success',
+                    email: accountEmail,
+                    cdk,
+                    jobKey: task.jobKey,
+                    message: normalizedAnalysis?.message || '激活成功'
+                });
+            } else if (isCardPoolExhaustedIssue(rawOutput, normalizedAnalysis)) {
+                notifyTaskOutcome({
+                    event: 'card_pool_empty',
+                    email: accountEmail,
+                    cdk,
+                    jobKey: task.jobKey,
+                    message: normalizedAnalysis?.message || '卡池资产枯竭'
+                });
+            } else if (finalStatus === 'failed' || finalStatus === 'manual') {
+                notifyTaskOutcome({
+                    event: 'failure',
+                    email: accountEmail,
+                    cdk,
+                    jobKey: task.jobKey,
+                    message: normalizedAnalysis?.message || '激活失败'
+                });
+            }
 
-    const filePath = resolveNamedArtifactPath('cpa', filename);
-    if (!fs.existsSync(filePath)) {
-        return res.status(404).send('File not found');
-    }
+            if (finalStatus !== 'success') {
+                await store.markCdkUnused(cdk);
+                logTask(task.jobKey, `CDK ${cdk} 已回滚为未使用`);
+            }
 
-    sendJsonFileDownload(res, filePath);
-});
+            if (isNoActivationEligibilityMessage(normalizedAnalysis?.message)) {
+                const cdkCooledDown = await store.recordCdkFailure(cdk);
+                const ipCooledDown = clientIp
+                    ? await store.recordActivationAttemptFailure('ip', clientIp)
+                    : false;
 
-app.post('/api/run-process', async (req, res) => {
-    const token = String(req.body?.token || '').trim();
+                if (cdkCooledDown || ipCooledDown) {
+                    const cooldownParts = [];
+                    if (cdkCooledDown) {
+                        cooldownParts.push('该 CDK 已冷却 10 分钟');
+                        logTask(task.jobKey, `CDK ${cdk} 因连续无资格提交进入 10 分钟冷却`, 'warn');
+                    }
+                    if (ipCooledDown) {
+                        cooldownParts.push(`IP ${clientIp} 已冷却 10 分钟`);
+                        logTask(task.jobKey, `IP ${clientIp} 因连续无资格提交进入 10 分钟冷却`, 'warn');
+                    }
+                    const cooldownMessage = `${normalizedAnalysis?.message || '该账号无激活权限,请更换账号重试'}（${cooldownParts.join('，')}）`;
+                    await store.updateTaskLog(task.jobKey, {
+                        status: finalStatus,
+                        message: cooldownMessage,
+                        rawOutput,
+                        cdkCode: cdk,
+                        progress: finalProgress
+                    });
+                    broadcastToTask(task.jobKey, {
+                        type: 'status',
+                        jobKey: task.jobKey,
+                        status: finalStatus,
+                        message: cooldownMessage,
+                        cdkCode: cdk,
+                        progress: finalProgress
+                    });
+                }
+            }
+        } catch (bgError) {
+            console.error(`[Background Task Error] ${task.jobKey}:`, bgError);
+            logTask(task.jobKey, `后台任务异常: ${bgError.message}`, 'error');
+            await store.updateTaskLog(task.jobKey, {
+                status: 'failed',
+                message: bgError.message,
+                rawOutput: bgError.message,
+                cdkCode: cdk,
+                progress: normalizeTaskProgress(lastProgress, 'failed', lastProgress)
+            });
+            broadcastToTask(task.jobKey, {
+                type: 'status',
+                jobKey: task.jobKey,
+                status: 'failed',
+                message: bgError.message,
+                cdkCode: cdk,
+                progress: normalizeTaskProgress(lastProgress, 'failed', lastProgress)
+            });
+            notifyTaskOutcome({
+                event: 'failure',
+                email: accountEmail,
+                cdk,
+                jobKey: task.jobKey,
+                message: bgError.message
+            });
+            if (shouldRollbackCdk) {
+                await store.markCdkUnused(cdk);
+                logTask(task.jobKey, `CDK ${cdk} 已回滚为未使用`);
+            }
+        } finally {
+            releaseForegroundSlot(task.jobKey);
+            if (getTotalActiveJobs() === 0) {
+                const maintenanceModeState = await store.getMaintenanceModeState();
+                if (maintenanceModeState.enabled && maintenanceModeState.drain) {
+                    await store.setMaintenanceModeState(true, false);
+                }
+            }
+        }
+    })();
+}
+
+async function handleActivationRequest(req, res) {
+    const rawSession = String(req.body?.session || req.body?.token || '').trim();
+    const sessionJson = parseSessionJson(rawSession);
+    const token = normalizeSessionToken(rawSession);
     const cdk = String(req.body?.cdk || '').trim();
     const clientIp = getClientIp(req);
+    console.log(`[Activation] 收到开通请求 path=${req.path} cdk=${cdk} session_json=${Boolean(sessionJson)} token_len=${token.length}`);
     if (!token) {
-        return res.status(400).json({ success: false, message: '缺少 AccessToken' });
+        return res.status(400).json({ success: false, message: '缺少 Session JSON 或 AccessToken' });
     }
     if (!cdk) {
         return res.status(400).json({ success: false, message: '缺少 CDK' });
@@ -2353,13 +3404,29 @@ app.post('/api/run-process', async (req, res) => {
             }
         }
 
+        const hasCard = await store.hasAvailableCard();
+        if (!hasCard) {
+            const poolEmail = extractEmailFromSession(rawSession);
+            fireTelegramNotification('card_pool_empty', {
+                email: poolEmail,
+                cdk,
+                message: '银行卡池暂无可用卡片，任务未启动'
+            });
+            return res.status(503).json({
+                success: false,
+                message: '银行卡池暂无可用卡片，请先在后台「银行卡池」导入银行卡后再试'
+            });
+        }
+
         const lockSuccess = await store.markCdkUsed(cdk);
         if (!lockSuccess) {
             return res.status(403).json({ success: false, message: 'CDK 不可用或正在被他人使用' });
         }
 
+        const storedSession = buildStoredSessionPayload(rawSession, sessionJson, token);
         const task = await store.createTaskLog({
-            tokenPreview: `${token.slice(0, 15)}...`,
+            tokenPreview: extractSessionPreview(storedSession),
+            sessionPayload: storedSession,
             cdkCode: cdk,
             phone: null,
             cardLast4: null,
@@ -2369,278 +3436,8 @@ app.post('/api/run-process', async (req, res) => {
 
         logTask(task.jobKey, `任务已创建，CDK=${cdk}`);
         reserveForegroundSlot(task.jobKey);
+        spawnActivationWorker({ task, token, sessionRaw: storedSession, cdk, cdkDetails, clientIp });
 
-        // 异步执行，不阻塞响应
-        (async () => {
-            const checkoutScript = path.join(__dirname, 'index.js');
-            let finalRun = null;
-            let finalAssets = null;
-            const allOutputs = [];
-            let shouldRollbackCdk = true;
-
-            try {
-                let lastProgress = 0;
-                for (let attempt = 1; attempt <= MAX_PROCESS_ATTEMPTS; attempt += 1) {
-                    logTask(task.jobKey, `开始第 ${attempt}/${MAX_PROCESS_ATTEMPTS} 次尝试`);
-
-                    // 重置进度条显示
-                    const attemptProgress = normalizeTaskProgress(attempt > 1 ? 1 : 3, 'running', lastProgress);
-                    broadcastToTask(task.jobKey, {
-                        type: 'progress',
-                        jobKey: task.jobKey,
-                        progress: attemptProgress,
-                        status: 'running',
-                        message: `正在进行第 ${attempt} 次尝试...`,
-                        cdkCode: cdk
-                    });
-                    // 排队抢一个未占用的手机号 + 银行卡，最多等 5 分钟
-                    let assets = null;
-                    const reserveDeadline = Date.now() + 5 * 60 * 1000;
-                    while (Date.now() < reserveDeadline) {
-                        assets = await store.reserveRuntimeAssets(`self:${task.jobKey}:${attempt}`);
-                        if (assets.phone.phone && assets.phone.phone !== '未配置' && assets.card.number) {
-                            break;
-                        }
-                        await store.releaseRuntimeAssets({
-                            phoneAssetId: assets.phoneAssetId,
-                            cardAssetId: assets.cardAssetId
-                        });
-                        assets = null;
-                        broadcastToTask(task.jobKey, {
-                            type: 'progress',
-                            jobKey: task.jobKey,
-                            progress: attemptProgress,
-                            status: 'running',
-                            message: '资产池暂时被占用，正在排队等待空闲手机号/银行卡...',
-                            cdkCode: cdk
-                        });
-                        await sleep(10000);
-                    }
-
-                    if (!assets) {
-                        logTask(task.jobKey, '手机号/银行卡池均无可用资源，任务转为维护状态', 'warn');
-                        finalRun = {
-                            attempt,
-                            output: allOutputs.join('\n'),
-                            analysis: buildRuntimeFailure('系统维护中,请联系管理员修复', 'ASSET_POOL_EXHAUSTED', 'maintenance')
-                        };
-                        break;
-                    }
-
-                    const runtimeEnv = {
-                        ...process.env,
-                        CHATGPT_TOKEN: token,
-                        SMS_API_KEY: assets.phone.key,
-                        BILLING_PHONE: assets.phone.phone,
-                        PROXY: assets.proxy,
-                        CARD_NUMBER: assets.card.number,
-                        CARD_EXPIRY: assets.card.expiry,
-                        CARD_CVC: assets.card.cvc
-                    };
-                    finalAssets = assets;
-
-                    logTask(
-                        task.jobKey,
-                        `尝试 ${attempt} 使用手机号=${assets.phone.phone} 银行卡尾号=${assets.card.number.slice(-4)} proxy=${assets.proxy ? 'yes' : 'no'}`
-                    );
-
-                    let run;
-                    try {
-                    run = await runCheckoutScript(task.jobKey, checkoutScript, runtimeEnv, attempt, async (progress) => {
-                        if (progress > 0) {
-                            const runningProgress = normalizeTaskProgress(progress, 'running', lastProgress);
-                            lastProgress = runningProgress;
-                            await store.updateTaskLog(task.jobKey, {
-                                status: 'running',
-                                message: '正在开通中',
-                                rawOutput: null,
-                                cdkCode: cdk,
-                                progress: runningProgress
-                            });
-                            broadcastToTask(task.jobKey, {
-                                type: 'progress',
-                                jobKey: task.jobKey,
-                                progress: runningProgress,
-                                status: 'running',
-                                message: '正在开通中',
-                                cdkCode: cdk
-                            });
-                        }
-                    });
-                    allOutputs.push(`===== ATTEMPT ${attempt} | PHONE ${assets.phone.phone} | CARD ${assets.card.number.slice(-4)} =====\n${run.output}`);
-                    finalRun = { ...run, output: allOutputs.join('\n\n') };
-
-                    const currentStatus = run.analysis.status === 'success' ? 'success' : 'running';
-                    const currentProgress = normalizeTaskProgress(
-                        getCheckoutProgress(run.output, currentStatus),
-                        currentStatus,
-                        lastProgress
-                    );
-                    lastProgress = currentProgress;
-                    await store.updateTaskLog(task.jobKey, {
-                        status: currentStatus,
-                        message: currentStatus === 'success' ? '激活成功' : '正在开通中',
-                        rawOutput: finalRun.output,
-                        progress: currentProgress,
-                        cdkCode: cdk,
-                        phone: assets.phone.phone,
-                        cardLast4: assets.card.number.slice(-4)
-                    });
-
-                    broadcastToTask(task.jobKey, {
-                        type: 'progress',
-                        jobKey: task.jobKey,
-                        progress: currentProgress,
-                        status: currentStatus,
-                        message: currentStatus === 'success' ? '激活成功' : '正在开通中',
-                        cdkCode: cdk,
-                        phone: assets.phone.phone,
-                        cardLast4: assets.card.number.slice(-4)
-                    });
-
-                    if (run.analysis.deletePhone) {
-                        await store.deletePhoneAsset(assets.phone.phone);
-                        logTask(task.jobKey, `🚫 [资产] 手机号 ${assets.phone.phone} 被拒/拦截，已永久禁用 (status='已报废', is_active=0)`, 'warn');
-                    }
-                    if (run.analysis.deleteCard) {
-                        await store.deleteCardAsset(assets.card.number);
-                        logTask(task.jobKey, `🚫 [资产] 银行卡尾号 ${assets.card.number.slice(-4)} 被拒，已永久禁用 (status='已报废', is_active=0)`, 'warn');
-                    }
-                    } finally {
-                        // 释放资产，让出手机号/银行卡给其他并发任务
-                        await store.releaseRuntimeAssets({
-                            phoneAssetId: assets.phoneAssetId,
-                            cardAssetId: assets.cardAssetId
-                        }).catch((err) => logTask(task.jobKey, `释放资产失败: ${err.message}`, 'warn'));
-                    }
-                    if (!run.analysis.shouldRetry || attempt >= MAX_PROCESS_ATTEMPTS) {
-                        logTask(task.jobKey, `尝试 ${attempt} 结束，status=${run.analysis.status} shouldRetry=${run.analysis.shouldRetry}`);
-                        break;
-                    }
-                    logTask(task.jobKey, `尝试 ${attempt} 失败，准备重试`, 'warn');
-                }
-
-                const rawOutput = finalRun?.output || '';
-                const normalizedAnalysis = finalRun?.analysis?.status === 'retry'
-                    ? { ...finalRun.analysis, status: 'failed', message: String(finalRun.analysis.message || '激活失败').replace('，准备重试', '') }
-                    : finalRun?.analysis;
-                const finalStatus = normalizedAnalysis?.status || 'failed';
-
-                const finalProgress = normalizeTaskProgress(finalStatus === 'success' ? 100 : lastProgress, finalStatus, lastProgress);
-                await store.updateTaskLog(task.jobKey, {
-                    status: finalStatus,
-                    message: normalizedAnalysis?.message || null,
-                    rawOutput,
-                    cdkCode: cdk,
-                    progress: finalProgress
-                });
-
-                broadcastToTask(task.jobKey, {
-                    type: 'status',
-                    jobKey: task.jobKey,
-                    status: finalStatus,
-                    message: normalizedAnalysis?.message,
-                    cdkCode: cdk,
-                    progress: finalProgress
-                });
-
-                logTask(
-                    task.jobKey,
-                    `任务结束 status=${finalStatus} progress=${finalProgress} message=${normalizedAnalysis?.message || ''}`
-                );
-
-                if (finalStatus === 'success') {
-                    shouldRollbackCdk = false;
-                    await store.resetCdkFailure(cdk);
-                    if (clientIp) {
-                        await store.resetActivationAttemptFailure('ip', clientIp);
-                    }
-                }
-
-                if (finalStatus === 'success' && finalAssets) {
-                    await store.incrementAssetSuccessCount({
-                        phone: finalAssets.phone?.phone,
-                        cardNumber: finalAssets.card?.number
-                    });
-                    logTask(
-                        task.jobKey,
-                        `成功计数已更新 手机号=${finalAssets.phone?.phone || 'N/A'} 银行卡尾号=${finalAssets.card?.number ? finalAssets.card.number.slice(-4) : 'N/A'}`
-                    );
-                }
-
-                if (finalStatus !== 'success') {
-                    await store.markCdkUnused(cdk);
-                    logTask(task.jobKey, `CDK ${cdk} 已回滚为未使用`);
-                }
-
-                if (isNoActivationEligibilityMessage(normalizedAnalysis?.message)) {
-                    const cdkCooledDown = await store.recordCdkFailure(cdk);
-                    const ipCooledDown = clientIp
-                        ? await store.recordActivationAttemptFailure('ip', clientIp)
-                        : false;
-
-                    if (cdkCooledDown || ipCooledDown) {
-                        const cooldownParts = [];
-                        if (cdkCooledDown) {
-                            cooldownParts.push('该 CDK 已冷却 10 分钟');
-                            logTask(task.jobKey, `CDK ${cdk} 因连续无资格提交进入 10 分钟冷却`, 'warn');
-                        }
-                        if (ipCooledDown) {
-                            cooldownParts.push(`IP ${clientIp} 已冷却 10 分钟`);
-                            logTask(task.jobKey, `IP ${clientIp} 因连续无资格提交进入 10 分钟冷却`, 'warn');
-                        }
-                        const cooldownMessage = `${normalizedAnalysis?.message || '该账号无激活权限,请更换账号重试'}（${cooldownParts.join('，')}）`;
-                        await store.updateTaskLog(task.jobKey, {
-                            status: finalStatus,
-                            message: cooldownMessage,
-                            rawOutput,
-                            cdkCode: cdk,
-                            progress: finalProgress
-                        });
-                        broadcastToTask(task.jobKey, {
-                            type: 'status',
-                            jobKey: task.jobKey,
-                            status: finalStatus,
-                            message: cooldownMessage,
-                            cdkCode: cdk,
-                            progress: finalProgress
-                        });
-                    }
-                }
-            } catch (bgError) {
-                console.error(`[Background Task Error] ${task.jobKey}:`, bgError);
-                logTask(task.jobKey, `后台任务异常: ${bgError.message}`, 'error');
-                await store.updateTaskLog(task.jobKey, {
-                    status: 'failed',
-                    message: bgError.message,
-                    rawOutput: bgError.message,
-                    cdkCode: cdk,
-                    progress: normalizeTaskProgress(lastProgress, 'failed', lastProgress)
-                });
-                broadcastToTask(task.jobKey, {
-                    type: 'status',
-                    jobKey: task.jobKey,
-                    status: 'failed',
-                    message: bgError.message,
-                    cdkCode: cdk,
-                    progress: normalizeTaskProgress(lastProgress, 'failed', lastProgress)
-                });
-                if (shouldRollbackCdk) {
-                    await store.markCdkUnused(cdk);
-                    logTask(task.jobKey, `CDK ${cdk} 已回滚为未使用`);
-                }
-            } finally {
-                releaseForegroundSlot(task.jobKey);
-                if (getTotalActiveJobs() === 0) {
-                    const maintenanceModeState = await store.getMaintenanceModeState();
-                    if (maintenanceModeState.enabled && maintenanceModeState.drain) {
-                        await store.setMaintenanceModeState(true, false);
-                    }
-                }
-            }
-        })();
-
-        // 立刻返回 jobKey，前端通过 WebSocket 订阅实时状态
         return res.json({
             success: true,
             jobKey: task.jobKey,
@@ -2650,7 +3447,11 @@ app.post('/api/run-process', async (req, res) => {
         try { await store.markCdkUnused(cdk); } catch (_) { }
         return res.status(500).json({ success: false, message: error.message });
     }
-});
+}
+
+app.post('/api/run-process', handleActivationRequest);
+
+app.post('/api/admin/trigger-activation', handleActivationRequest);
 
 app.post('/api/verify-cdk', async (req, res) => {
     const cdk = String(req.body?.cdk || '').trim();
@@ -2668,6 +3469,8 @@ app.post('/api/verify-cdk', async (req, res) => {
                 success: true,
                 data: {
                     type: cdkData.type || '自助',
+                    plan_type: cdkData.plan_type || 'plus',
+                    plan_label: getPlanTypeLabel(cdkData.plan_type || 'plus'),
                     status: 'processing',
                     jobKey: runningTask.job_key,
                     message: runningTask.message || '当前 CDK 正在开通中'
@@ -2697,7 +3500,9 @@ app.post('/api/verify-cdk', async (req, res) => {
             return res.json({
                 success: true,
                 data: {
-                    type: cdkData.type || '自助'
+                    type: cdkData.type || '自助',
+                    plan_type: cdkData.plan_type || 'plus',
+                    plan_label: getPlanTypeLabel(cdkData.plan_type || 'plus')
                 }
             });
         }
@@ -2726,28 +3531,16 @@ app.get('/api/cdk/query', async (req, res) => {
             ? '开通中'
             : (cdkData.used_at ? '已使用' : '未使用');
 
-        const downloadInfo = cdkData.type === '成品' && cdkData.used_at
-            ? await store.getClaimedProductDownloadInfo(cdk)
-            : null;
-        const artifactInfo = resolveProductArtifactInfo(downloadInfo);
-
         res.json({
             success: true,
             data: {
                 status: cdkStatus,
-                type: cdkData.type,
+                type: cdkData.type || '自助',
                 createdAt: cdkData.created_at,
                 jobKey: runningTask?.job_key || null,
                 usedAt: cdkData.used_at
                     ? new Date(cdkData.used_at).toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-')
-                    : null,
-                imapKey: downloadInfo?.imapKey || null,
-                downloadAvailable: Boolean(artifactInfo.sub2apiPath),
-                downloadFileName: artifactInfo.sub2apiFileName,
-                sub2apiAvailable: Boolean(artifactInfo.sub2apiPath),
-                sub2apiFileName: artifactInfo.sub2apiFileName,
-                cpaAvailable: Boolean(artifactInfo.cpaPath),
-                cpaFileName: artifactInfo.cpaFileName
+                    : null
             }
         });
     } catch (error) {
@@ -2756,42 +3549,32 @@ app.get('/api/cdk/query', async (req, res) => {
 });
 
 app.get('/api/cdk/download', async (req, res) => {
-    const cdk = String(req.query.cdk || '').trim();
-    const kind = String(req.query.kind || 'sub2api').trim().toLowerCase();
-    if (!cdk) {
-        return res.status(400).send('Missing cdk');
-    }
-    if (!['sub2api', 'cpa'].includes(kind)) {
-        return res.status(400).send('Invalid download kind');
-    }
-
-    try {
-        await ensureStoreReady();
-        const cdkData = await store.verifyCdkDetails(cdk);
-        if (!cdkData || cdkData.type !== '成品' || !cdkData.used_at) {
-            return res.status(403).send('CDK not eligible for download');
-        }
-
-        const downloadInfo = await store.getClaimedProductDownloadInfo(cdk);
-        if (!downloadInfo?.filePath) {
-            return res.status(404).send('Credential file not found');
-        }
-
-        const artifactInfo = resolveProductArtifactInfo(downloadInfo);
-        const fullPath = kind === 'cpa' ? artifactInfo.cpaPath : artifactInfo.sub2apiPath;
-
-        if (!fullPath || !fs.existsSync(fullPath)) {
-            return res.status(404).send('Credential file missing');
-        }
-
-        sendJsonFileDownload(res, fullPath);
-    } catch (error) {
-        res.status(500).send(error.message);
-    }
+    return res.status(410).send('成品号下载功能已移除，仅支持自助开通');
 });
 
 async function start() {
     await ensureStoreReady();
+
+    try {
+        const poolInfo = await syncBrowserPoolModeFromStore();
+        if (poolInfo.enabled && poolInfo.initialized !== false) {
+            runtimeLog.push({
+                jobKey: '',
+                level: 'system',
+                source: 'server',
+                text: `[BrowserPool] 已预热 ${poolInfo.size} 个浏览器槽位`
+            });
+        } else if (!poolInfo.enabled) {
+            runtimeLog.push({
+                jobKey: '',
+                level: 'system',
+                source: 'server',
+                text: '[Browser] 独立启动模式（后台已关闭浏览器池）'
+            });
+        }
+    } catch (error) {
+        console.error(`[BrowserPool] 初始化失败: ${error.message}`);
+    }
 
     // 启动时把所有遗留的 in_use 锁清空（避免上次崩溃残留的锁卡死整个池）
     try {
@@ -2812,15 +3595,6 @@ async function start() {
             console.warn(`⚠️  [资产锁] 周期清理失败: ${error.message}`);
         }
     }, 60 * 1000).unref();
-
-    try {
-        await initializeImapAuth();
-        await syncAccessDeactivatedProductStatuses(true);
-        scheduleAccessDeactivatedSync();
-    } catch (error) {
-        console.error(`[IMAP] 项目启动预刷新失败: ${error.message}`);
-        scheduleAccessDeactivatedSync();
-    }
 
     const server = app.listen(PORT, () => {
         const conn = store.connectionInfo;

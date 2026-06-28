@@ -1,0 +1,102 @@
+# ============================================================
+# Docker Compose — 一键部署 ChatGPT Plus 自动化开通工具
+# 包含 MySQL 8 + 应用服务
+# ============================================================
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: kc-gpt-pay-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-your_mysql_password}
+      MYSQL_DATABASE: ${DB_NAME:-plus_papay}
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max-connections=200
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  app:
+    build: .
+    container_name: kc-gpt-pay-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ${DB_PASSWORD:-your_mysql_password}
+      DB_NAME: ${DB_NAME:-plus_papay}
+      DB_POOL_LIMIT: 60
+      HEADFUL: 0
+      PROXY: ${PROXY:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      HCAPTCHA_CONFIG_FILE: /app/data/hcaptcha-config.json
+      HCAPTCHA_VLM_API_KEY: ${HCAPTCHA_VLM_API_KEY:-}
+      HCAPTCHA_VLM_BASE_URL: ${HCAPTCHA_VLM_BASE_URL:-https://api.openai.com/v1}
+      HCAPTCHA_VLM_MODEL: ${HCAPTCHA_VLM_MODEL:-gpt-5.5}
+      HCAPTCHA_CAPTCHA_PLATFORM_API_KEY: ${HCAPTCHA_CAPTCHA_PLATFORM_API_KEY:-}
+      HCAPTCHA_CAPTCHA_PLATFORM_API_URL: ${HCAPTCHA_CAPTCHA_PLATFORM_API_URL:-https://api.capsolver.com}
+      HCAPTCHA_CAPTCHA_PLATFORM_TIMEOUT: ${HCAPTCHA_CAPTCHA_PLATFORM_TIMEOUT:-180}
+      HCAPTCHA_SOLVER_ENABLED: ${HCAPTCHA_SOLVER_ENABLED:-1}
+      CHATGPT_SESSION_COOKIE: ${CHATGPT_SESSION_COOKIE:-}
+      BROWSER_POOL: ${BROWSER_POOL:-1}
+      BROWSER_POOL_SIZE: ${BROWSER_POOL_SIZE:-2}
+      BROWSER_POOL_MAX_SIZE: ${BROWSER_POOL_MAX_SIZE:-24}
+      BROWSER_POOL_BASE_PORT: ${BROWSER_POOL_BASE_PORT:-19222}
+    volumes:
+      - ./debug_screenshots:/app/debug_screenshots
+      - ./data:/app/data
+      - ./product_files:/app/product_files
+      - ./public:/app/public
+      - ./server.js:/app/server.js
+      - ./chatgpt.js:/app/chatgpt.js
+      - ./index.js:/app/index.js
+      - ./playwright-proxy.js:/app/playwright-proxy.js
+      - ./mysql-store.js:/app/mysql-store.js
+      - ./hcaptcha-runtime.js:/app/hcaptcha-runtime.js
+      - ./payment-retry.js:/app/payment-retry.js
+      - ./proxy-pool.js:/app/proxy-pool.js
+      - ./stripe-payment.js:/app/stripe-payment.js
+      - ./hcaptcha-solver.js:/app/hcaptcha-solver.js
+      - ./captcha-platform.js:/app/captcha-platform.js
+      - ./hcaptcha-runtime.js:/app/hcaptcha-runtime.js
+      - ./human-verification.js:/app/human-verification.js
+      - ./auth-page-detect.js:/app/auth-page-detect.js
+      - ./session-auth.js:/app/session-auth.js
+      - ./subscription-check.js:/app/subscription-check.js
+      - ./pricing-checkout.js:/app/pricing-checkout.js
+      - ./tax-free-address.js:/app/tax-free-address.js
+      - ./browser-pool.js:/app/browser-pool.js
+      - ./browser-pool-client.js:/app/browser-pool-client.js
+      - ./browser-standalone.js:/app/browser-standalone.js
+      - ./browser-runtime.js:/app/browser-runtime.js
+      - ./admin-auth.js:/app/admin-auth.js
+      - ./admin-paths.js:/app/admin-paths.js
+      - ./hcaptcha/solver.py:/app/hcaptcha/solver.py
+    # 浏览器自动化 + hCaptcha ML 推理需要较大共享内存
+    shm_size: '2gb'
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+
+volumes:
+  mysql_data:

@@ -15,6 +15,8 @@ _server.out.log
 _server.err.log
 debug_screenshots/
 product_files/
+data/hcaptcha-config.json
+data/browser-pool/
 scratch/
 mail.txt
 
