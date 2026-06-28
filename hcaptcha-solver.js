@@ -101,8 +101,13 @@ function isSolverSuccessResult(parsed) {
     if (!parsed || typeof parsed !== 'object') {
         return false;
     }
-    if (parsed.type === 'passive_checkbox' || parsed.type === 'response') {
+    if (parsed.type === 'response' && String(parsed.response || '').trim()) {
         return true;
+    }
+    if (parsed.type === 'passive_checkbox') {
+        const token = String(parsed.response || '').trim();
+        const verified = Boolean(parsed.raw?.verified);
+        return Boolean(token) || verified;
     }
     return Boolean(parsed.response);
 }

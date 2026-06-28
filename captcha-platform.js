@@ -421,7 +421,9 @@ async function extractHcaptchaParamsFromPage(page) {
             [/"sitekey"\s*:\s*"([^"]+)"/g, addSiteKey],
             [/hcaptcha_site_key"\s*:\s*"([^"]+)"/g, addSiteKey],
             [/"rqdata"\s*:\s*"([^"]+)"/g, addRqdata],
-            [/hcaptcha_rqdata"\s*:\s*"([^"]+)"/g, addRqdata]
+            [/hcaptcha_rqdata"\s*:\s*"([^"]+)"/g, addRqdata],
+            [/rqdata['"]\s*:\s*['"]([^'"]+)['"]/g, addRqdata],
+            [/\\"rqdata\\"\s*:\s*\\"([^"\\]+)\\"/g, addRqdata]
         ];
         for (const [regex, adder] of patterns) {
             for (const match of html.matchAll(regex)) {

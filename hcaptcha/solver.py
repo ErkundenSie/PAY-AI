@@ -2742,6 +2742,12 @@ def checkbox_frame(page):
 
 def _is_checkbox_only_overlay_text(text: str) -> bool:
     t = str(text or "").lower()
+    if re.search(
+        r"click the|click on|please click|please select|drag the|select all|"
+        r"matching shape|identify|choose all|different from|arrows",
+        t,
+    ):
+        return False
     if "one more step" in t and "select the checkbox" in t:
         return True
     if "i am human" in t and not re.search(
@@ -2752,7 +2758,40 @@ def _is_checkbox_only_overlay_text(text: str) -> bool:
     return False
 
 
+def _page_has_visible_hcaptcha_challenge(page) -> bool:
+    """主文档或 iframe 内仍有可见图片/交互 challenge（不能只看主页面 innerText）。"""
+    ch = challenge_frame(page)
+    if ch is not None and _frame_looks_like_challenge(ch):
+        return True
+    try:
+        for frame in page.frames:
+            url = str(frame.url or "").lower()
+            if _should_ignore_hcaptcha_frame(url):
+                continue
+            if "hcaptcha" not in url and "newassets" not in url:
+                continue
+            try:
+                if frame.locator("canvas").count() > 0:
+                    return True
+                if frame.locator(".challenge-container, .button-submit, .task-grid").count() > 0:
+                    return True
+                body = str(frame.locator("body").inner_text(timeout=600) or "").lower()
+                if body and re.search(
+                    r"click the|please click|please select|drag the|"
+                    r"different from|matching shape|choose all|identify",
+                    body,
+                ):
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return False
+
+
 def _checkout_overlay_cleared(page) -> bool:
+    if _page_has_visible_hcaptcha_challenge(page):
+        return False
     try:
         body = page.locator("body").inner_text(timeout=1_000).lower()
     except Exception:
@@ -2760,6 +2799,12 @@ def _checkout_overlay_cleared(page) -> bool:
     if "one more step" in body and "select the checkbox" in body:
         return False
     if re.search(r"one more step before you.?re done", body) and "i am human" in body:
+        return False
+    if re.search(
+        r"click the|please click|please select|drag the|different from|"
+        r"matching shape|choose all|identify",
+        body,
+    ):
         return False
     return True
 
@@ -2776,11 +2821,14 @@ def _wait_passive_checkbox_clear(page, observed_network_solution, deadline: floa
         if result:
             return result
         if _checkout_overlay_cleared(page):
+            if _page_has_visible_hcaptcha_challenge(page):
+                page.wait_for_timeout(800)
+                continue
             log("主页面 checkbox 弹层已消失，视为被动验证通过")
             return {
                 "type": "passive_checkbox",
                 "response": "",
-                "raw": {"source": "passive_checkbox_overlay"},
+                "raw": {"source": "passive_checkbox_overlay", "verified": True},
             }
         page.wait_for_timeout(800)
     return None
@@ -2879,6 +2927,9 @@ def _looks_like_prompt_line(line: str) -> bool:
         "please drop",
         "tap on",
         "click on",
+        "click the",
+        "different from",
+        "that are different",
         "select all",
         "drag the object",
         "drop the object",
@@ -2979,6 +3030,18 @@ def get_prompt(ch, network_prompt: str = "") -> str:
     first = _normalize_prompt_text(lines[0])
     if _looks_like_prompt_line(first):
         return first
+    for line in lines:
+        text = _normalize_prompt_text(line)
+        lower = text.lower()
+        if len(text) < 10:
+            continue
+        if _is_checkbox_only_overlay_text(text):
+            continue
+        if re.search(
+            r"click|select|drag|tap|choose|identify|arrow|different|matching",
+            lower,
+        ):
+            return text
     return ""
 
 
@@ -3900,6 +3963,8 @@ def solve_bridge(
                     return result
 
                 ch = challenge_frame(page)
+                if ch is None and _page_has_visible_hcaptcha_challenge(page):
+                    ch = challenge_frame(page)
                 if ch is None:
                     if click_checkbox(page):
                         log("已点击 checkbox，等待 challenge ...")

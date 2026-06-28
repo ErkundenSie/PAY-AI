@@ -94,11 +94,54 @@ async function hasHcaptchaImageChallenge(page) {
             return true;
         }
     }
+    for (const frame of page.frames()) {
+        const url = String(frame.url() || '').toLowerCase();
+        if (isInvisibleStripeHcaptchaUrl(url)) {
+            continue;
+        }
+        if (!/hcaptcha|newassets/i.test(url)) {
+            continue;
+        }
+        try {
+            const looksLikeChallenge = await frame.evaluate(() => {
+                const body = String(document.body?.innerText || '').toLowerCase();
+                if (/click the|please click|please select|drag the|different from|matching shape|choose all|identify/i.test(body)) {
+                    return true;
+                }
+                if (document.querySelector('.challenge-container, .button-submit, .task-grid, canvas')) {
+                    return true;
+                }
+                return false;
+            });
+            if (looksLikeChallenge) {
+                return true;
+            }
+        } catch (_) { /* cross-origin frame */ }
+    }
+    try {
+        const mainHasChallenge = await page.evaluate(() => {
+            const body = String(document.body?.innerText || '').toLowerCase();
+            return /click the .+ (different|arrow|select)/i.test(body)
+                || /please click|please select|drag the matching|that are different/i.test(body);
+        });
+        if (mainHasChallenge) {
+            return true;
+        }
+    } catch (_) { /* ignore */ }
     return false;
 }
 
 async function hasHcaptchaSolverTarget(page) {
-    return hasHcaptchaImageChallenge(page);
+    if (await hasHcaptchaImageChallenge(page)) {
+        return true;
+    }
+    for (const frame of page.frames()) {
+        const url = String(frame.url() || '').toLowerCase();
+        if (isHcaptchaCheckboxFrameUrl(url)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 async function waitForPassiveCheckboxClear(page, phase, verifyOpts, timeoutMs = 45000) {
@@ -946,19 +989,30 @@ async function attemptCaptchaPlatformSolver(page, phase = 'platform', verifyOpts
         return false;
     }
 
+    const imageChallenge = await hasHcaptchaImageChallenge(page);
+    if (imageChallenge) {
+        captchaLog(phase, '已出现 hCaptcha 图片题，打码 token 注入无效，跳过平台解题', 'warn');
+        return false;
+    }
+
     captchaLog(phase, '尝试打码平台（createTask/getTaskResult）解题…');
     const params = await extractHcaptchaParamsFromPage(page);
+    const userAgent = String(
+        await page.evaluate(() => navigator.userAgent).catch(() => '')
+        || process.env.HCAPTCHA_USER_AGENT
+        || ''
+    ).trim();
     captchaLog(
         phase,
-        `提取参数 siteKey=${params.siteKey.slice(0, 12)}… rqdata=${params.rqdata ? 'yes' : 'no'} urls=${params.websiteUrls.length}`
+        `提取参数 siteKey=${params.siteKey.slice(0, 12)}… rqdata=${params.rqdata ? 'yes' : 'no'} urls=${params.websiteUrls.length} ua=${userAgent ? 'yes' : 'no'}`
     );
 
-    const imageChallenge = await hasHcaptchaImageChallenge(page);
     const solveResult = await solveHcaptchaViaPlatform({
         siteKey: params.siteKey,
         rqdata: params.rqdata,
         websiteUrls: params.websiteUrls,
-        isInvisible: !imageChallenge
+        isInvisible: true,
+        userAgent
     });
 
     if (!solveResult.ok) {
@@ -1036,7 +1090,7 @@ async function attemptHcaptchaVisualSolver(page, phase = 'visual') {
     }
 
     if (solverResult.result?.type === 'passive_checkbox') {
-        captchaLog(phase, '视觉求解器：被动 checkbox 已通过，等待支付继续...');
+        captchaLog(phase, '视觉求解器：被动 checkbox 信号，等待页面确认...');
     } else {
         captchaLog(phase, '视觉求解器已完成，等待页面继续...');
     }
@@ -1205,25 +1259,31 @@ async function clearHumanVerification(page, options = {}) {
         overlayCaptcha = await hasAnyCheckoutCaptchaSignal(page);
         imageChallenge = await hasHcaptchaImageChallenge(page);
 
-        if (overlayCaptcha && isCaptchaPlatformEnabled()) {
+        // 图片题优先走 VLM 实点（参考 Gpt-Agreement-Payment：浏览器侧解题优先，打码平台仅 passive 兜底）
+        const shouldRunSolver = useVisualSolver
+            && isHcaptchaSolverEnabled()
+            && (imageChallenge || overlayCaptcha);
+
+        if (shouldRunSolver && imageChallenge) {
+            const solved = await attemptHcaptchaVisualSolver(page, `${phase}-vlm-${round}`);
+            if (solved && await isVerificationCleared(page, verifyOpts)) {
+                return { cleared: true, rounds: round, via: 'visual-solver' };
+            }
+        }
+
+        if (overlayCaptcha && isCaptchaPlatformEnabled() && !imageChallenge) {
             const platformOk = await attemptCaptchaPlatformSolver(page, `${phase}-platform-${round}`, verifyOpts);
             if (platformOk && await isVerificationCleared(page, verifyOpts)) {
                 return { cleared: true, rounds: round, via: 'captcha-platform' };
             }
         }
 
-        const solverTarget = imageChallenge;
-        const shouldRunSolver = useVisualSolver
-            && isHcaptchaSolverEnabled()
-            && solverTarget
-            && (round >= 1 || overlayCaptcha);
-
-        if (shouldRunSolver) {
+        if (shouldRunSolver && !imageChallenge) {
             const solved = await attemptHcaptchaVisualSolver(page, `${phase}-vlm-${round}`);
             if (solved && await isVerificationCleared(page, verifyOpts)) {
                 return { cleared: true, rounds: round, via: 'visual-solver' };
             }
-        } else if (useVisualSolver && isHcaptchaSolverEnabled() && round >= 2) {
+        } else if (useVisualSolver && isHcaptchaSolverEnabled() && round >= 2 && !imageChallenge) {
             captchaLog(phase, '无可见 hCaptcha 图片题，跳过 VLM 求解器');
         }
 
