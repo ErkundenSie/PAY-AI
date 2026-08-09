@@ -4,9 +4,9 @@
 > 用户粘贴 Session + 兑换 CDK → 官方 Stripe Checkout → 信用卡卡池自动支付 → 订阅开通完成。  
 > 配套 **KC GPT自动充值系统** 后台：卡池管理、CDK 管理、任务监控、账单审计、浏览器池、并发控制。
 
-| 开发者 | QQ | 微信 |
-|--------|-----|------|
-| **KC** | 1619043 | widc0cc |
+| 开发者 | TG | 
+|--------|-----|
+| **KC** | KcCatk |
 
 [License: MIT](LICENSE) · Node.js 20+ · MySQL 8 · Playwright · Docker
 
@@ -414,10 +414,10 @@ A: 管理员 PowerShell 执行：`Set-ExecutionPolicy -Scope CurrentUser RemoteS
 | 项目 | 信息 |
 |------|------|
 | 开发者 | **KC** |
-| QQ | **1619043** |
-| 微信 | **widc0cc** |
+| TG | **KcCatk** |
 
-部署或使用过程中遇到问题，可通过以上方式联系开发者。
+
+
 
 ---
 
