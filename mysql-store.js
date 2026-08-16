@@ -19,8 +19,8 @@ const DB_PASSWORD = process.env.DB_PASSWORD || '';
 
 const SCHEMA_PATH = path.join(__dirname, 'mysql-schema.sql');
 const DEFAULT_ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || 'admin@vru.cc').trim().toLowerCase();
-const DEFAULT_ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '8023diao');
-const DEFAULT_ADMIN_SECONDARY_PASSWORD = String(process.env.ADMIN_SECONDARY_PASSWORD || '8023diao');
+const DEFAULT_ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'admin123');
+const DEFAULT_ADMIN_SECONDARY_PASSWORD = String(process.env.ADMIN_SECONDARY_PASSWORD || 'admin123');
 const DEFAULT_ADMIN_LOGIN_PATH = String(process.env.ADMIN_LOGIN_PATH || 'admin-login').trim().toLowerCase();
 const DEFAULT_ADMIN_PANEL_PATH = String(process.env.ADMIN_PANEL_PATH || 'admin').trim().toLowerCase();
 const { normalizeAdminPaths } = require('./admin-paths');
@@ -239,6 +239,80 @@ async function ensureHcaptchaConfigDefaults() {
     }
 }
 
+// ─── 第三方 GPT 代充 API 配置 ────────────────────────────────────────────────
+
+const GPT_API_CONFIG_KEYS = [
+    'gpt_api_enabled',
+    'gpt_api_base_url',
+    'gpt_api_key',
+    'gpt_api_plan_key',
+    'gpt_api_country',
+    'gpt_api_currency'
+];
+
+async function ensureGptApiColumns() {
+    await ensureColumn('task_logs', 'gpt_api_order_id', "VARCHAR(128) NULL DEFAULT NULL");
+    await ensureColumn('task_logs', 'gpt_api_task_id', "VARCHAR(128) NULL DEFAULT NULL");
+    await ensureColumn('task_logs', 'gpt_api_raw', "MEDIUMTEXT NULL");
+}
+
+async function ensureGptApiConfigDefaults() {
+    const defaults = [
+        ['gpt_api_enabled', '0'],
+        ['gpt_api_base_url', 'https://kc.vpss.eu.cc/'],
+        ['gpt_api_key', ''],
+        ['gpt_api_plan_key', 'plus'],
+        ['gpt_api_country', 'PH'],
+        ['gpt_api_currency', 'PHP']
+    ];
+    for (const [key, value] of defaults) {
+        await runExecute(
+            `INSERT INTO app_config (config_key, config_value)
+             VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE config_value = config_value`,
+            [key, value]
+        );
+    }
+}
+
+async function getGptApiConfig() {
+    const rows = await runQuery(
+        `SELECT config_key, config_value
+         FROM app_config
+         WHERE config_key IN (${GPT_API_CONFIG_KEYS.map(() => '?').join(', ')})`,
+        GPT_API_CONFIG_KEYS
+    );
+    const map = Object.fromEntries(rows.map((row) => [row.config_key, row.config_value]));
+    return {
+        enabled: String(map.gpt_api_enabled || '0') === '1',
+        base_url: String(map.gpt_api_base_url || 'https://kc.vpss.eu.cc/').trim()
+            || 'https://kc.vpss.eu.cc/',
+        api_key: String(map.gpt_api_key || '').trim(),
+        plan_key: String(map.gpt_api_plan_key || 'plus').trim() || 'plus',
+        country: String(map.gpt_api_country || 'PH').trim().toUpperCase() || 'PH',
+        currency: String(map.gpt_api_currency || 'PHP').trim().toUpperCase() || 'PHP'
+    };
+}
+
+async function saveGptApiConfig(config = {}) {
+    const existing = await getGptApiConfig();
+    const apiKey = String(config.api_key || '').trim() || existing.api_key || '';
+    await runExecute(
+        `INSERT INTO app_config (config_key, config_value)
+         VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)
+         ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)`,
+        [
+            'gpt_api_enabled', config.enabled ? '1' : '0',
+            'gpt_api_base_url', String(config.base_url || existing.base_url || 'https://kc.vpss.eu.cc/').trim()
+                .replace(/\/+$/, '') || 'https://kc.vpss.eu.cc/',
+            'gpt_api_key', apiKey,
+            'gpt_api_plan_key', String(config.plan_key || existing.plan_key || 'plus').trim() || 'plus',
+            'gpt_api_country', String(config.country || existing.country || 'PH').trim().toUpperCase() || 'PH',
+            'gpt_api_currency', String(config.currency || existing.currency || 'PHP').trim().toUpperCase() || 'PHP'
+        ]
+    );
+}
+
 async function hasColumn(tableName, columnName) {
     const rows = await runQuery(
         `SELECT COUNT(*) AS count
@@ -317,6 +391,7 @@ async function ensureLegacyColumns() {
     await ensureColumn('task_logs', 'raw_output', 'MEDIUMTEXT NULL');
     await ensureColumn('task_logs', 'failure_screenshots', 'TEXT NULL');
     await ensureColumn('task_logs', 'session_payload', 'MEDIUMTEXT NULL');
+    await ensureColumn('task_logs', 'gpt_api_topup_code', "VARCHAR(255) NULL DEFAULT NULL");
     await ensureColumn('task_logs', 'created_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
     await ensureColumn('task_logs', 'updated_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
 
@@ -418,9 +493,11 @@ async function ensureReady() {
     const schemaSql = fs.readFileSync(SCHEMA_PATH, 'utf8');
     await runQuery(schemaSql);
     await ensureLegacyColumns();
+    await ensureGptApiColumns();
     await initializeBaseData();
     await ensureAdminSecurityDefaults();
     await ensureHcaptchaConfigDefaults();
+    await ensureGptApiConfigDefaults();
     await syncHcaptchaConfigPersistence();
     await migrateLegacyProxyConfig();
     await seedTaxFreeAddresses();
@@ -2544,7 +2621,8 @@ async function createTaskLog({ tokenPreview, sessionPayload, cdkCode, phone, car
 
 async function getTaskStatus(jobKey) {
     const rows = await runQuery(
-        `SELECT status, message, progress, raw_output, cdk_code, phone, card_last4, failure_screenshots
+        `SELECT status, message, progress, raw_output, cdk_code, phone, card_last4, failure_screenshots,
+                gpt_api_order_id, gpt_api_task_id, gpt_api_raw, gpt_api_topup_code
          FROM task_logs
          WHERE job_key = ?
          LIMIT 1`,
@@ -2586,7 +2664,7 @@ async function deleteTaskLogByJobKey(jobKey) {
     return { deleted: Number(result.affectedRows || 0), mediaDeleted };
 }
 
-async function updateTaskLog(jobKey, { status, message, rawOutput, cdkCode, phone, cardLast4, progress, failureScreenshots }) {
+async function updateTaskLog(jobKey, { status, message, rawOutput, cdkCode, phone, cardLast4, progress, failureScreenshots, gptApiOrderId, gptApiTaskId, gptApiRaw, gptApiTopupCode }) {
     const screenshotsJson = Array.isArray(failureScreenshots)
         ? JSON.stringify(failureScreenshots)
         : null;
@@ -2599,7 +2677,11 @@ async function updateTaskLog(jobKey, { status, message, rawOutput, cdkCode, phon
              cdk_code = COALESCE(?, cdk_code),
              phone = COALESCE(?, phone),
              card_last4 = COALESCE(?, card_last4),
-             failure_screenshots = COALESCE(?, failure_screenshots)
+             failure_screenshots = COALESCE(?, failure_screenshots),
+             gpt_api_order_id = COALESCE(?, gpt_api_order_id),
+             gpt_api_task_id = COALESCE(?, gpt_api_task_id),
+             gpt_api_raw = COALESCE(?, gpt_api_raw),
+             gpt_api_topup_code = COALESCE(?, gpt_api_topup_code)
          WHERE job_key = ?`,
         [
             String(status),
@@ -2610,6 +2692,10 @@ async function updateTaskLog(jobKey, { status, message, rawOutput, cdkCode, phon
             phone || null,
             cardLast4 || null,
             screenshotsJson,
+            gptApiOrderId || null,
+            gptApiTaskId || null,
+            gptApiRaw || null,
+            gptApiTopupCode || null,
             String(jobKey)
         ]
     );
@@ -3419,6 +3505,20 @@ async function getCardBillingSummary(cardLast4) {
     };
 }
 
+async function listRecentGptApiOrders(limit = 10) {
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 50));
+    return runQuery(
+        `SELECT job_key, cdk_code, status, message, progress, updated_at,
+                gpt_api_order_id, gpt_api_task_id, gpt_api_topup_code, gpt_api_raw
+         FROM task_logs
+         WHERE (gpt_api_order_id IS NOT NULL OR gpt_api_task_id IS NOT NULL)
+           AND status = 'failed'
+         ORDER BY updated_at DESC, id DESC
+         LIMIT ?`,
+        [safeLimit]
+    );
+}
+
 module.exports = {
     runQuery,
     runExecute,
@@ -3479,6 +3579,8 @@ module.exports = {
     setBrowserPoolEnabled,
     getTelegramConfig,
     saveTelegramConfig,
+    getGptApiConfig,
+    saveGptApiConfig,
     getHcaptchaConfig,
     saveHcaptchaConfig,
     syncHcaptchaConfigPersistence,
@@ -3494,6 +3596,7 @@ module.exports = {
     getTaskStatus,
     getRunningTaskByCdk,
     updateTaskLog,
+    listRecentGptApiOrders,
     listProducts,
     addProduct,
     upsertPendingProduct,

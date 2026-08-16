@@ -21,6 +21,7 @@ const { testCaptchaPlatformConnectivity, normalizeCaptchaPlatformApiUrl, resolve
 const browserPool = require('./browser-pool');
 const { buildWorkerRuntimeEnv } = require('./browser-runtime');
 const { querySubscriptionBySession, validateSessionTokenForQuery, cancelAutoRenew, resumeAutoRenew } = require('./subscription-check');
+const gptApi = require('./gpt-api-client');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -2388,6 +2389,105 @@ app.get('/api/admin/hcaptcha/logs', async (req, res) => {
     }
 });
 
+// ─── 第三方 GPT 代充 API 配置 ──────────────────────────────────────────────
+
+app.get('/api/admin/gpt-api', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const cfg = await store.getGptApiConfig();
+        const masked = gptApi.maskApiKey(cfg.api_key);
+        res.json({
+            success: true,
+            config: {
+                enabled: cfg.enabled,
+                base_url: cfg.base_url,
+                api_key_saved: Boolean(cfg.api_key),
+                api_key_preview: masked,
+                plan_key: cfg.plan_key,
+                country: cfg.country,
+                currency: cfg.currency
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/gpt-api', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const body = req.body || {};
+        await store.saveGptApiConfig({
+            enabled: Boolean(body.enabled),
+            base_url: body.base_url,
+            api_key: body.api_key,
+            plan_key: body.plan_key,
+            country: body.country,
+            currency: body.currency
+        });
+        res.json({ success: true, message: '第三方代充 API 配置已保存' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post('/api/admin/gpt-api/test', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const body = req.body || {};
+        const saved = await store.getGptApiConfig();
+        const merged = {
+            base_url: String(body.base_url || '').trim() || saved.base_url,
+            api_key: String(body.api_key || '').trim() || saved.api_key
+        };
+        const result = await gptApi.testConnection(merged);
+        if (!result.success) {
+            return res.status(400).json({ success: false, message: result.error || '连接失败' });
+        }
+        res.json({ success: true, message: result.message, plans: result.plans, balance: result.balance });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.get('/api/admin/gpt-api/status', async (req, res) => {
+    try {
+        await ensureStoreReady();
+        const cfg = await store.getGptApiConfig();
+        if (!cfg.api_key) {
+            return res.status(400).json({ success: false, message: '尚未配置第三方代充 API Key' });
+        }
+        const [plansResult, balanceResult, recentOrders] = await Promise.all([
+            gptApi.fetchPlans(cfg),
+            gptApi.queryBalance(cfg),
+            store.listRecentGptApiOrders(10)
+        ]);
+        if (!plansResult.success) {
+            return res.status(400).json({ success: false, message: `套餐查询失败: ${plansResult.error || '未知错误'}` });
+        }
+        const orders = recentOrders.map((order) => ({
+            job_key: order.job_key,
+            cdk_code: order.cdk_code,
+            status: order.status,
+            message: order.message,
+            updated_at: order.updated_at,
+            order_id: order.gpt_api_order_id,
+            task_id: order.gpt_api_task_id,
+            topup_code: order.gpt_api_topup_code || null
+        }));
+        res.json({
+            success: true,
+            gpt_plans: plansResult.gptPlans,
+            credit_plans: plansResult.creditPlans,
+            balance: balanceResult.success ? balanceResult.data : null,
+            balance_error: balanceResult.success ? null : balanceResult.error,
+            recent_orders: orders
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
 app.post('/api/admin/config', async (req, res) => {
     try {
         await ensureStoreReady();
@@ -3086,6 +3186,254 @@ function spawnCheckoutDebugWorker({ task, token, sessionRaw, planType, region, p
     })();
 }
 
+/**
+ * 第三方 GPT 代充 API 任务 Worker（协议见 协议api.md）
+ *
+ * 流程：
+ * 1. 读取后台配置（base_url / api_key / plan_key / country / currency / enabled）
+ * 2. 从银行卡池预留一张卡作为 new_card（可选，失败则跳过）
+ * 3. POST /pay 提交代充（带 Idempotency-Key = `cdk-${cdk}`）
+ * 4. 轮询订单/任务状态，直到终态（success / failed）
+ * 5. 将结果写回 task_logs（含 gpt_api_order_id / gpt_api_task_id / gpt_api_raw）
+ */
+const GPT_API_PLAN_MAP = Object.freeze({ plus: 'plus', pro_5x: 'pro5x', pro_20x: 'pro20x' });
+
+function mapGptApiPlanKey(planType) {
+    return GPT_API_PLAN_MAP[String(planType || '').trim()] || 'plus';
+}
+
+function parseCardExpiry(value) {
+    const match = String(value || '').trim().match(/^(0?[1-9]|1[0-2])\s*\/?\s*(\d{2}|\d{4})$/);
+    if (!match) throw new Error('银行卡有效期格式错误，应为 MMYY、MM/YY 或 MM/YYYY');
+    const year = Number(match[2].length === 2 ? `20${match[2]}` : match[2]);
+    return { month: Number(match[1]), year };
+}
+
+async function runGptApiWorker({ task, token, session, cdk, planType }) {
+    const { jobKey } = task;
+    const sessionPayload = session && typeof session === 'object'
+        ? session
+        : { access_token: token };
+    const accountEmail = task.tokenPreview || '';
+    let shouldRollbackCdk = true;
+    let reservedCard = null;
+
+    const setProgress = async (status, progress, message, extra = {}) => {
+        await store.updateTaskLog(jobKey, { status, progress, message, ...extra });
+        broadcastToTask(jobKey, {
+            type: status === 'running' ? 'progress' : 'status',
+            jobKey,
+            status,
+            progress,
+            message,
+            cdkCode: cdk
+        });
+    };
+
+    try {
+        const cfg = await store.getGptApiConfig();
+        if (!cfg.enabled) {
+            throw new Error('第三方代充 API 未启用，请在后台「系统配置」中开启并填写 API 地址与 Key');
+        }
+        if (!cfg.api_key) {
+            throw new Error('第三方代充 API Key 未配置');
+        }
+
+        const apiPlanKey = mapGptApiPlanKey(planType);
+        await setProgress('running', 10, '正在检查 Session 格式...');
+        const inspect = await gptApi.inspectPay(cfg, {
+            planKey: apiPlanKey,
+            session: sessionPayload
+        });
+        if (!inspect.success) {
+            const statusText = inspect.status ? ` (HTTP ${inspect.status})` : '';
+            const detail = [inspect.error, inspect.reason, inspect.upstreamStatus ? `upstream ${inspect.upstreamStatus}` : ''].filter(Boolean).join(' / ');
+            throw new Error(`Session 格式或有效期检查失败${statusText}: ${detail || 'session_invalid'}`);
+        }
+        logTask(jobKey, 'Session 本機格式／有效期檢查通過；上游將於代充任務中驗證登入狀態');
+
+        const proxy = await store.getActiveProxy();
+        logTask(jobKey, proxy
+            ? `第三方 API 协议代理 ${maskProxyForLog(proxy)}`
+            : '第三方 API 使用平台启用代理池');
+
+        // 本機检查通过后才从卡池预留一张卡，避免无效 Session 占用资产。
+        let newCard = null;
+        reservedCard = await store.reserveCard(`gptapi_${jobKey}`);
+        if (!reservedCard) {
+            throw new Error('银行卡池暂无可用卡片，请在后台「银行卡池」导入银行卡后再试');
+        }
+        const expiry = parseCardExpiry(reservedCard.card_expiry);
+        newCard = {
+            number: reservedCard.card_number,
+            exp_month: expiry.month,
+            exp_year: expiry.year,
+            cvc: reservedCard.card_cvc,
+            name: reservedCard.card_holder || 'API User',
+            country: cfg.country || 'PH'
+        };
+        logTask(jobKey, `第三方 API 使用卡池预留卡 ...${String(reservedCard.card_number || '').slice(-4)}`);
+
+        // 套餐从 CDK 的 plan_type 同步；国家币种使用协议默认值（PH / PHP）
+        await setProgress('running', 20, '正在提交代充订单...');
+        const idempotencyKey = `cdk-${cdk}`;
+        const submit = await gptApi.submitPay(cfg, {
+            planKey: apiPlanKey,
+            session: sessionPayload,
+            country: cfg.country,
+            currency: cfg.currency,
+            newCard,
+            proxy,
+            clientRef: `kc-cdk-${cdk}-${jobKey}`,
+            idempotencyKey
+        });
+
+        if (!submit.success) {
+            const statusText = submit.status ? ` (HTTP ${submit.status})` : '';
+            const detail = submit.error
+                || (submit.data && typeof submit.data === 'object' ? JSON.stringify(submit.data).slice(0, 300) : '');
+            throw new Error(`代充提交失败${statusText}: ${detail || '未知错误'}`);
+        }
+
+        const orderId = submit.orderId || submit.taskId || submit.id;
+        const taskId = submit.taskId || null;
+        if (!orderId) {
+            throw new Error(`代充提交成功但未返回订单号: ${JSON.stringify(submit.data).slice(0, 300)}`);
+        }
+
+        await setProgress('running', 35, `代充订单已创建 ${orderId}，正在等待上游处理...`, {
+            gptApiOrderId: orderId,
+            gptApiTaskId: taskId,
+            gptApiRaw: JSON.stringify(submit.data),
+            gptApiTopupCode: submit.topupCode
+        });
+
+        // 轮询状态
+        let finalStatus = 'running';
+        let finalMessage = '第三方代充进行中';
+        let lastRaw = submit.data;
+        const maxPolls = Number(process.env.GPT_API_MAX_POLLS || 120);
+        const pollIntervalMs = Number(process.env.GPT_API_POLL_INTERVAL_MS || 5000);
+
+        for (let poll = 1; poll <= maxPolls; poll += 1) {
+            await sleep(pollIntervalMs);
+
+            let queryRes = null;
+            if (taskId) {
+                queryRes = await gptApi.queryTask(cfg, taskId);
+            }
+            if (!queryRes || !queryRes.success || !queryRes.rawStatus) {
+                queryRes = await gptApi.queryOrder(cfg, orderId);
+            }
+
+            if (!queryRes || !queryRes.success) {
+                logTask(jobKey, `状态轮询第 ${poll} 次失败: ${queryRes?.error || '未知错误'}`, 'warn');
+                continue;
+            }
+
+            lastRaw = queryRes.data;
+            const rawStatus = String(queryRes.rawStatus || '').toLowerCase();
+            const progress = Math.min(95, 40 + poll);
+
+            if (isTerminalGptApiStatus(rawStatus)) {
+                const businessResult = lastRaw && typeof lastRaw.result === 'object' ? lastRaw.result : {};
+                const succeeded = businessResult.ok === false ? false : isSuccessGptApiStatus(rawStatus);
+                const failureDetail = businessResult.error || lastRaw?.error || businessResult.status || rawStatus || 'unknown';
+                finalStatus = succeeded ? 'success' : 'failed';
+                finalMessage = succeeded ? '第三方代充开通成功' : `第三方代充失败: ${failureDetail}`;
+                await setProgress(
+                    finalStatus,
+                    succeeded ? 100 : 99,
+                    finalMessage,
+                    {
+                        gptApiRaw: JSON.stringify(lastRaw),
+                        gptApiTopupCode: gptApi.extractTopupCode(lastRaw)
+                    }
+                );
+                break;
+            }
+
+            await setProgress('running', progress, `上游处理中 (${rawStatus || 'pending'})...`);
+        }
+
+        if (finalStatus === 'running') {
+            finalStatus = 'failed';
+            finalMessage = '第三方代充超时未完成，请稍后在第三方平台查询订单状态';
+            await setProgress(finalStatus, 99, finalMessage, {
+                gptApiRaw: JSON.stringify(lastRaw),
+                gptApiTopupCode: gptApi.extractTopupCode(lastRaw)
+            });
+        }
+
+        if (finalStatus === 'success') {
+            shouldRollbackCdk = false;
+            await store.resetCdkFailure(cdk);
+            await store.recordCardUsage(reservedCard?.id);
+            await store.releaseCard(reservedCard?.id).catch(() => { });
+            notifyTaskOutcome({ event: 'success', email: accountEmail, cdk, jobKey, message: finalMessage });
+        } else {
+            await store.releaseCard(reservedCard?.id).catch(() => { });
+            notifyTaskOutcome({ event: 'failure', email: accountEmail, cdk, jobKey, message: finalMessage });
+        }
+    } catch (error) {
+        console.error(`[GPT API Task Error] ${jobKey}:`, error);
+        logTask(jobKey, `第三方代充任务异常: ${error.message}`, 'error');
+        await store.releaseCard(reservedCard?.id).catch(() => { });
+        await store.updateTaskLog(jobKey, {
+            status: 'failed',
+            message: error.message,
+            progress: 0,
+            cdkCode: cdk
+        });
+        broadcastToTask(jobKey, {
+            type: 'status',
+            jobKey,
+            status: 'failed',
+            message: error.message,
+            cdkCode: cdk,
+            progress: 0
+        });
+        notifyTaskOutcome({ event: 'failure', email: accountEmail, cdk, jobKey, message: error.message });
+    } finally {
+        releaseForegroundSlot(jobKey);
+        if (shouldRollbackCdk) {
+            await store.markCdkUnused(cdk).catch(() => { });
+            logTask(jobKey, `CDK ${cdk} 已回滚为未使用`);
+        }
+        if (getTotalActiveJobs() === 0) {
+            const maintenanceModeState = await store.getMaintenanceModeState();
+            if (maintenanceModeState.enabled && maintenanceModeState.drain) {
+                await store.setMaintenanceModeState(true, false);
+            }
+        }
+    }
+}
+
+function maskProxyForLog(proxyUrl) {
+    const raw = String(proxyUrl || '');
+    try {
+        const masked = raw.replace(/\/\/([^@/]+)@/, '//***:***@');
+        return masked || '(空)';
+    } catch (_) {
+        return '(已配置)';
+    }
+}
+
+const GPT_API_TERMINAL_SUCCESS = new Set(['success', 'succeeded', 'completed', 'paid', 'active', '开通成功', '成功']);
+const GPT_API_TERMINAL_FAILED = new Set(['failed', 'declined', 'canceled', 'cancelled', 'error', 'expired', 'rejected', '失败', '取消']);
+
+function isSuccessGptApiStatus(rawStatus) {
+    const s = String(rawStatus || '').toLowerCase().trim();
+    return [...GPT_API_TERMINAL_SUCCESS].some((kw) => s.includes(kw.toLowerCase()));
+}
+
+function isTerminalGptApiStatus(rawStatus) {
+    const s = String(rawStatus || '').toLowerCase().trim();
+    if (!s) return false;
+    if (isSuccessGptApiStatus(s)) return true;
+    return [...GPT_API_TERMINAL_FAILED].some((kw) => s.includes(kw.toLowerCase()));
+}
+
 function spawnActivationWorker({ task, token, sessionRaw, cdk, cdkDetails, clientIp }) {
     (async () => {
         const checkoutScript = path.join(__dirname, 'index.js');
@@ -3404,18 +3752,24 @@ async function handleActivationRequest(req, res) {
             }
         }
 
-        const hasCard = await store.hasAvailableCard();
-        if (!hasCard) {
-            const poolEmail = extractEmailFromSession(rawSession);
-            fireTelegramNotification('card_pool_empty', {
-                email: poolEmail,
-                cdk,
-                message: '银行卡池暂无可用卡片，任务未启动'
-            });
-            return res.status(503).json({
-                success: false,
-                message: '银行卡池暂无可用卡片，请先在后台「银行卡池」导入银行卡后再试'
-            });
+        // 判断是否走第三方代充 API 模式（后台「系统配置」开启后生效）
+        const gptApiConfig = await store.getGptApiConfig();
+        const useGptApi = gptApiConfig.enabled && Boolean(gptApiConfig.api_key);
+
+        if (!useGptApi) {
+            const hasCard = await store.hasAvailableCard();
+            if (!hasCard) {
+                const poolEmail = extractEmailFromSession(rawSession);
+                fireTelegramNotification('card_pool_empty', {
+                    email: poolEmail,
+                    cdk,
+                    message: '银行卡池暂无可用卡片，任务未启动'
+                });
+                return res.status(503).json({
+                    success: false,
+                    message: '银行卡池暂无可用卡片，请先在后台「银行卡池」导入银行卡后再试'
+                });
+            }
         }
 
         const lockSuccess = await store.markCdkUsed(cdk);
@@ -3434,9 +3788,16 @@ async function handleActivationRequest(req, res) {
             progress: 3
         });
 
-        logTask(task.jobKey, `任务已创建，CDK=${cdk}`);
+        logTask(task.jobKey, `任务已创建，CDK=${cdk} mode=${useGptApi ? 'gpt-api' : 'local'}`);
         reserveForegroundSlot(task.jobKey);
-        spawnActivationWorker({ task, token, sessionRaw: storedSession, cdk, cdkDetails, clientIp });
+
+        if (useGptApi) {
+            runGptApiWorker({ task, token, session: JSON.parse(storedSession), cdk, planType: cdkDetails.plan_type || 'plus' }).catch((error) => {
+                console.error(`[GPT API Worker] ${task.jobKey}:`, error);
+            });
+        } else {
+            spawnActivationWorker({ task, token, sessionRaw: storedSession, cdk, cdkDetails, clientIp });
+        }
 
         return res.json({
             success: true,

@@ -373,31 +373,10 @@ function pickDefaultLogin2faMethod(methods = [], preferred = '') {
 }
 
 function createRequireSecondaryAuth(store, ensureStoreReady) {
+    // 已取消后台二级密码：直接放行，仅保留管理员登录鉴权（authenticateAdmin）
     return async function requireSecondaryAuth(req, res, next) {
-        const token = String(req.headers['x-admin-secondary-token'] || '').trim();
-        const payload = verifySecondaryToken(token);
-        if (!payload) {
-            return res.status(403).json({
-                success: false,
-                code: 'SECONDARY_AUTH_REQUIRED',
-                message: '查看此模块需要二级密码验证'
-            });
-        }
-        try {
-            await ensureStoreReady();
-            const authConfig = await store.getAdminAuthConfig();
-            if (Number(payload.sv || 0) !== Number(authConfig.secondaryPasswordVersion || 0)) {
-                return res.status(403).json({
-                    success: false,
-                    code: 'SECONDARY_AUTH_REQUIRED',
-                    message: '二级验证已失效，请重新验证'
-                });
-            }
-            req.secondaryAuth = payload;
-            return next();
-        } catch (error) {
-            return res.status(500).json({ success: false, message: error.message });
-        }
+        req.secondaryAuth = { bypassed: true };
+        return next();
     };
 }
 

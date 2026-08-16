@@ -352,6 +352,8 @@ async function verifyRealSessionApi(context) {
             timeout: 60000
         });
         const status = response?.status() || 0;
+        const headers = response?.headers?.() || {};
+        const headerText = Object.keys(headers).map((k) => `${k}:${headers[k]}`).join('\n').toLowerCase();
         const bodyText = await probe.evaluate(() => document.body?.innerText || '').catch(() => '');
         let data = null;
         try {
@@ -361,6 +363,17 @@ async function verifyRealSessionApi(context) {
         }
         if (data?.accessToken || data?.user?.email || data?.user?.id) {
             return { ok: true, data, status };
+        }
+        const isCloudflareChallenge = headerText.includes('cf-mitigated: challenge')
+            || /just a moment|verify you are human/i.test(bodyText);
+        if (isCloudflareChallenge) {
+            return {
+                ok: false,
+                status,
+                challenge: true,
+                error: `Cloudflare 人机验证拦截（HTTP ${status}，cf-mitigated: challenge）`
+                    + '。当前出口/代理 IP 被 ChatGPT 风控，请更换干净的住宅代理后重试'
+            };
         }
         const snippet = String(bodyText || '').replace(/\s+/g, ' ').slice(0, 120);
         return {

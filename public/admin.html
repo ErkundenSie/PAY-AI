@@ -1983,6 +1983,60 @@
                 <h1>系统配置</h1>
                 <p>自助开通并发与维护模式（保存后立即生效，无需重启服务）。Telegram / hCaptcha 需分别点各自区域的「保存」按钮；配置写入 MySQL，重启容器不会丢失（请勿使用 <code>docker compose down -v</code>）。</p>
             </div>
+
+            <!-- 第三方代充 API 设置 -->
+            <div class="panel">
+                <h2 class="panel-title">第三方代充 API（协议对接）</h2>
+                <p style="font-size: 13px; color: var(--text-dim); margin-top: 10px;">
+                    開啟後，前台兌換開通將呼叫第三方 GPT 代充平台提交訂單並輪詢狀態；將不再使用本地開通流程。
+                    銀行卡與代理會從「銀行卡池」「代理池」自動取得並隨訂單提交。
+                </p>
+                <div class="toggle-field" style="margin-top: 18px;">
+                    <div class="toggle-label"><span>啟用第三方代充 API（開啟後不再使用本地開通）</span></div>
+                    <label class="toggle-control">
+                        <input type="checkbox" id="gpt_api_enabled" class="toggle-input">
+                        <span class="toggle-switch"></span>
+                    </label>
+                </div>
+                <div class="form-group" style="margin-top: 18px;">
+                    <label>API 基础地址（Base URL）</label>
+                    <input type="text" id="gpt_api_base_url" class="asset-input" placeholder="https://kc.vpss.eu.cc/">
+                </div>
+                <div class="form-group" style="margin-top: 16px;">
+                    <label>API Key</label>
+                    <input type="password" id="gpt_api_key" class="asset-input" placeholder="gptk_..." autocomplete="off">
+                    <p id="gpt_api_key_hint" style="font-size: 12px; color: var(--text-dim); margin-top: 6px;"></p>
+                </div>
+                <p style="font-size: 12px; color: var(--text-dim); margin-top: 12px;">
+                    套餐（plan_key）将自动同步 CDK 的套餐类型；国家/币种使用协议默认值（PH / PHP），无需填写。
+                </p>
+                <div id="gpt_api_status" style="margin-top: 18px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-secondary);">
+                    <div style="display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap;">
+                        <strong>供應商帳戶狀態</strong>
+                        <button type="button" class="btn btn-secondary" onclick="refreshGptApiStatus()"><i data-lucide="refresh-cw"></i>重新整理</button>
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-top:14px;">
+                        <div><div style="font-size:12px;color:var(--text-dim)">可用積分</div><div id="gpt_api_credits" style="font-size:22px;font-weight:700">—</div></div>
+                        <div><div style="font-size:12px;color:var(--text-dim)">USD 餘額</div><div id="gpt_api_balance_usd" style="font-size:22px;font-weight:700">—</div></div>
+                        <div><div style="font-size:12px;color:var(--text-dim)">可用 GPT 套餐</div><div id="gpt_api_plans" style="font-size:13px;margin-top:5px">—</div></div>
+                        <div><div style="font-size:12px;color:var(--text-dim)">積分套餐</div><div id="gpt_api_credit_plans" style="font-size:13px;margin-top:5px">—</div></div>
+                    </div>
+                    <div style="margin-top:14px; font-size:12px; color:var(--text-dim)">最近失敗代充（僅顯示供應商回傳的卡密前綴）</div>
+                    <div id="gpt_api_recent_orders" style="font-size:13px; margin-top:7px; overflow-x:auto">尚未查詢</div>
+                    <div id="gpt_api_status_hint" style="font-size:12px;color:var(--text-dim); margin-top:10px"></div>
+                </div>
+                <div style="margin-top: 24px; display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-secondary" onclick="testGptApiConnection()">
+                        <i data-lucide="activity"></i>
+                        测试连接
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="saveGptApiConfig()">
+                        <i data-lucide="save"></i>
+                        保存 API 配置
+                    </button>
+                </div>
+            </div>
+
             <div class="config-grid">
                 <!-- 左：并发与维护 -->
                 <div class="panel">
@@ -2206,7 +2260,7 @@
             <div class="panel" style="margin-top: 24px;">
                 <h2 class="panel-title">安全设置</h2>
                 <p style="font-size: 13px; color: var(--text-dim); margin-top: 10px;">
-                    登录支持 Google Authenticator 或 Telegram 验证码；卡池/CDK/Session 需二级密码。
+                    登录支持 Google Authenticator 或 Telegram 验证码。
                 </p>
                 <div style="margin-top: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 10px;">
                     <div class="form-group" style="margin-bottom: 12px;">
@@ -2227,18 +2281,6 @@
                         保存入口路径
                     </button>
                 </div>
-                <div class="form-group" style="margin-top: 16px;">
-                    <label>二级密码（当前）</label>
-                    <input type="password" id="current_secondary_password" placeholder="当前二级密码" class="asset-input">
-                </div>
-                <div class="form-group" style="margin-top: 12px;">
-                    <label>新二级密码</label>
-                    <input type="password" id="new_secondary_password" placeholder="至少 6 位" class="asset-input">
-                </div>
-                <button class="btn btn-secondary" style="margin-top: 12px;" onclick="changeSecondaryPassword()">
-                    <i data-lucide="shield"></i>
-                    修改二级密码
-                </button>
                 <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);">
                     <div class="form-group" style="margin-bottom: 14px;">
                         <label>登录二次验证方式</label>
@@ -3144,7 +3186,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
         <div id="admin_login_logs" class="page-view">
             <div class="page-header">
                 <h1>后台登录日志</h1>
-                <p>记录后台登录、二次验证、二级密码解锁等安全事件（IP、浏览器指纹）</p>
+                <p>记录后台登录、二次验证等安全事件（IP、浏览器指纹）</p>
             </div>
             <div class="panel">
                 <div class="panel-header">
@@ -3176,34 +3218,17 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
         </div>
     </main>
 
-    <div id="secondary_auth_overlay" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.55); z-index:9999; place-items:center; padding:24px;">
-        <div style="background:#fff; border-radius:16px; padding:28px; width:100%; max-width:420px; box-shadow:0 20px 50px rgba(0,0,0,0.2);">
-            <h3 style="margin-bottom:8px; font-size:20px;">二级密码验证</h3>
-            <p style="color:#64748b; font-size:13px; margin-bottom:16px;">银行卡池、CDK 管理、Session 管理需要额外验证。</p>
-            <input id="secondary_password_input" type="password" placeholder="请输入二级密码" style="width:100%; padding:12px; border:1px solid #e5e7eb; border-radius:10px; margin-bottom:12px;">
-            <button type="button" class="btn btn-primary" style="width:100%;" onclick="submitSecondaryPassword()">验证并进入</button>
-            <button type="button" class="btn btn-secondary" style="width:100%; margin-top:10px;" onclick="closeSecondaryAuthModal()">取消</button>
-            <div id="secondary_auth_message" style="margin-top:12px; font-size:13px; color:#ef4444;"></div>
-        </div>
-    </div>
-
     <script>
         const TOKEN_KEY = 'plus_admin_token';
-        const SECONDARY_TOKEN_KEY = 'plus_admin_secondary_token';
         let adminLoginPath = '/admin-login';
-        const SENSITIVE_PAGES = new Set(['cards', 'cdks', 'sessions']);
         const BUSINESS_PAGES = new Set(['checkout_debug', 'cards', 'cdks', 'sessions', 'billing']);
         const ADMIN_LOGIN_EVENT_LABELS = {
             login_success: '登录成功',
             login_failed: '登录失败',
             '2fa_failed': '二次验证失败',
-            secondary_success: '二级密码通过',
-            secondary_failed: '二级密码失败',
             password_changed: '修改密码',
             logout: '退出登录'
         };
-        let pendingSensitivePage = null;
-        let pendingSensitiveNavEl = null;
         const statusMap = {
             success: { class: 'status-success', label: 'SUCCESS' },
             failed: { class: 'status-failed', label: 'FAILED' },
@@ -3514,31 +3539,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
             lucide.createIcons();
         }
 
-        function getBrowserFingerprint() {
-            const parts = [
-                navigator.userAgent,
-                navigator.language,
-                screen.width,
-                screen.height,
-                Intl.DateTimeFormat().resolvedOptions().timeZone || ''
-            ];
-            return btoa(unescape(encodeURIComponent(parts.join('|')))).slice(0, 96);
-        }
-
-        function getSecondaryToken() {
-            return localStorage.getItem(SECONDARY_TOKEN_KEY);
-        }
-
-        function setSecondaryToken(token) {
-            if (token) {
-                localStorage.setItem(SECONDARY_TOKEN_KEY, token);
-            }
-        }
-
-        function clearSecondaryToken() {
-            localStorage.removeItem(SECONDARY_TOKEN_KEY);
-        }
-
         function getAdminToken() {
             return localStorage.getItem(TOKEN_KEY);
         }
@@ -3551,7 +3551,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
 
         function clearAdminToken() {
             localStorage.removeItem(TOKEN_KEY);
-            clearSecondaryToken();
         }
 
         function formatDurationText(totalSeconds) {
@@ -3629,79 +3628,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
             }
 
             const headers = { ...(options.headers || {}), Authorization: `Bearer ${token}` };
-            const secondaryToken = getSecondaryToken();
-            if (secondaryToken) {
-                headers['X-Admin-Secondary-Token'] = secondaryToken;
-            }
             const response = await fetch(url, { ...options, headers });
             if (response.status === 401) {
                 redirectToLogin();
                 throw new Error('登录已失效');
             }
-            if (response.status === 403) {
-                const data = await response.clone().json().catch(() => ({}));
-                if (data.code === 'SECONDARY_AUTH_REQUIRED') {
-                    clearSecondaryToken();
-                    throw new Error('SECONDARY_AUTH_REQUIRED');
-                }
-            }
             return response;
-        }
-
-        async function ensureSecondaryAuth() {
-            const token = getSecondaryToken();
-            if (token) {
-                const res = await authFetch('/api/admin/secondary/session');
-                const data = await res.json();
-                if (data.verified) {
-                    return true;
-                }
-                clearSecondaryToken();
-            }
-            return false;
-        }
-
-        function openSecondaryAuthModal(pageId, navEl) {
-            pendingSensitivePage = pageId;
-            pendingSensitiveNavEl = navEl || null;
-            document.getElementById('secondary_auth_message').textContent = '';
-            document.getElementById('secondary_password_input').value = '';
-            document.getElementById('secondary_auth_overlay').style.display = 'grid';
-            document.getElementById('secondary_password_input').focus();
-        }
-
-        function closeSecondaryAuthModal() {
-            document.getElementById('secondary_auth_overlay').style.display = 'none';
-            pendingSensitivePage = null;
-            pendingSensitiveNavEl = null;
-        }
-
-        async function submitSecondaryPassword() {
-            const password = document.getElementById('secondary_password_input').value;
-            const msgEl = document.getElementById('secondary_auth_message');
-            if (!password) {
-                msgEl.textContent = '请输入二级密码';
-                return;
-            }
-            try {
-                const res = await authFetch('/api/admin/verify-secondary', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password, fingerprint: getBrowserFingerprint() })
-                });
-                const data = await res.json();
-                if (!res.ok || !data.success) {
-                    msgEl.textContent = data.message || '验证失败';
-                    return;
-                }
-                setSecondaryToken(data.secondaryToken);
-                closeSecondaryAuthModal();
-                if (pendingSensitivePage) {
-                    switchPageInternal(pendingSensitivePage, pendingSensitiveNavEl);
-                }
-            } catch (error) {
-                msgEl.textContent = error.message || '验证失败';
-            }
         }
 
         async function loadAdminSecurityStatus() {
@@ -3862,31 +3794,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                 await loadAdminSecurityStatus();
             } catch (error) {
                 showMessage(error.message || '关闭失败', 'error');
-            }
-        }
-
-        async function changeSecondaryPassword() {
-            const currentPassword = document.getElementById('current_secondary_password').value;
-            const newPassword = document.getElementById('new_secondary_password').value.trim();
-            if (!currentPassword || newPassword.length < 6) {
-                showMessage('请填写当前二级密码，且新密码至少 6 位', 'warning');
-                return;
-            }
-            try {
-                const res = await authFetch('/api/admin/change-secondary-password', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ currentPassword, newPassword })
-                });
-                const data = await res.json();
-                showMessage(data.message || (data.success ? '已更新' : '失败'), data.success ? 'success' : 'error');
-                if (data.success) {
-                    clearSecondaryToken();
-                    document.getElementById('current_secondary_password').value = '';
-                    document.getElementById('new_secondary_password').value = '';
-                }
-            } catch (error) {
-                showMessage(error.message || '修改失败', 'error');
             }
         }
 
@@ -4966,13 +4873,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
         }
 
         async function switchPage(pId, el) {
-            if (SENSITIVE_PAGES.has(pId)) {
-                const ok = await ensureSecondaryAuth();
-                if (!ok) {
-                    openSecondaryAuthModal(pId, el);
-                    return;
-                }
-            }
             switchPageInternal(pId, el);
         }
 
@@ -7743,6 +7643,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                 await ensureAdminSession();
                 await loadData(true);
                 await loadRegionConfig();
+                await loadGptApiConfig();
                 if (adminDataRefreshTimer) {
                     clearInterval(adminDataRefreshTimer);
                 }
@@ -8127,6 +8028,131 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                 showMessage(e.message || '保存地区失败', 'error');
             }
             lucide.createIcons();
+        }
+
+        // ─── 第三方代充 API 配置 ─────────────────────────────────────────────
+        async function loadGptApiConfig() {
+            try {
+                const res = await authFetch('/api/admin/gpt-api');
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    throw new Error(data.message || '加载 API 配置失败');
+                }
+                const cfg = data.config || {};
+                const enabledEl = document.getElementById('gpt_api_enabled');
+                if (enabledEl) enabledEl.checked = Boolean(cfg.enabled);
+                const baseUrlEl = document.getElementById('gpt_api_base_url');
+                if (baseUrlEl) baseUrlEl.value = cfg.base_url || '';
+                const keyEl = document.getElementById('gpt_api_key');
+                const keyHint = document.getElementById('gpt_api_key_hint');
+                if (keyEl) keyEl.value = '';
+                if (keyEl) keyEl.placeholder = cfg.api_key_saved
+                    ? `已保存（${cfg.api_key_preview || 'gptk_…'}）留空不修改`
+                    : 'gptk_...';
+                if (keyHint) {
+                    keyHint.textContent = cfg.api_key_saved ? '✓ API Key 已保存' : '尚未配置 API Key';
+                }
+                if (cfg.api_key_saved) refreshGptApiStatus();
+            } catch (e) {
+                console.error('loadGptApiConfig failed', e);
+            }
+        }
+
+        function buildGptApiPayload() {
+            return {
+                enabled: Boolean(document.getElementById('gpt_api_enabled')?.checked),
+                base_url: document.getElementById('gpt_api_base_url')?.value.trim() || '',
+                api_key: document.getElementById('gpt_api_key')?.value.trim() || ''
+            };
+        }
+
+        async function saveGptApiConfig() {
+            try {
+                const res = await authFetch('/api/admin/gpt-api', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(buildGptApiPayload())
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    throw new Error(data.message || '保存失败');
+                }
+                showMessage(data.message, 'success');
+                await loadGptApiConfig();
+            } catch (error) {
+                showMessage(error.message || '第三方代充 API 配置保存失败', 'error');
+            }
+        }
+
+        function renderGptApiStatus(data) {
+            const balance = data.balance || {};
+            document.getElementById('gpt_api_credits').textContent = balance.credits ?? '—';
+            document.getElementById('gpt_api_balance_usd').textContent = balance.balance_usd
+                ? `$${balance.balance_usd}`
+                : (balance.balance != null ? `${balance.balance} cents` : '—');
+            const gptPlans = (data.gpt_plans || []).filter((p) => p.enabled !== 0 && p.enabled !== false);
+            document.getElementById('gpt_api_plans').textContent = gptPlans.length
+                ? gptPlans.map((p) => `${p.name || p.key} (${p.key || '—'})`).join('、')
+                : '無可用套餐';
+            const creditPlans = data.credit_plans || [];
+            document.getElementById('gpt_api_credit_plans').textContent = creditPlans.length
+                ? creditPlans.map((p) => `${p.name || p.id}: ${p.credits ?? '—'} 積分`).join('、')
+                : '無';
+            const orders = data.recent_orders || [];
+            document.getElementById('gpt_api_recent_orders').innerHTML = orders.length
+                ? `<table style="width:100%; border-collapse:collapse"><thead><tr><th style="text-align:left">訂單</th><th style="text-align:left">狀態</th><th style="text-align:left">套餐卡密</th><th style="text-align:left">更新時間</th></tr></thead><tbody>${orders.map((o) => `<tr><td>${escapeHtml(String(o.order_id || o.task_id || '—'))}</td><td>${escapeHtml(o.status || '—')}</td><td>${escapeHtml(o.topup_code || '—')}</td><td>${escapeHtml(o.updated_at || '—')}</td></tr>`).join('')}</tbody></table>`
+                : '尚無失敗的第三方代充訂單';
+            document.getElementById('gpt_api_status_hint').textContent = data.balance_error
+                ? `積分查詢失敗：${data.balance_error}`
+                : '資料來自供應商 /plans 與 /balance；完整卡密不會由接口回傳。';
+        }
+
+        async function readApiJson(response, fallbackMessage) {
+            const contentType = response.headers.get('content-type') || '';
+            const text = await response.text();
+            if (!contentType.includes('application/json')) {
+                const preview = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+                throw new Error(`${fallbackMessage}：伺服器回傳 HTML，請重新啟動應用服務後再試${preview ? `（${preview}）` : ''}`);
+            }
+            try {
+                return JSON.parse(text);
+            } catch (_) {
+                throw new Error(`${fallbackMessage}：伺服器回傳了無法解析的 JSON`);
+            }
+        }
+
+        async function refreshGptApiStatus() {
+            try {
+                const res = await authFetch('/api/admin/gpt-api/status');
+                const data = await readApiJson(res, '狀態查詢失敗');
+                if (!res.ok || !data.success) throw new Error(data.message || '狀態查詢失敗');
+                renderGptApiStatus(data);
+            } catch (error) {
+                document.getElementById('gpt_api_status_hint').textContent = error.message || '狀態查詢失敗';
+            }
+            lucide.createIcons();
+        }
+
+        async function testGptApiConnection() {
+            const payload = buildGptApiPayload();
+            const hasSavedKey = Boolean(document.getElementById('gpt_api_key_hint')?.textContent.includes('已保存'));
+            if (!payload.api_key && !hasSavedKey) {
+                showMessage('請先填寫並保存 API Key', 'warning');
+                return;
+            }
+            try {
+                const res = await authFetch('/api/admin/gpt-api/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await readApiJson(res, 'API 連線測試失敗');
+                if (!res.ok || !data.success) throw new Error(data.message || '連線失敗');
+                showMessage(data.message, 'success');
+                await refreshGptApiStatus();
+            } catch (error) {
+                showMessage(error.message || 'API 連線測試失敗', 'error');
+            }
         }
 
         const US_TAX_FREE_STATE_NAMES = ['Oregon', 'Delaware', 'Montana', 'New Hampshire', 'Alaska'];
