@@ -1,3 +1,5 @@
+require('./load-env');
+
 const express = require('express');
 const { spawn, execFileSync } = require('child_process');
 const path = require('path');

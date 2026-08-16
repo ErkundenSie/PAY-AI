@@ -1,3 +1,5 @@
+require('./load-env');
+
 const mysql = require('mysql2/promise');
 
 const DB_HOST = process.env.DB_HOST || '127.0.0.1';

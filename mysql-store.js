@@ -218,6 +218,19 @@ async function ensureAdminSecurityDefaults() {
     }
 }
 
+async function syncAdminConfigFromEnvironment() {
+    if (String(process.env.ADMIN_CONFIG_SYNC || '0') !== '1') return;
+
+    await updateAdminEmail(DEFAULT_ADMIN_EMAIL);
+    await updateAdminPassword(DEFAULT_ADMIN_PASSWORD);
+    await updateAdminSecondaryPassword(DEFAULT_ADMIN_SECONDARY_PASSWORD);
+    await saveAdminPaths({
+        loginPath: DEFAULT_ADMIN_LOGIN_PATH,
+        panelPath: DEFAULT_ADMIN_PANEL_PATH
+    });
+    console.warn('[配置] ADMIN_CONFIG_SYNC=1：已用环境变量覆盖已有后台账号、密码和路径；请将其改回 0 后重启。');
+}
+
 async function ensureHcaptchaConfigDefaults() {
     const defaults = [
         ['hcaptcha_solver_enabled', '1'],
@@ -496,6 +509,7 @@ async function ensureReady() {
     await ensureGptApiColumns();
     await initializeBaseData();
     await ensureAdminSecurityDefaults();
+    await syncAdminConfigFromEnvironment();
     await ensureHcaptchaConfigDefaults();
     await ensureGptApiConfigDefaults();
     await syncHcaptchaConfigPersistence();

@@ -1,3 +1,5 @@
+require('./load-env');
+
 const { executePaymentWithRetry } = require('./payment-retry');
 const { openPricingCheckout } = require('./pricing-checkout');
 const { openApiCheckout } = require('./chatgpt');

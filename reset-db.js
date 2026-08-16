@@ -1,3 +1,5 @@
+require('./load-env');
+
 const mysql = require('mysql2/promise');
 
 // 数据库配置（请根据实际情况修改）

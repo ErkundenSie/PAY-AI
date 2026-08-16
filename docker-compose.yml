@@ -41,15 +41,21 @@ services:
       - "${PORT:-3100}:3000"
     environment:
       PORT: 3000
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_USER: root
+      DB_HOST: ${DB_HOST:-mysql}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:-your_mysql_password}
       DB_NAME: ${DB_NAME:-plus_papay}
       DB_POOL_LIMIT: 60
       HEADFUL: 0
       PROXY: ${PROXY:-}
+      ADMIN_TOKEN_SECRET: ${ADMIN_TOKEN_SECRET:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@vru.cc}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      ADMIN_SECONDARY_PASSWORD: ${ADMIN_SECONDARY_PASSWORD:-admin}
+      ADMIN_LOGIN_PATH: ${ADMIN_LOGIN_PATH:-admin-login}
+      ADMIN_PANEL_PATH: ${ADMIN_PANEL_PATH:-admin}
+      ADMIN_CONFIG_SYNC: ${ADMIN_CONFIG_SYNC:-0}
       HCAPTCHA_CONFIG_FILE: /app/data/hcaptcha-config.json
       HCAPTCHA_VLM_API_KEY: ${HCAPTCHA_VLM_API_KEY:-}
       HCAPTCHA_VLM_BASE_URL: ${HCAPTCHA_VLM_BASE_URL:-https://api.openai.com/v1}
