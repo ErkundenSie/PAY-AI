@@ -7295,7 +7295,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"></textarea>
                     socket.onopen = () => {
                         clearTimeout(reconnectTimer);
                         reconnectTimer = null;
-                        socket.send(JSON.stringify({ type: 'subscribe', jobKey: data.jobKey }));
+                        socket.send(JSON.stringify({ type: 'subscribe', jobKey: data.jobKey, adminToken: getAdminToken() }));
                         startHeartbeat();
                     };
 

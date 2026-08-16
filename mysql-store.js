@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const mysql = require('mysql2/promise');
+const { encryptSecret, decryptSecret } = require('./data-crypto');
 const {
     substituteProxySession,
     hashProxyUrl,
@@ -19,8 +20,8 @@ const DB_PASSWORD = process.env.DB_PASSWORD || '';
 
 const SCHEMA_PATH = path.join(__dirname, 'mysql-schema.sql');
 const DEFAULT_ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || 'admin@vru.cc').trim().toLowerCase();
-const DEFAULT_ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'admin123');
-const DEFAULT_ADMIN_SECONDARY_PASSWORD = String(process.env.ADMIN_SECONDARY_PASSWORD || 'admin123');
+const DEFAULT_ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '');
+const DEFAULT_ADMIN_SECONDARY_PASSWORD = String(process.env.ADMIN_SECONDARY_PASSWORD || '');
 const DEFAULT_ADMIN_LOGIN_PATH = String(process.env.ADMIN_LOGIN_PATH || 'admin-login').trim().toLowerCase();
 const DEFAULT_ADMIN_PANEL_PATH = String(process.env.ADMIN_PANEL_PATH || 'admin').trim().toLowerCase();
 const { normalizeAdminPaths } = require('./admin-paths');
@@ -295,7 +296,7 @@ async function getGptApiConfig() {
          WHERE config_key IN (${GPT_API_CONFIG_KEYS.map(() => '?').join(', ')})`,
         GPT_API_CONFIG_KEYS
     );
-    const map = Object.fromEntries(rows.map((row) => [row.config_key, row.config_value]));
+    const map = Object.fromEntries(rows.map((row) => [row.config_key, decodeConfigValue(row.config_key, row.config_value)]));
     return {
         enabled: String(map.gpt_api_enabled || '0') === '1',
         base_url: String(map.gpt_api_base_url || 'https://kc.vpss.eu.cc/').trim()
@@ -318,7 +319,7 @@ async function saveGptApiConfig(config = {}) {
             'gpt_api_enabled', config.enabled ? '1' : '0',
             'gpt_api_base_url', String(config.base_url || existing.base_url || 'https://kc.vpss.eu.cc/').trim()
                 .replace(/\/+$/, '') || 'https://kc.vpss.eu.cc/',
-            'gpt_api_key', apiKey,
+            'gpt_api_key', encodeConfigValue('gpt_api_key', apiKey),
             'gpt_api_plan_key', String(config.plan_key || existing.plan_key || 'plus').trim() || 'plus',
             'gpt_api_country', String(config.country || existing.country || 'PH').trim().toUpperCase() || 'PH',
             'gpt_api_currency', String(config.currency || existing.currency || 'PHP').trim().toUpperCase() || 'PHP'
@@ -503,11 +504,16 @@ async function cleanupStaleLegacyTasks() {
 }
 
 async function ensureReady() {
+    if (DEFAULT_ADMIN_PASSWORD.length < 12) {
+        throw new Error('ADMIN_PASSWORD 必须至少 12 个字符；请在 .env 中设置强密码后重启');
+    }
     const schemaSql = fs.readFileSync(SCHEMA_PATH, 'utf8');
     await runQuery(schemaSql);
     await ensureLegacyColumns();
     await ensureGptApiColumns();
+    await migrateTaskSessionPayloads();
     await initializeBaseData();
+    await migrateSensitiveAppConfigValues();
     await ensureAdminSecurityDefaults();
     await syncAdminConfigFromEnvironment();
     await ensureHcaptchaConfigDefaults();
@@ -516,6 +522,45 @@ async function ensureReady() {
     await migrateLegacyProxyConfig();
     await seedTaxFreeAddresses();
     await cleanupStaleLegacyTasks();
+}
+
+async function migrateTaskSessionPayloads() {
+    const rows = await runQuery(
+        `SELECT id, session_payload
+         FROM task_logs
+         WHERE session_payload IS NOT NULL
+           AND session_payload <> ''
+           AND session_payload NOT LIKE ?
+         ORDER BY id ASC
+         LIMIT 200`,
+        ['enc:v1:%']
+    );
+    for (const row of rows) {
+        await runExecute(
+            'UPDATE task_logs SET session_payload = ? WHERE id = ?',
+            [encryptSecret(row.session_payload), row.id]
+        );
+    }
+    if (rows.length) console.log(`[安全] 已加密 ${rows.length} 条历史 Session 数据`);
+}
+
+async function migrateSensitiveAppConfigValues() {
+    const keys = [...ENCRYPTED_CONFIG_KEYS];
+    const rows = await runQuery(
+        `SELECT config_key, config_value
+         FROM app_config
+         WHERE config_key IN (${keys.map(() => '?').join(', ')})`,
+        keys
+    );
+    for (const row of rows) {
+        const encrypted = encodeConfigValue(row.config_key, decryptSecret(row.config_value || ''));
+        if (encrypted !== row.config_value) {
+            await runExecute(
+                'UPDATE app_config SET config_value = ? WHERE config_key = ?',
+                [encrypted, row.config_key]
+            );
+        }
+    }
 }
 
 function parseAdminProductGenerationTask(row) {
@@ -1213,7 +1258,7 @@ async function getSessionByJobKey(jobKey) {
         job_key: row.job_key,
         time: row.display_time,
         token_preview: row.token_preview,
-        session_payload: row.session_payload || '',
+        session_payload: decryptSecret(row.session_payload || ''),
         cdk_code: row.cdk_code || '',
         card_last4: row.card_last4 || '',
         status: row.status,
@@ -1996,6 +2041,23 @@ async function incrementAssetSuccessCount({ phone, cardNumber }) {
     }
 }
 
+const ENCRYPTED_CONFIG_KEYS = new Set([
+    'external_card_api_key',
+    'telegram_bot_token',
+    'gpt_api_key',
+    'hcaptcha_vlm_api_key',
+    'hcaptcha_captcha_platform_api_key'
+]);
+
+function encodeConfigValue(configKey, value) {
+    const normalized = String(value ?? '');
+    return ENCRYPTED_CONFIG_KEYS.has(String(configKey)) ? encryptSecret(normalized) : normalized;
+}
+
+function decodeConfigValue(configKey, value) {
+    return ENCRYPTED_CONFIG_KEYS.has(String(configKey)) ? decryptSecret(value ?? '') : (value ?? '');
+}
+
 async function getAppConfigValue(configKey, fallbackValue = '') {
     const rows = await runQuery(
         `SELECT config_value
@@ -2004,7 +2066,7 @@ async function getAppConfigValue(configKey, fallbackValue = '') {
          LIMIT 1`,
         [String(configKey)]
     );
-    return rows[0]?.config_value ?? fallbackValue;
+    return rows[0] ? decodeConfigValue(configKey, rows[0].config_value) : fallbackValue;
 }
 
 async function setAppConfigValue(configKey, configValue) {
@@ -2012,7 +2074,7 @@ async function setAppConfigValue(configKey, configValue) {
         `INSERT INTO app_config (config_key, config_value)
          VALUES (?, ?)
          ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)`,
-        [String(configKey), String(configValue ?? '')]
+        [String(configKey), encodeConfigValue(configKey, configValue)]
     );
 }
 
@@ -2059,7 +2121,7 @@ async function getTelegramConfig() {
          WHERE config_key IN (${keys.map(() => '?').join(', ')})`,
         keys
     );
-    const map = Object.fromEntries(rows.map((row) => [row.config_key, row.config_value]));
+    const map = Object.fromEntries(rows.map((row) => [row.config_key, decodeConfigValue(row.config_key, row.config_value)]));
     return {
         bot_token: String(map.telegram_bot_token || '').trim(),
         admin_chat_id: String(map.telegram_admin_chat_id || '').trim(),
@@ -2089,14 +2151,14 @@ function readHcaptchaConfigFile(filePath = resolveHcaptchaConfigFilePath()) {
         }
         return {
             enabled: raw.enabled !== false && String(raw.enabled ?? '1') !== '0',
-            vlm_api_key: String(raw.vlm_api_key || '').trim(),
+            vlm_api_key: decryptSecret(String(raw.vlm_api_key || '').trim()),
             vlm_base_url: String(raw.vlm_base_url || 'https://api.openai.com/v1').trim() || 'https://api.openai.com/v1',
             vlm_model: String(raw.vlm_model || DEFAULT_HCAPTCHA_VLM_MODEL).trim() || DEFAULT_HCAPTCHA_VLM_MODEL,
             vlm_timeout: Math.max(10, Number(raw.vlm_timeout || 45) || 45),
             solver_timeout: Math.max(60, Number(raw.solver_timeout || 240) || 240),
             no_vlm: Boolean(raw.no_vlm),
             cdp_port: String(raw.cdp_port || '9222').trim() || '9222',
-            captcha_platform_api_key: String(raw.captcha_platform_api_key || '').trim(),
+            captcha_platform_api_key: decryptSecret(String(raw.captcha_platform_api_key || '').trim()),
             captcha_platform_api_url: String(raw.captcha_platform_api_url || 'https://api.capsolver.com').trim()
                 .replace(/\/+$/, '') || 'https://api.capsolver.com',
             captcha_platform_timeout: Math.max(30, Number(raw.captcha_platform_timeout || 180) || 180)
@@ -2113,14 +2175,14 @@ function writeHcaptchaConfigFile(config, filePath = resolveHcaptchaConfigFilePat
         fs.mkdirSync(dir, { recursive: true });
         const payload = {
             enabled: config.enabled !== false,
-            vlm_api_key: String(config.vlm_api_key || '').trim(),
+            vlm_api_key: encryptSecret(String(config.vlm_api_key || '').trim()),
             vlm_base_url: String(config.vlm_base_url || 'https://api.openai.com/v1').trim() || 'https://api.openai.com/v1',
             vlm_model: String(config.vlm_model || DEFAULT_HCAPTCHA_VLM_MODEL).trim() || DEFAULT_HCAPTCHA_VLM_MODEL,
             vlm_timeout: Math.max(10, Number(config.vlm_timeout || 45) || 45),
             solver_timeout: Math.max(60, Number(config.solver_timeout || 240) || 240),
             no_vlm: Boolean(config.no_vlm),
             cdp_port: String(config.cdp_port || '9222').trim() || '9222',
-            captcha_platform_api_key: String(config.captcha_platform_api_key || '').trim(),
+            captcha_platform_api_key: encryptSecret(String(config.captcha_platform_api_key || '').trim()),
             captcha_platform_api_url: String(config.captcha_platform_api_url || 'https://api.capsolver.com').trim()
                 .replace(/\/+$/, '') || 'https://api.capsolver.com',
             captcha_platform_timeout: Math.max(30, Number(config.captcha_platform_timeout || 180) || 180),
@@ -2277,7 +2339,7 @@ async function getHcaptchaConfig() {
          WHERE config_key IN (${keys.map(() => '?').join(', ')})`,
         keys
     );
-    const map = Object.fromEntries(rows.map((row) => [row.config_key, row.config_value]));
+    const map = Object.fromEntries(rows.map((row) => [row.config_key, decodeConfigValue(row.config_key, row.config_value)]));
     return {
         enabled: String(map.hcaptcha_solver_enabled ?? '1') !== '0',
         vlm_api_key: String(map.hcaptcha_vlm_api_key || '').trim(),
@@ -2320,7 +2382,7 @@ async function saveHcaptchaConfig(config = {}, options = {}) {
          ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)`,
         [
             'hcaptcha_solver_enabled', enabled,
-            'hcaptcha_vlm_api_key', vlmApiKey,
+            'hcaptcha_vlm_api_key', encodeConfigValue('hcaptcha_vlm_api_key', vlmApiKey),
             'hcaptcha_vlm_base_url', String(config.vlm_base_url || existing.vlm_base_url || 'https://api.openai.com/v1').trim()
                 || 'https://api.openai.com/v1',
             'hcaptcha_vlm_model', String(config.vlm_model || existing.vlm_model || DEFAULT_HCAPTCHA_VLM_MODEL).trim() || DEFAULT_HCAPTCHA_VLM_MODEL,
@@ -2328,7 +2390,7 @@ async function saveHcaptchaConfig(config = {}, options = {}) {
             'hcaptcha_solver_timeout', solverTimeout,
             'hcaptcha_solver_no_vlm', noVlm,
             'hcaptcha_cdp_port', cdpPort,
-            'hcaptcha_captcha_platform_api_key', platformApiKey,
+            'hcaptcha_captcha_platform_api_key', encodeConfigValue('hcaptcha_captcha_platform_api_key', platformApiKey),
             'hcaptcha_captcha_platform_api_url', platformApiUrl,
             'hcaptcha_captcha_platform_timeout', platformTimeout
         ]
@@ -2366,7 +2428,7 @@ async function saveTelegramConfig(config = {}) {
          VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)
          ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)`,
         [
-            'telegram_bot_token', botToken,
+            'telegram_bot_token', encodeConfigValue('telegram_bot_token', botToken),
             'telegram_admin_chat_id', String(config.admin_chat_id || '').trim(),
             'telegram_group_chat_id', String(config.group_chat_id || '').trim(),
             'telegram_notify_admin', notifyAdmin,
@@ -2584,6 +2646,9 @@ async function listAdminLoginLogs(limit = 100, offset = 0) {
 }
 
 async function updateAdminPassword(password) {
+    if (String(password || '').length < 12) {
+        throw new Error('管理员密码必须至少 12 个字符');
+    }
     const nextHash = createPasswordHash(password);
     const authConfig = await getAdminAuthConfig();
     const nextVersion = Math.max(1, Number(authConfig.passwordVersion || 1)) + 1;
@@ -2619,7 +2684,7 @@ async function createTaskLog({ tokenPreview, sessionPayload, cdkCode, phone, car
         [
             jobKey,
             String(tokenPreview),
-            sessionPayload ? String(sessionPayload) : null,
+            sessionPayload ? encryptSecret(String(sessionPayload)) : null,
             cdkCode || null,
             phone || null,
             cardLast4 || null,
@@ -3330,11 +3395,10 @@ async function setPaymentRegion(regionCode) {
 async function createBillingRecord(data) {
     const result = await runExecute(
         `INSERT INTO billing_records
-            (payment_time, card_number, card_last4, amount, currency, plan_type, stripe_session_id, cdk_code, email, status, error_code, error_message)
-         VALUES (COALESCE(?, NOW()), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (payment_time, card_last4, amount, currency, plan_type, stripe_session_id, cdk_code, email, status, error_code, error_message)
+         VALUES (COALESCE(?, NOW()), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
             data.payment_time || null,
-            data.card_number ? String(data.card_number) : null,
             String(data.card_last4 || ''),
             Number(data.amount || 0),
             String(data.currency || 'USD'),
@@ -3395,7 +3459,7 @@ async function listBillingRecords(filters = {}, page = 1, pageSize = 20) {
 
     const offset = (page - 1) * pageSize;
     const records = await runQuery(
-        `SELECT id, payment_time, card_number, card_last4, amount, currency, plan_type, stripe_session_id, cdk_code, email, status, error_code, error_message, created_at
+        `SELECT id, payment_time, NULL AS card_number, card_last4, amount, currency, plan_type, stripe_session_id, cdk_code, email, status, error_code, error_message, created_at
          FROM billing_records
          ${whereClause}
          ORDER BY payment_time DESC
@@ -3439,7 +3503,7 @@ async function exportBillingRecordsCSV(filters = {}) {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const rows = await runQuery(
-        `SELECT payment_time, card_number, card_last4, amount, currency, plan_type, stripe_session_id, cdk_code, email, status, error_code, error_message
+        `SELECT payment_time, NULL AS card_number, card_last4, amount, currency, plan_type, stripe_session_id, cdk_code, email, status, error_code, error_message
          FROM billing_records
          ${whereClause}
          ORDER BY payment_time DESC

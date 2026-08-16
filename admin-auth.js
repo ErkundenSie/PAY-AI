@@ -1,6 +1,8 @@
 'use strict';
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const BASE32_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
@@ -13,15 +15,44 @@ const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_LOCK_MS = 30 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const TG_CODE_MAX_ATTEMPTS = 5;
+const TASK_VIEWER_TOKEN_TTL_MS = 60 * 60 * 1000;
+const MIN_ADMIN_TOKEN_SECRET_LENGTH = 32;
 
 const loginAttempts = new Map();
 const tgLoginCodes = new Map();
 
 function resolveAdminTokenSecret() {
-    return process.env.ADMIN_TOKEN_SECRET || crypto
-        .createHash('sha256')
-        .update(`web_redeem:${process.cwd()}:admin-token-secret`)
-        .digest('hex');
+    const configured = String(process.env.ADMIN_TOKEN_SECRET || '').trim();
+    if (configured) {
+        if (configured.length < MIN_ADMIN_TOKEN_SECRET_LENGTH) {
+            throw new Error(`ADMIN_TOKEN_SECRET 至少需要 ${MIN_ADMIN_TOKEN_SECRET_LENGTH} 个字符`);
+        }
+        return configured;
+    }
+
+    // Never derive a signing key from public values such as the working directory.
+    // The generated key lives in the persistent data volume so restarts retain it.
+    const secretFile = path.join(__dirname, 'data', '.admin-token-secret');
+    try {
+        const existing = fs.readFileSync(secretFile, 'utf8').trim();
+        if (existing.length >= MIN_ADMIN_TOKEN_SECRET_LENGTH) return existing;
+    } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+    }
+
+    fs.mkdirSync(path.dirname(secretFile), { recursive: true, mode: 0o700 });
+    const generated = crypto.randomBytes(48).toString('base64url');
+    try {
+        fs.writeFileSync(secretFile, `${generated}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+        console.warn('[安全] 未设置 ADMIN_TOKEN_SECRET，已生成并持久化随机签名密钥；生产环境请在 .env 中设置独立密钥。');
+        return generated;
+    } catch (error) {
+        if (error.code === 'EEXIST') {
+            const existing = fs.readFileSync(secretFile, 'utf8').trim();
+            if (existing.length >= MIN_ADMIN_TOKEN_SECRET_LENGTH) return existing;
+        }
+        throw error;
+    }
 }
 
 function encodeBase64Url(input) {
@@ -132,6 +163,19 @@ function verifyAdminToken(token) {
     return payload;
 }
 
+function issueTaskViewerToken(jobKey) {
+    return issueSignedToken({
+        sub: 'task_viewer',
+        jobKey: String(jobKey || '').trim()
+    }, TASK_VIEWER_TOKEN_TTL_MS);
+}
+
+function verifyTaskViewerToken(token, jobKey) {
+    const payload = verifySignedToken(token, { expectedSub: 'task_viewer' });
+    if (!payload || !payload.jobKey || !jobKey) return null;
+    return safeEqualString(String(payload.jobKey), String(jobKey)) ? payload : null;
+}
+
 function issueLoginChallenge({ email, passwordVersion, ip, fingerprint }) {
     const challengeId = crypto.randomBytes(16).toString('hex');
     return issueSignedToken({
@@ -161,11 +205,10 @@ function verifySecondaryToken(token) {
 }
 
 function getClientMeta(req) {
-    const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-    const ip = forwarded
-        || String(req.headers['x-real-ip'] || '').trim()
-        || req.socket?.remoteAddress
-        || '';
+    const trustProxy = String(process.env.TRUST_PROXY || '0') === '1';
+    const forwarded = trustProxy ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '';
+    const realIp = trustProxy ? String(req.headers['x-real-ip'] || '').trim() : '';
+    const ip = forwarded || realIp || req.socket?.remoteAddress || '';
     return {
         ip: ip.replace(/^::ffff:/, ''),
         userAgent: String(req.headers['user-agent'] || '').slice(0, 512),
@@ -383,11 +426,14 @@ function createRequireSecondaryAuth(store, ensureStoreReady) {
 module.exports = {
     ADMIN_TOKEN_TTL_MS,
     ADMIN_REFRESH_AFTER_MS,
+    TASK_VIEWER_TOKEN_TTL_MS,
     resolveAdminTokenSecret,
     createPasswordHash,
     verifyPassword,
     issueAdminToken,
     verifyAdminToken,
+    issueTaskViewerToken,
+    verifyTaskViewerToken,
     issueLoginChallenge,
     verifyLoginChallenge,
     issueSecondaryToken,

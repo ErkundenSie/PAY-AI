@@ -459,7 +459,7 @@
                         showStatus(data.data?.message || '检测到当前 CDK 正在开通中，正在恢复任务进度...', 'success');
                         step1.style.display = 'none';
                         step2.style.display = 'block';
-                        initWebSocket(data.data.jobKey);
+                        initWebSocket(data.data.jobKey, data.data.viewerToken || '');
                         return;
                     }
 
@@ -502,6 +502,7 @@
         let socketHeartbeatInterval = null;
         let socketHeartbeatTimeout = null;
         let activeJobKey = '';
+        let activeViewerToken = '';
         let taskCompleted = false;
         const WS_HEARTBEAT_INTERVAL_MS = 15000;
         const WS_HEARTBEAT_TIMEOUT_MS = 45000;
@@ -547,6 +548,7 @@
             }
             socket = null;
             activeJobKey = '';
+            activeViewerToken = '';
         }
 
         function resetRedeemFlow(options = {}) {
@@ -631,15 +633,17 @@
             }
         }
 
-        function initWebSocket(jobKey) {
-            if (!jobKey) {
+        function initWebSocket(jobKey, viewerToken = activeViewerToken) {
+            if (!jobKey || !viewerToken) {
+                showStatus('任务订阅凭据缺失，请重新验证 CDK', 'error');
                 return;
             }
 
             activeJobKey = jobKey;
+            activeViewerToken = viewerToken;
 
             if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-                socket.send(JSON.stringify({ type: 'subscribe', jobKey }));
+                socket.send(JSON.stringify({ type: 'subscribe', jobKey, viewerToken }));
                 return;
             }
 
@@ -648,7 +652,7 @@
 
             socket.onopen = () => {
                 clearTimeout(reconnectTimer);
-                socket.send(JSON.stringify({ type: 'subscribe', jobKey }));
+                socket.send(JSON.stringify({ type: 'subscribe', jobKey, viewerToken }));
                 startSocketHeartbeat();
             };
 
@@ -676,7 +680,7 @@
                 socket = null;
                 if (activeJobKey && !taskCompleted) {
                     clearTimeout(reconnectTimer);
-                    reconnectTimer = setTimeout(() => initWebSocket(activeJobKey), 3000);
+                    reconnectTimer = setTimeout(() => initWebSocket(activeJobKey, activeViewerToken), 3000);
                 }
             };
 
@@ -722,7 +726,7 @@
                 if (data.success && data.jobKey) {
                     setProgress(8, '任务已启动，正在开通中...');
                     showStatus('任务已启动，正在为您开通中...', 'success');
-                    initWebSocket(data.jobKey);
+                    initWebSocket(data.jobKey, data.viewerToken || '');
                 } else {
                     hideProgress();
                     updateFlowUI(2, 'failed');

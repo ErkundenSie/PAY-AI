@@ -16,6 +16,8 @@ _server.err.log
 debug_screenshots/
 product_files/
 data/hcaptcha-config.json
+data/.admin-token-secret
+data/.data-encryption-key
 data/browser-pool/
 scratch/
 mail.txt

@@ -10,12 +10,12 @@ services:
     container_name: kc-gpt-pay2-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-your_mysql_password}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME:-plus_papay}
       MYSQL_CHARSET: utf8mb4
       MYSQL_COLLATION: utf8mb4_unicode_ci
     ports:
-      - "3310:3306"
+      - "${MYSQL_BIND_ADDRESS:-127.0.0.1}:${MYSQL_PORT:-3310}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
@@ -38,24 +38,25 @@ services:
       mysql:
         condition: service_healthy
     ports:
-      - "${PORT:-3100}:3000"
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${PORT:-3100}:3000"
     environment:
       PORT: 3000
       DB_HOST: ${DB_HOST:-mysql}
       DB_PORT: ${DB_PORT:-3306}
       DB_USER: ${DB_USER:-root}
-      DB_PASSWORD: ${DB_PASSWORD:-your_mysql_password}
+      DB_PASSWORD: ${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}
       DB_NAME: ${DB_NAME:-plus_papay}
       DB_POOL_LIMIT: 60
       HEADFUL: 0
       PROXY: ${PROXY:-}
       ADMIN_TOKEN_SECRET: ${ADMIN_TOKEN_SECRET:-}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@vru.cc}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
-      ADMIN_SECONDARY_PASSWORD: ${ADMIN_SECONDARY_PASSWORD:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 .env 设置 ADMIN_PASSWORD}
+      ADMIN_SECONDARY_PASSWORD: ${ADMIN_SECONDARY_PASSWORD:-}
       ADMIN_LOGIN_PATH: ${ADMIN_LOGIN_PATH:-admin-login}
       ADMIN_PANEL_PATH: ${ADMIN_PANEL_PATH:-admin}
       ADMIN_CONFIG_SYNC: ${ADMIN_CONFIG_SYNC:-0}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
       HCAPTCHA_CONFIG_FILE: /app/data/hcaptcha-config.json
       HCAPTCHA_VLM_API_KEY: ${HCAPTCHA_VLM_API_KEY:-}
       HCAPTCHA_VLM_BASE_URL: ${HCAPTCHA_VLM_BASE_URL:-https://api.openai.com/v1}

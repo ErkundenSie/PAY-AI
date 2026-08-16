@@ -27,6 +27,8 @@ const gptApi = require('./gpt-api-client');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
+const TRUST_PROXY = String(process.env.TRUST_PROXY || '0') === '1';
+const VERIFY_OPENAI_TOKEN_ON_ACTIVATION = String(process.env.VERIFY_OPENAI_TOKEN_ON_ACTIVATION || '1') !== '0';
 const ADMIN_TOKEN_TTL_MS = adminAuth.ADMIN_TOKEN_TTL_MS;
 const ADMIN_REFRESH_AFTER_MS = adminAuth.ADMIN_REFRESH_AFTER_MS;
 const PROCESS_IDLE_TIMEOUT_MS = Number(process.env.PROCESS_IDLE_TIMEOUT_MS) || (3 * 60 * 1000);
@@ -36,7 +38,11 @@ const WS_HEARTBEAT_PONG_TYPE = 'pong';
 const ACCESS_DEACTIVATED_MESSAGES_URL = '';
 const ACCESS_DEACTIVATED_SYNC_KEY = '';
 const ACCESS_DEACTIVATED_SYNC_COOLDOWN_MS = 30 * 1000;
-const ADMIN_TOKEN_SECRET = process.env.ADMIN_TOKEN_SECRET || adminAuth.resolveAdminTokenSecret();
+// Validate configured signing material (or create the secure persistent fallback) at startup.
+adminAuth.resolveAdminTokenSecret();
+
+app.disable('x-powered-by');
+app.set('trust proxy', TRUST_PROXY ? 1 : false);
 
 // 追踪活跃的子进程，防止产生僵尸进程
 const activeProcesses = new Set();
@@ -144,12 +150,33 @@ async function getSystemMetrics() {
 }
 
 function getClientIp(req) {
-    const forwarded = String(req.headers['x-forwarded-for'] || '').trim();
-    const rawIp = forwarded ? forwarded.split(',')[0].trim() : (req.ip || req.socket?.remoteAddress || '');
+    const forwarded = TRUST_PROXY ? String(req.headers['x-forwarded-for'] || '').trim() : '';
+    const rawIp = forwarded ? forwarded.split(',')[0].trim() : (req.socket?.remoteAddress || '');
     return String(rawIp || '')
         .replace(/^::ffff:/, '')
         .replace(/^::1$/, '127.0.0.1')
         .trim();
+}
+
+const publicRequestWindows = new Map();
+function limitPublicRequests(scope, limit, windowMs) {
+    return (req, res, next) => {
+        const now = Date.now();
+        const key = `${scope}:${getClientIp(req) || 'unknown'}`;
+        const current = publicRequestWindows.get(key);
+        const entry = current && now - current.startedAt < windowMs
+            ? current
+            : { startedAt: now, count: 0 };
+        entry.count += 1;
+        publicRequestWindows.set(key, entry);
+        if (publicRequestWindows.size > 10_000) publicRequestWindows.clear();
+        if (entry.count > limit) {
+            const retryAfterSec = Math.max(1, Math.ceil((windowMs - (now - entry.startedAt)) / 1000));
+            res.setHeader('Retry-After', String(retryAfterSec));
+            return res.status(429).json({ success: false, message: '请求过于频繁，请稍后再试' });
+        }
+        return next();
+    };
 }
 
 function getRemainingCooldownMinutes(cooldownUntil) {
@@ -214,7 +241,14 @@ function parseFlexibleTimestamp(value) {
 function broadcastToTask(jobKey, data) {
     const clients = taskClients.get(jobKey);
     if (clients) {
-        const message = JSON.stringify(data);
+        const message = JSON.stringify({
+            type: data.type,
+            jobKey: String(jobKey),
+            status: data.status,
+            message: data.message,
+            progress: Number(data.progress || 0),
+            isTerminal: TERMINAL_TASK_STATUSES.has(data.status)
+        });
         for (const client of clients) {
             if (client.readyState === WebSocket.OPEN) {
                 client.send(message);
@@ -240,26 +274,12 @@ async function sendTaskSnapshot(ws, jobKey) {
         return;
     }
 
-    let storedMedia = { screenshots: [], videos: [] };
-    if (task.failure_screenshots) {
-        try {
-            const parsed = JSON.parse(task.failure_screenshots);
-            storedMedia = splitTaskMediaPaths(Array.isArray(parsed) ? parsed : []);
-        } catch (_) { /* ignore */ }
-    }
-    const media = extractTaskMediaFromOutput(task.raw_output || '');
-
     ws.send(JSON.stringify({
         type: 'snapshot',
         jobKey,
         status: task.status,
         message: task.message,
         progress: Number(task.progress || 0),
-        cdkCode: task.cdk_code || null,
-        phone: task.phone || null,
-        cardLast4: task.card_last4 || null,
-        screenshots: [...new Set([...storedMedia.screenshots, ...media.screenshots])],
-        videos: [...new Set([...storedMedia.videos, ...media.videos])],
         isTerminal: TERMINAL_TASK_STATUSES.has(task.status)
     }));
 }
@@ -307,7 +327,15 @@ process.on('exit', () => cleanupProcesses());
 
 let storeReadyPromise = null;
 
-const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '15mb';
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '2mb';
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    if (req.path.startsWith('/api/admin')) res.setHeader('Cache-Control', 'no-store');
+    next();
+});
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 let cachedAdminPaths = null;
@@ -513,7 +541,7 @@ function getBearerToken(req) {
     if (scheme === 'Bearer' && token) {
         return token.trim();
     }
-    return (req.query?.token || '').trim() || null;
+    return null;
 }
 
 async function authenticateAdmin(req, res, next) {
@@ -1563,7 +1591,7 @@ app.get('/api/public/admin-paths', async (req, res) => {
     }
 });
 
-app.post('/api/public/subscription/check', async (req, res) => {
+app.post('/api/public/subscription/check', limitPublicRequests('subscription-check', 10, 60 * 1000), async (req, res) => {
     try {
         const rawSession = String(req.body?.session || req.body?.token || '').trim().replace(/^\uFEFF/, '');
         if (!rawSession) {
@@ -3713,6 +3741,19 @@ async function handleActivationRequest(req, res) {
 
     try {
         await ensureStoreReady();
+        if (VERIFY_OPENAI_TOKEN_ON_ACTIVATION) {
+            // Claim inspection alone is not signature verification. Ask the issuer's
+            // authenticated endpoint before a CDK is consumed or a worker starts.
+            const verification = await querySubscriptionBySession(token, {
+                email: extractEmailFromSession(rawSession) || tokenCheck.email || ''
+            });
+            if (!verification.ok) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Session 无法通过 OpenAI 服务验证，请确认有效后重试'
+                });
+            }
+        }
         const maintenanceModeState = await store.getMaintenanceModeState();
         if (maintenanceModeState.enabled) {
             return res.status(503).json({ success: false, message: '系统维护中，请稍后再试' });
@@ -3728,6 +3769,7 @@ async function handleActivationRequest(req, res) {
             return res.json({
                 success: true,
                 jobKey: runningTask.job_key,
+                viewerToken: adminAuth.issueTaskViewerToken(runningTask.job_key).token,
                 message: runningTask.message || '该 CDK 正在开通中，已为您恢复等待进度'
             });
         }
@@ -3789,6 +3831,7 @@ async function handleActivationRequest(req, res) {
             status: 'running',
             progress: 3
         });
+        const viewerToken = adminAuth.issueTaskViewerToken(task.jobKey).token;
 
         logTask(task.jobKey, `任务已创建，CDK=${cdk} mode=${useGptApi ? 'gpt-api' : 'local'}`);
         reserveForegroundSlot(task.jobKey);
@@ -3804,6 +3847,7 @@ async function handleActivationRequest(req, res) {
         return res.json({
             success: true,
             jobKey: task.jobKey,
+            viewerToken,
             message: '任务已启动，正在为您开通中...'
         });
     } catch (error) {
@@ -3812,11 +3856,24 @@ async function handleActivationRequest(req, res) {
     }
 }
 
-app.post('/api/run-process', handleActivationRequest);
+async function authorizeTaskSubscription(data, jobKey) {
+    if (adminAuth.verifyTaskViewerToken(String(data.viewerToken || ''), jobKey)) {
+        return true;
+    }
+
+    const adminPayload = adminAuth.verifyAdminToken(String(data.adminToken || ''));
+    if (!adminPayload) return false;
+
+    await ensureStoreReady();
+    const authConfig = await store.getAdminAuthConfig();
+    return Number(adminPayload.pv || 0) === authConfig.passwordVersion;
+}
+
+app.post('/api/run-process', limitPublicRequests('activation', 5, 60 * 1000), handleActivationRequest);
 
 app.post('/api/admin/trigger-activation', handleActivationRequest);
 
-app.post('/api/verify-cdk', async (req, res) => {
+app.post('/api/verify-cdk', limitPublicRequests('verify-cdk', 30, 60 * 1000), async (req, res) => {
     const cdk = String(req.body?.cdk || '').trim();
     const clientIp = getClientIp(req);
     if (!cdk) {
@@ -3836,6 +3893,7 @@ app.post('/api/verify-cdk', async (req, res) => {
                     plan_label: getPlanTypeLabel(cdkData.plan_type || 'plus'),
                     status: 'processing',
                     jobKey: runningTask.job_key,
+                    viewerToken: adminAuth.issueTaskViewerToken(runningTask.job_key).token,
                     message: runningTask.message || '当前 CDK 正在开通中'
                 }
             });
@@ -3876,7 +3934,7 @@ app.post('/api/verify-cdk', async (req, res) => {
     }
 });
 
-app.get('/api/cdk/query', async (req, res) => {
+app.get('/api/cdk/query', limitPublicRequests('cdk-query', 30, 60 * 1000), async (req, res) => {
     const cdk = String(req.query.cdk || '').trim();
     if (!cdk) {
         return res.status(400).json({ success: false, message: '请输入查询激活码' });
@@ -3973,14 +4031,28 @@ async function start() {
     });
 
     // WebSocket Server Setup
-    const wss = new WebSocket.Server({ server });
+    const wss = new WebSocket.Server({ server, maxPayload: 8 * 1024 });
+    let activeWebSocketConnections = 0;
+    const MAX_WEB_SOCKET_CONNECTIONS = 200;
     wss.on('connection', (ws) => {
+        activeWebSocketConnections += 1;
+        if (activeWebSocketConnections > MAX_WEB_SOCKET_CONNECTIONS) {
+            activeWebSocketConnections -= 1;
+            ws.close(1013, '服务器繁忙，请稍后重试');
+            return;
+        }
+
         let currentJobKey = null;
+        let subscribed = false;
+        const subscriptionTimeout = setTimeout(() => {
+            if (!subscribed) ws.close(1008, '订阅超时');
+        }, 10_000);
 
         ws.on('message', async (message) => {
             try {
                 const data = JSON.parse(message);
                 if (data.type === WS_HEARTBEAT_PING_TYPE) {
+                    if (!subscribed) return ws.close(1008, '尚未授权订阅');
                     if (ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({
                             type: WS_HEARTBEAT_PONG_TYPE,
@@ -3990,10 +4062,19 @@ async function start() {
                     return;
                 }
                 if (data.type === 'subscribe' && data.jobKey) {
-                    if (currentJobKey && currentJobKey !== data.jobKey) {
+                    const jobKey = String(data.jobKey || '').trim();
+                    if (!/^[A-Za-z0-9_-]{1,64}$/.test(jobKey)) {
+                        return ws.close(1008, '无效任务标识');
+                    }
+                    if (!await authorizeTaskSubscription(data, jobKey)) {
+                        return ws.close(1008, '未授权订阅');
+                    }
+                    if (currentJobKey && currentJobKey !== jobKey) {
                         unsubscribeTaskClient(currentJobKey, ws);
                     }
-                    currentJobKey = data.jobKey;
+                    currentJobKey = jobKey;
+                    subscribed = true;
+                    clearTimeout(subscriptionTimeout);
                     if (!taskClients.has(currentJobKey)) {
                         taskClients.set(currentJobKey, new Set());
                     }
@@ -4007,6 +4088,8 @@ async function start() {
         });
 
         ws.on('close', () => {
+            clearTimeout(subscriptionTimeout);
+            activeWebSocketConnections = Math.max(0, activeWebSocketConnections - 1);
             unsubscribeTaskClient(currentJobKey, ws);
         });
     });
