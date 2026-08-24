@@ -1,6 +1,14 @@
 "use strict";
 
-const { buildCheckoutHeaders, buildCheckoutPayload } = require("../chatgpt");
+const {
+  buildCheckoutHeaders,
+  buildCheckoutPayload,
+  extractAccountIdFromCheck,
+  extractCheckoutPlan,
+  summarizeCheckoutCookies,
+  buildCheckoutWarmupRequests,
+  resolveCheckoutModes,
+} = require("../chatgpt");
 
 describe("chatgpt checkout helpers", () => {
   it("matches the userscript checkout payload", () => {
@@ -32,5 +40,93 @@ describe("chatgpt checkout helpers", () => {
     expect(headers.Authorization).toBe(`Bearer ${token}`);
     expect(headers["chatgpt-account-id"]).toBe("acct-1");
     expect(headers["openai-account-id"]).toBe("acct-1");
+  });
+
+  it("reads account_id from accounts/check default account", () => {
+    expect(
+      extractAccountIdFromCheck({
+        accounts: { default: { account: { account_id: "acct-check" } } },
+      }),
+    ).toBe("acct-check");
+  });
+
+  it("prefers the personal free account over a deactivated workspace plus plan", () => {
+    const data = {
+      accounts: {
+        default: {
+          account: {
+            account_id: "acct-workspace",
+            name: "Cronkshaw's Workspace",
+            structure: "workspace",
+            is_deactivated: true,
+          },
+          entitlement: {
+            has_active_subscription: true,
+            subscription_plan: "chatgptplusplan",
+          },
+        },
+        personal: {
+          account: {
+            account_id: "acct-personal",
+            name: "Cronkshaw 个人账户",
+            structure: "personal",
+          },
+          entitlement: {
+            has_active_subscription: false,
+            subscription_plan: "free",
+          },
+        },
+      },
+    };
+    expect(extractAccountIdFromCheck(data)).toBe("acct-personal");
+    expect(extractCheckoutPlan(data)).toBe("");
+    expect(resolveCheckoutModes(extractCheckoutPlan(data))).toEqual([
+      "custom",
+      "hosted",
+    ]);
+  });
+
+  it("summarizes checkout cookies without values", () => {
+    const summary = summarizeCheckoutCookies([
+      { name: "oai-did" },
+      { name: "__Secure-next-auth.session-token.0" },
+      { name: "__Secure-next-auth.session-token.1" },
+      { name: "cf_clearance" },
+    ]);
+    expect(summary.hasOaiDid).toBe(true);
+    expect(summary.markers).toEqual([
+      "oai-did",
+      "cf_clearance",
+      "session-token×2",
+    ]);
+  });
+
+  it("warms session, account, subscription, and pricing endpoints", () => {
+    const requests = buildCheckoutWarmupRequests({
+      timezoneOffsetMin: -480,
+      country: "PH",
+      accountId: "acct-1",
+    });
+    expect(requests.map((item) => item.name)).toEqual([
+      "session",
+      "accounts/check",
+      "conversations",
+      "subscriptions",
+      "payments/subscription",
+      "pricing_config",
+      "billing_info",
+      "stripe_bootstrap",
+    ]);
+    expect(
+      requests.find((item) => item.name === "accounts/check").path,
+    ).toContain("timezone_offset_min=-480");
+    expect(
+      requests.find((item) => item.name === "pricing_config").path,
+    ).toContain("/PH");
+  });
+
+  it("uses hosted only when the account already has a paid plan", () => {
+    expect(resolveCheckoutModes("chatgptplusplan")).toEqual(["hosted"]);
+    expect(resolveCheckoutModes("free")).toEqual(["custom", "hosted"]);
   });
 });

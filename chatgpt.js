@@ -8,6 +8,8 @@ const { extractProfileFromToken } = require("./session-auth");
 
 const CHECKOUT_API_PATH = "/backend-api/payments/checkout";
 const CHECKOUT_API_URL = `https://chatgpt.com${CHECKOUT_API_PATH}`;
+const ACCOUNT_CHECK_PATH = "/backend-api/accounts/check/v4-2023-04-27";
+const CHATGPT_HOME_URL = "https://chatgpt.com/";
 
 function resolveProcessorEntity(country) {
   return String(country || "").toUpperCase() === "US"
@@ -43,11 +45,418 @@ function buildCheckoutHeaders(accessToken, extra = {}) {
     Accept: "application/json",
     ...extra,
   };
-  if (profile.accountId) {
-    headers["chatgpt-account-id"] = profile.accountId;
-    headers["openai-account-id"] = profile.accountId;
+  const accountId = String(extra.accountId || profile.accountId || "").trim();
+  if (accountId) {
+    headers["chatgpt-account-id"] = accountId;
+    headers["openai-account-id"] = accountId;
   }
+  delete headers.accountId;
   return headers;
+}
+
+function listAccountCheckRecords(data) {
+  const accounts = data?.accounts;
+  if (!accounts || typeof accounts !== "object") return [];
+  if (Array.isArray(accounts)) return accounts.filter(Boolean);
+  return Object.entries(accounts).map(([key, item]) => ({
+    ...(item && typeof item === "object" ? item : {}),
+    __key: key,
+  }));
+}
+
+function getAccountRecordMeta(record) {
+  const account = record?.account || record || {};
+  const entitlement = record?.entitlement || {};
+  const plan = String(entitlement.subscription_plan || "").trim();
+  const structure = String(
+    account.structure ||
+      account.account_structure ||
+      account.type ||
+      record?.structure ||
+      "",
+  ).toLowerCase();
+  const name = String(
+    account.name ||
+      account.account_name ||
+      account.workspace_name ||
+      account.workspaceName ||
+      "",
+  );
+  return {
+    accountId: String(account.account_id || account.accountId || "").trim(),
+    plan,
+    hasActive: entitlement.has_active_subscription === true,
+    deactivated: Boolean(
+      account.is_deactivated ||
+      account.deactivated ||
+      record?.is_deactivated ||
+      /deactivat|disabled|停用/.test(
+        `${account.status || ""} ${record?.status || ""} ${name}`,
+      ),
+    ),
+    workspace: Boolean(
+      structure.includes("workspace") ||
+      name.toLowerCase().includes("workspace") ||
+      account.is_workspace === true,
+    ),
+    personal: Boolean(
+      structure.includes("personal") ||
+      structure.includes("individual") ||
+      name.includes("个人账户") ||
+      /personal|individual/.test(name.toLowerCase()),
+    ),
+    name,
+    key: String(record?.__key || ""),
+  };
+}
+
+function pickCheckoutAccountRecord(data, preferredAccountId = "") {
+  const records = listAccountCheckRecords(data);
+  if (!records.length) return data?.accounts?.default || null;
+  const preferred = String(preferredAccountId || "").trim();
+  if (preferred) {
+    const matched = records.find((item) => {
+      const meta = getAccountRecordMeta(item);
+      return meta.accountId === preferred || item.__key === preferred;
+    });
+    if (matched) return matched;
+  }
+  const scored = records
+    .map((record) => {
+      const meta = getAccountRecordMeta(record);
+      let score = 0;
+      if (meta.deactivated) score -= 50;
+      if (meta.personal) score += 20;
+      if (meta.workspace) score -= 15;
+      if (!meta.hasActive) score += 10;
+      if (meta.key === "default") score += 1;
+      return { record, meta, score };
+    })
+    .sort((a, b) => b.score - a.score);
+  return scored[0]?.record || data?.accounts?.default || null;
+}
+
+function extractAccountIdFromCheck(data, preferredAccountId = "") {
+  const record = pickCheckoutAccountRecord(data, preferredAccountId);
+  return getAccountRecordMeta(record).accountId;
+}
+
+function extractCheckoutPlan(data, preferredAccountId = "") {
+  const record = pickCheckoutAccountRecord(data, preferredAccountId);
+  const meta = getAccountRecordMeta(record);
+  if (meta.deactivated || (meta.workspace && !meta.hasActive)) {
+    return "";
+  }
+  if (meta.hasActive) return meta.plan;
+  return "";
+}
+
+function describeCheckoutAccount(data, preferredAccountId = "") {
+  const record = pickCheckoutAccountRecord(data, preferredAccountId);
+  const meta = getAccountRecordMeta(record);
+  const parts = [
+    meta.personal ? "personal" : "",
+    meta.workspace ? "workspace" : "",
+    meta.deactivated ? "deactivated" : "",
+    meta.hasActive ? "active" : "free",
+    meta.name ? `name=${meta.name}` : "",
+  ].filter(Boolean);
+  return parts.join(",") || "unknown";
+}
+
+function hasActiveCheckoutPlan(plan) {
+  const raw = String(plan || "")
+    .trim()
+    .toLowerCase();
+  return Boolean(raw) && raw !== "free" && !raw.includes("free");
+}
+
+function resolveCheckoutModes(plan) {
+  const preferredMode =
+    String(process.env.CHECKOUT_UI_MODE || "custom").trim() || "custom";
+  const firstMode = hasActiveCheckoutPlan(plan) ? "hosted" : preferredMode;
+  const modes = [firstMode];
+  if (!hasActiveCheckoutPlan(plan) && !modes.includes("hosted")) {
+    modes.push("hosted");
+  }
+  return modes;
+}
+
+function summarizeCheckoutCookies(cookies) {
+  const names = (Array.isArray(cookies) ? cookies : [])
+    .map((item) => String(item?.name || "").trim())
+    .filter(Boolean);
+  const has = (name) => names.includes(name);
+  const sessionChunks = names.filter(
+    (name) =>
+      name === "__Secure-next-auth.session-token" ||
+      /^__Secure-next-auth\.session-token\.\d+$/.test(name),
+  );
+  const markers = [
+    has("oai-did") ? "oai-did" : "",
+    has("oai-hlib") ? "oai-hlib" : "",
+    has("oai-sc") ? "oai-sc" : "",
+    has("cf_clearance") ? "cf_clearance" : "",
+    has("__cf_bm") ? "__cf_bm" : "",
+    sessionChunks.length ? `session-token×${sessionChunks.length}` : "",
+    has("__Host-next-auth.csrf-token") ? "csrf" : "",
+    has("__Secure-next-auth.callback-url") ? "callback-url" : "",
+  ].filter(Boolean);
+  return {
+    count: names.length,
+    hasOaiDid: has("oai-did"),
+    markers,
+  };
+}
+
+async function ensureChatGptHome(page) {
+  const currentUrl = String(page.url() || "");
+  if (!currentUrl.startsWith("https://chatgpt.com")) {
+    await page.goto(CHATGPT_HOME_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
+    });
+  }
+  await page
+    .waitForLoadState("networkidle", { timeout: 20000 })
+    .catch(() => {});
+}
+
+async function waitForCheckoutCookies(page, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  let summary = summarizeCheckoutCookies(
+    await page.context().cookies(CHATGPT_HOME_URL),
+  );
+  while (Date.now() < deadline && !summary.hasOaiDid) {
+    await page.waitForTimeout(500);
+    summary = summarizeCheckoutCookies(
+      await page.context().cookies(CHATGPT_HOME_URL),
+    );
+  }
+  return summary;
+}
+
+function buildCheckoutWarmupRequests({
+  timezoneOffsetMin = 0,
+  country = "PH",
+  accountId = "",
+} = {}) {
+  const region = String(country || "PH").toUpperCase();
+  const id = String(accountId || "").trim();
+  const requests = [
+    { name: "session", path: "/api/auth/session", auth: false },
+    {
+      name: "accounts/check",
+      path: `${ACCOUNT_CHECK_PATH}?timezone_offset_min=${Number(timezoneOffsetMin) || 0}`,
+    },
+    {
+      name: "conversations",
+      path: "/backend-api/conversations?offset=0&limit=28",
+    },
+    { name: "subscriptions", path: "/backend-api/subscriptions" },
+    {
+      name: "payments/subscription",
+      path: "/backend-api/payments/subscription",
+    },
+    {
+      name: "pricing_config",
+      path: `/backend-api/checkout_pricing_config/configs/${region}`,
+    },
+  ];
+  if (id) {
+    requests.push(
+      {
+        name: "billing_info",
+        path: `/backend-api/payments/billing_info?account_id=${encodeURIComponent(id)}`,
+        accountHeader: true,
+      },
+      {
+        name: "stripe_bootstrap",
+        path: `/backend-api/payments/stripe_client_bootstrap?account_id=${encodeURIComponent(id)}`,
+        accountHeader: true,
+      },
+    );
+  }
+  return requests;
+}
+
+async function fetchSameOriginGets(page, { token, accountId, requests }) {
+  return page.evaluate(
+    async ({ token, accountId, requests }) => {
+      const results = [];
+      for (const item of requests) {
+        const headers = { accept: "application/json" };
+        if (item.auth !== false) {
+          headers.authorization = `Bearer ${token}`;
+        }
+        if (accountId && item.accountHeader) {
+          headers["chatgpt-account-id"] = accountId;
+          headers["openai-account-id"] = accountId;
+        }
+        try {
+          const response = await fetch(item.path, {
+            method: "GET",
+            credentials: "include",
+            headers,
+          });
+          const text = await response.text();
+          results.push({
+            name: item.name,
+            status: response.status,
+            bytes: text.length,
+            bodyText: item.name === "accounts/check" ? text : "",
+          });
+        } catch (err) {
+          results.push({
+            name: item.name,
+            status: 0,
+            bodyText: "",
+            error: String((err && err.message) || err),
+          });
+        }
+      }
+      return results;
+    },
+    {
+      token: String(token || "").trim(),
+      accountId: String(accountId || "").trim(),
+      requests,
+    },
+  );
+}
+
+function formatWarmupStatuses(results) {
+  return (Array.isArray(results) ? results : [])
+    .map((item) => `${item.name}=${item.status}${item.error ? "/err" : ""}`)
+    .join(" ");
+}
+
+async function openPricingModalForWarmup(page) {
+  try {
+    const pricing = require("./pricing-checkout");
+    if (await pricing.isPricingModalVisible(page)) {
+      return "already-open";
+    }
+    const opened = await pricing.openPricingModalFromChat(page);
+    if (opened) {
+      await page
+        .waitForLoadState("networkidle", { timeout: 15000 })
+        .catch(() => {});
+      await page.waitForTimeout(1200);
+      return "opened";
+    }
+    await page.goto("https://chatgpt.com/?upgrade=plus", {
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
+    });
+    await page
+      .waitForLoadState("networkidle", { timeout: 20000 })
+      .catch(() => {});
+    await page.waitForTimeout(1500);
+    if (await pricing.isPricingModalVisible(page)) {
+      return "hash-open";
+    }
+    const retry = await pricing.openPricingModalFromChat(page);
+    if (retry) {
+      return "opened";
+    }
+    return "missing";
+  } catch (err) {
+    return `skip:${String((err && err.message) || err).slice(0, 80)}`;
+  }
+}
+
+async function warmupCheckoutContext(page, accessToken, options = {}) {
+  const country = String(options.country || "PH").toUpperCase();
+  await ensureChatGptHome(page);
+  let cookies = await waitForCheckoutCookies(page);
+  if (!cookies.hasOaiDid) {
+    await page
+      .reload({ waitUntil: "domcontentloaded", timeout: 60000 })
+      .catch(() => {});
+    await page
+      .waitForLoadState("networkidle", { timeout: 20000 })
+      .catch(() => {});
+    cookies = await waitForCheckoutCookies(page, 8000);
+  }
+
+  const modal = await openPricingModalForWarmup(page);
+  cookies = summarizeCheckoutCookies(
+    await page.context().cookies(CHATGPT_HOME_URL),
+  );
+
+  const timezoneOffsetMin = await page
+    .evaluate(() => new Date().getTimezoneOffset())
+    .catch(() => 0);
+  let accountId = String(
+    options.accountId || extractProfileFromToken(accessToken).accountId || "",
+  ).trim();
+
+  const firstWave = buildCheckoutWarmupRequests({
+    timezoneOffsetMin,
+    country,
+    accountId: "",
+  });
+  const firstResults = await fetchSameOriginGets(page, {
+    token: accessToken,
+    accountId: "",
+    requests: firstWave,
+  });
+
+  let plan = "";
+  let accountKind = "";
+  const checkResult = firstResults.find(
+    (item) => item.name === "accounts/check",
+  );
+  if (checkResult?.bodyText) {
+    try {
+      const data = JSON.parse(checkResult.bodyText);
+      accountId = extractAccountIdFromCheck(data, accountId);
+      plan = extractCheckoutPlan(data, accountId);
+      accountKind = describeCheckoutAccount(data, accountId);
+    } catch (_) {
+      /* ignore non-JSON */
+    }
+  }
+
+  let secondResults = [];
+  if (accountId) {
+    const secondWave = buildCheckoutWarmupRequests({
+      timezoneOffsetMin,
+      country,
+      accountId,
+    }).filter((item) =>
+      ["billing_info", "stripe_bootstrap"].includes(item.name),
+    );
+    secondResults = await fetchSameOriginGets(page, {
+      token: accessToken,
+      accountId,
+      requests: secondWave,
+    });
+  }
+
+  const results = [...firstResults, ...secondResults];
+  cookies = summarizeCheckoutCookies(
+    await page.context().cookies(CHATGPT_HOME_URL),
+  );
+
+  console.log(
+    `[ChatGPT] Checkout 预热 url=${String(page.url() || "").slice(0, 80)} cookies=${cookies.count} present=${cookies.markers.join(",") || "none"} oai-did=${cookies.hasOaiDid ? "yes" : "no"} modal=${modal}`,
+  );
+  console.log(
+    `[ChatGPT] accounts/check status=${checkResult?.status ?? 0} account_id=${accountId || "none"} plan=${plan || "none"} kind=${accountKind || "unknown"}`,
+  );
+  console.log(`[ChatGPT] Checkout 预热请求 ${formatWarmupStatuses(results)}`);
+
+  return {
+    accountId,
+    plan,
+    cookies,
+    accountKind,
+    checkStatus: checkResult?.status ?? 0,
+    modal,
+    results,
+  };
 }
 
 function formatApiErrorDetail(detail, fallback = "") {
@@ -261,16 +670,7 @@ class ChatGPTService {
 
   async postCheckoutRequest(payload, page) {
     if (page && typeof page.evaluate === "function") {
-      const currentUrl = String(page.url() || "");
-      if (!currentUrl.startsWith("https://chatgpt.com")) {
-        await page.goto("https://chatgpt.com/", {
-          waitUntil: "domcontentloaded",
-          timeout: 60000,
-        });
-        await page
-          .waitForLoadState("networkidle", { timeout: 20000 })
-          .catch(() => {});
-      }
+      await ensureChatGptHome(page);
       return this.postCheckoutFromPage(page, payload);
     }
 
@@ -302,21 +702,31 @@ class ChatGPTService {
         planNameOverride || store.resolvePlanName(planType),
       ).trim();
       const profile = extractProfileFromToken(this.token);
-      const preferredMode =
-        String(process.env.CHECKOUT_UI_MODE || "custom").trim() || "custom";
-      const modes = [preferredMode];
-      if (!modes.includes("hosted")) {
-        modes.push("hosted");
+      let accountId = String(profile.accountId || "").trim();
+      let warmupPlan = "";
+      if (options.page && typeof options.page.evaluate === "function") {
+        const warmup = await warmupCheckoutContext(options.page, this.token, {
+          country,
+          accountId,
+        });
+        if (!accountId && warmup.accountId) {
+          accountId = warmup.accountId;
+        }
+        warmupPlan = String(warmup.plan || "").trim();
+        if (accountId) {
+          this.headers = buildCheckoutHeaders(this.token, { accountId });
+        }
       }
+      const modes = resolveCheckoutModes(warmupPlan);
       console.log(
-        `[ChatGPT] 创建 Checkout Session: plan_name=${planName}, country=${country}, currency=${currency}, modes=${modes.join("->")}${options.page ? ", via=page-fetch" : ""}`,
+        `[ChatGPT] 创建 Checkout Session: plan_name=${planName}, country=${country}, currency=${currency}, account_id=${accountId || "none"}, current_plan=${warmupPlan || "none"}, modes=${modes.join("->")}${options.page ? ", via=page-fetch" : ""}`,
       );
 
       let lastParsed = null;
       for (const uiMode of modes) {
         const payload = buildCheckoutPayload(planName, country, currency, {
           uiMode,
-          accountId: profile.accountId,
+          accountId,
         });
         const parsed = await this.postCheckoutRequest(payload, options.page);
         lastParsed = parsed;
@@ -363,6 +773,13 @@ class ChatGPTService {
           console.error(
             "❌ [提示] Checkout 被风控拦截，当前出口 IP / 账号组合被判定异常",
           );
+          if (hasActiveCheckoutPlan(warmupPlan)) {
+            console.error(
+              `❌ [提示] accounts/check 显示当前套餐已是 ${warmupPlan}，再打 checkout 会被风控`,
+            );
+            return { sessionId: null, checkoutUrl: null, error: detail };
+          }
+          continue;
         }
       }
 
@@ -683,4 +1100,11 @@ module.exports.openApiCheckout = openApiCheckout;
 module.exports.createHostedCheckoutLink = createHostedCheckoutLink;
 module.exports.buildCheckoutPayload = buildCheckoutPayload;
 module.exports.buildCheckoutHeaders = buildCheckoutHeaders;
+module.exports.extractAccountIdFromCheck = extractAccountIdFromCheck;
+module.exports.describeCheckoutAccount = describeCheckoutAccount;
+module.exports.pickCheckoutAccountRecord = pickCheckoutAccountRecord;
+module.exports.extractCheckoutPlan = extractCheckoutPlan;
+module.exports.resolveCheckoutModes = resolveCheckoutModes;
+module.exports.summarizeCheckoutCookies = summarizeCheckoutCookies;
+module.exports.buildCheckoutWarmupRequests = buildCheckoutWarmupRequests;
 module.exports.formatApiErrorDetail = formatApiErrorDetail;

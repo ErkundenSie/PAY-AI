@@ -813,6 +813,12 @@ async function pageShowsCurrency(page, regionCode) {
 }
 
 async function waitForPricingPage(page, timeout = 60000) {
+  if ((await isPricingModalVisible(page)) || (await isPersonalPlanView(page))) {
+    console.log(
+      `✅ [步骤] 套餐弹窗已在当前页: ${String(page.url() || "").slice(0, 80)}`,
+    );
+    return;
+  }
   let lastUrl = "";
   for (const url of PRICING_FALLBACK_URLS) {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout });
@@ -1078,5 +1084,7 @@ module.exports = {
   switchToPersonalPlans,
   clickPlanUpgrade,
   waitForCheckoutPage,
+  isPricingModalVisible,
+  openPricingModalFromChat,
   pageShowsTargetRegionPricing,
 };

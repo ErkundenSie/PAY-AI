@@ -1,3 +1,108 @@
+## 2026-08-24 - Task: 免费号 checkout 风控后继续 hosted / UI
+
+### What was done
+
+- 免费号 custom 被 unusual activity 后继续试 hosted，不再立刻退出。
+- 定价页回退若弹窗已开，不再重新 goto 聊天页。
+
+### Testing
+
+- `node --check chatgpt.js`
+- `node --check pricing-checkout.js`
+
+### Notes
+
+- `chatgpt.js`、`pricing-checkout.js`。
+- 回滚方式：还原上述文件。
+
+## 2026-08-24 - Task: Checkout 选个人免费账户而不是停用工作区
+
+### What was done
+
+- `accounts/check` 不再只用 `accounts.default`。
+- 优先个人免费账户，跳过已停用 Workspace 的 Plus 套餐。
+- 日志补 `kind=personal,free` / `workspace,deactivated`。
+
+### Testing
+
+- `node --check chatgpt.js`
+
+### Notes
+
+- `chatgpt.js`：`pickCheckoutAccountRecord`。
+- 回滚方式：还原该文件。
+
+## 2026-08-24 - Task: 已订阅账号不再连打 custom/hosted
+
+### What was done
+
+- 预热打不开套餐弹窗时，再走 `?upgrade=plus`。
+- `accounts/check` 已是 Plus/Pro 时只打 hosted，不再 custom→hosted 连打。
+- unusual activity 时明确记录当前套餐。
+
+### Testing
+
+- `node --check chatgpt.js`
+
+### Notes
+
+- `chatgpt.js`：`resolveCheckoutModes`。
+- 回滚方式：还原该文件。
+
+## 2026-08-24 - Task: 修复 VS Code 内置预览播不了任务录像
+
+### What was done
+
+- 录像不再整段拉成 blob，改为带 token 的直链播放。
+- 弹窗增加“用系统浏览器打开 / 复制播放链接”。
+- `/api/admin/video` 支持 query token，并声明 `Accept-Ranges`。
+
+### Testing
+
+- `node --check server.js`
+
+### Notes
+
+- `public/admin.html`、`server.js`。
+- 回滚方式：还原上述文件。
+
+## 2026-08-24 - Task: Checkout 预热补齐油猴/官网 GET
+
+### What was done
+
+- 下单前先尝试打开套餐弹窗（不点订阅）。
+- 同源预热 session、accounts/check、conversations、subscriptions、pricing_config。
+- 有 account_id 后再拉 billing_info、stripe_client_bootstrap。
+- 不伪造 oai-did / attestation，不调用 payment_method POST / 取消订阅。
+
+### Testing
+
+- `node --check chatgpt.js`
+- `node --check pricing-checkout.js`
+
+### Notes
+
+- `chatgpt.js`：`buildCheckoutWarmupRequests`。
+- 回滚方式：还原该文件。
+
+## 2026-08-24 - Task: Checkout 下单前补 accounts/check 预热
+
+### What was done
+
+- 页面 fetch 下单前先停在 chatgpt.com，等待站点自己写 `oai-did`（不伪造设备 ID）。
+- 同源 GET `/backend-api/accounts/check/v4-2023-04-27`，JWT 没有 account_id 时用 check 结果补上。
+- 日志只记 Cookie 名和 check 状态，不打印 Cookie 值。
+
+### Testing
+
+- `node --check chatgpt.js`
+- `npx --yes vitest --run test/chatgpt-checkout.test.js`
+
+### Notes
+
+- `chatgpt.js`：`warmupCheckoutContext`。
+- 回滚方式：还原该文件。
+
 ## 2026-08-24 - Task: Checkout 改为页面同源 fetch
 
 ### What was done
