@@ -4,13 +4,14 @@
 > 使用者貼上 Session 與兌換 CDK 後，可使用本地 Stripe 自動化流程，或啟用第三方代充 API 建立並輪詢代充訂單。  
 > 配套管理後台：卡池管理、CDK 管理、任務監控、帳單稽核、第三方代充積分與套餐狀態、並發控制。
 
-| 开发者 | TG | 
-|--------|-----|
+| 开发者 | TG     |
+| ------ | ------ |
 | **KC** | KcCatk |
 
 [License: MIT](LICENSE) · Node.js 20+ · MySQL 8 · Playwright · Docker · [GitHub](https://github.com/KC-CatK/KC-PAY-GPT)
 
 > ## 加入 Telegram 社群
+>
 > **[點此加入 AI科研組 Telegram 群組](https://t.me/+xPBORDjtky9mM2Mx)**
 
 ---
@@ -32,13 +33,13 @@
 
 ## 系统要求
 
-| 组件 | 要求 |
-|------|------|
-| **Node.js** | ≥ 20.x |
-| **MySQL** | ≥ 8.0 |
-| **記憶體** | ≥ 2 GB（本地瀏覽器自動化建議 4 GB+） |
-| **磁盘** | ≥ 5 GB（含 Chromium + Python hCaptcha 依赖） |
-| **操作系统** | Linux / macOS / Windows |
+| 组件         | 要求                                         |
+| ------------ | -------------------------------------------- |
+| **Node.js**  | ≥ 20.x                                       |
+| **MySQL**    | ≥ 8.0                                        |
+| **記憶體**   | ≥ 2 GB（本地瀏覽器自動化建議 4 GB+）         |
+| **磁盘**     | ≥ 5 GB（含 Chromium + Python hCaptcha 依赖） |
+| **操作系统** | Linux / macOS / Windows                      |
 
 Linux 无图形界面跑 headless 时，需安装 Playwright 系统依赖（见下方各平台说明）。
 
@@ -86,9 +87,9 @@ docker compose up -d
 
 首次构建镜像需数分钟（含 Playwright Chromium + hCaptcha Python 依赖）。启动成功后：
 
-| 地址 | 说明 |
-|------|------|
-| `http://服务器IP:3000/` | 用户前台（卡密兑换） |
+| 地址                               | 说明                             |
+| ---------------------------------- | -------------------------------- |
+| `http://服务器IP:3000/`            | 用户前台（卡密兑换）             |
 | `http://服务器IP:3000/admin-login` | 后台登录（默认路径可在后台修改） |
 
 #### 4. Docker 常用命令
@@ -152,13 +153,15 @@ chmod +x scripts/install.sh
 
 #### Windows 一键安装
 
-以**管理员权限**打开 PowerShell：
+以**管理员权限**打开 PowerShell 完成首次安装：
 
 ```powershell
 git clone https://github.com/KC-CatK/KC-PAY-GPT.git KC-GPT-PAY
 cd KC-GPT-PAY
 powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
 ```
+
+本地日常运行请用 WSL + Docker：`docker compose up -d --build`。裸机调试用 `npm start`，并先在 `.env` 填写 `DB_PASSWORD`，确保 MySQL 已运行。
 
 #### 手动安装（各平台通用）
 
@@ -312,17 +315,17 @@ sudo certbot --nginx -d your-domain.com
 
 ## 主要功能
 
-| 模块 | 说明 |
-|------|------|
-| **CDK 兑换** | Plus / Pro 5x / Pro 20x 三档套餐，一卡一充 |
-| **信用卡卡池** | 批量导入、智能选卡、冷却机制、Stripe 拒卡自动报废、失败换卡重试 |
-| **支付地区** | PH / US / SG / MY 可切换，配套免税地址池 |
-| **账单审计** | 自动记录每笔支付，支持筛选与 CSV 导出 |
-| **瀏覽器池** | 本地自動化的可選多槽位模式；目前預設關閉（`BROWSER_POOL=0`） |
-| **hCaptcha** | VLM / 打码平台 / Python solver 多通道 |
-| **反指纹** | Stealth + 30+ 指纹点修正，支持真 Chrome / Edge |
-| **Telegram 通知** | 任务成功 / 失败推送（后台配置） |
-| **并发 & 维护模式** | 前台并发上限、维护开关，保存即生效 |
+| 模块                | 说明                                                            |
+| ------------------- | --------------------------------------------------------------- |
+| **CDK 兑换**        | Plus / Pro 5x / Pro 20x 三档套餐，一卡一充                      |
+| **信用卡卡池**      | 批量导入、智能选卡、冷却机制、Stripe 拒卡自动报废、失败换卡重试 |
+| **支付地区**        | PH / US / SG / MY 可切换，配套免税地址池                        |
+| **账单审计**        | 自动记录每笔支付，支持筛选与 CSV 导出                           |
+| **瀏覽器池**        | 本地自動化的可選多槽位模式；目前預設關閉（`BROWSER_POOL=0`）    |
+| **hCaptcha**        | VLM / 打码平台 / Python solver 多通道                           |
+| **反指纹**          | Stealth + 30+ 指纹点修正，支持真 Chrome / Edge                  |
+| **Telegram 通知**   | 任务成功 / 失败推送（后台配置）                                 |
+| **并发 & 维护模式** | 前台并发上限、维护开关，保存即生效                              |
 
 ---
 
@@ -388,15 +391,15 @@ sudo certbot --nginx -d your-domain.com
 
 本系統 REST API 請依 `server.js` 路由使用；第三方代充接口見 [對接 API 文件](对接api.md)。常用接口：
 
-| 用途 | Method + Path | 鉴权 |
-|------|---------------|------|
-| 用户兑换开通 | `POST /api/redeem-product` | 无 |
-| 查询 CDK 状态 | `GET /api/cdk/query?cdk=...` | 无 |
-| 后台登录 | `POST /api/admin/login` | 密码 |
-| 卡池批量导入 | `POST /api/admin/cards/import` | Bearer |
-| 外部卡池推送 | `POST /api/external/cards/push` | X-API-Key |
-| 账单 CSV 导出 | `GET /api/admin/billing/export` | Bearer |
-| 实时运行日志 | `GET /api/admin/runtime-logs` | Bearer |
+| 用途          | Method + Path                   | 鉴权      |
+| ------------- | ------------------------------- | --------- |
+| 用户兑换开通  | `POST /api/redeem-product`      | 无        |
+| 查询 CDK 状态 | `GET /api/cdk/query?cdk=...`    | 无        |
+| 后台登录      | `POST /api/admin/login`         | 密码      |
+| 卡池批量导入  | `POST /api/admin/cards/import`  | Bearer    |
+| 外部卡池推送  | `POST /api/external/cards/push` | X-API-Key |
+| 账单 CSV 导出 | `GET /api/admin/billing/export` | Bearer    |
+| 实时运行日志  | `GET /api/admin/runtime-logs`   | Bearer    |
 
 ---
 
@@ -427,23 +430,20 @@ A: 管理员 PowerShell 执行：`Set-ExecutionPolicy -Scope CurrentUser RemoteS
 
 ## 端口说明
 
-| 端口 | 用途 |
-|------|------|
-| 3000 | Web 服务 + WebSocket（可通过 `PORT` 环境变量修改） |
-| 3306 | MySQL（Docker 模式下映射到宿主机） |
+| 端口   | 用途                                                  |
+| ------ | ----------------------------------------------------- |
+| 3000   | Web 服务 + WebSocket（可通过 `PORT` 环境变量修改）    |
+| 3306   | MySQL（Docker 模式下映射到宿主机）                    |
 | 19222+ | 瀏覽器池 CDP 連接埠（僅啟用 `BROWSER_POOL=1` 時使用） |
 
 ---
 
 ## 开发者 & 联系方式
 
-| 项目 | 信息 |
-|------|------|
-| 开发者 | **KC** |
-| TG | **KcCatk** |
-
-
-
+| 项目   | 信息       |
+| ------ | ---------- |
+| 开发者 | **KC**     |
+| TG     | **KcCatk** |
 
 ---
 

@@ -2,12 +2,12 @@
 
 ## 系统要求
 
-| 组件 | 最低要求 |
-|------|----------|
-| Node.js | >= 20 |
-| MySQL | >= 8.0 |
-| 内存 | >= 2GB（浏览器自动化需要） |
-| 磁盘 | >= 5GB（含 Chromium 浏览器） |
+| 组件    | 最低要求                     |
+| ------- | ---------------------------- |
+| Node.js | >= 20                        |
+| MySQL   | >= 8.0                       |
+| 内存    | >= 2GB（浏览器自动化需要）   |
+| 磁盘    | >= 5GB（含 Chromium 浏览器） |
 
 ---
 
@@ -37,6 +37,7 @@ nano .env   # 填写 DB_PASSWORD 和 PROXY
 ```
 
 关键配置项：
+
 ```env
 DB_PASSWORD=your_strong_password   # MySQL 密码
 PROXY=http://user:pass@proxy:port  # 住宅代理（强烈建议）
@@ -89,9 +90,11 @@ chmod +x scripts/install.sh
 
 ```powershell
 git clone <your-repo-url> KC-GPT-PAY
-cd KC-GPT-PAY
+cd KC-PAY-GPT
 powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
 ```
+
+安装完成后用 `npm start` 启动。请先在 `.env` 填写 `DB_PASSWORD`，并确保本机 MySQL 已运行。本地推荐走 WSL + Docker：`docker compose up -d --build`。
 
 ### 手动安装步骤
 
@@ -116,6 +119,7 @@ sudo yum install -y nodejs
 #### 2. 安装系统依赖（Linux）
 
 Ubuntu/Debian:
+
 ```bash
 sudo apt-get install -y \
     wget curl fonts-liberation fonts-noto-cjk \
@@ -126,6 +130,7 @@ sudo apt-get install -y \
 ```
 
 CentOS/RHEL:
+
 ```bash
 sudo yum install -y \
     wget curl liberation-fonts google-noto-cjk-fonts \
@@ -161,6 +166,7 @@ sudo systemctl start mysqld
 ```
 
 创建数据库：
+
 ```bash
 mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS plus_papay CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 ```
@@ -223,6 +229,7 @@ server {
 ```
 
 配合 Let's Encrypt 免费 HTTPS：
+
 ```bash
 sudo apt install certbot python3-certbot-nginx
 sudo certbot --nginx -d your-domain.com
@@ -235,6 +242,7 @@ sudo certbot --nginx -d your-domain.com
 ### Q: Chromium 启动失败 (Linux 无图形界面)
 
 确保使用 `HEADFUL=0`（默认无头模式），并安装了所有系统依赖：
+
 ```bash
 npx playwright install-deps chromium
 ```
@@ -246,6 +254,7 @@ npx playwright install-deps chromium
 ### Q: Windows 上 Playwright 安装失败
 
 以管理员权限运行 PowerShell：
+
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 npx playwright install chromium
@@ -254,6 +263,7 @@ npx playwright install chromium
 ### Q: MySQL 连接被拒绝
 
 检查：
+
 1. MySQL 服务是否运行：`sudo systemctl status mysql`
 2. 用户权限：`GRANT ALL ON plus_papay.* TO 'root'@'%';`
 3. Docker 模式下 DB_HOST 应为 `mysql`（service name），裸机模式下为 `127.0.0.1`
@@ -261,6 +271,7 @@ npx playwright install chromium
 ### Q: 代理如何配置
 
 在 `.env` 中设置：
+
 ```env
 PROXY=http://username:password@proxy-host:port
 ```
@@ -271,7 +282,7 @@ PROXY=http://username:password@proxy-host:port
 
 ## 端口说明
 
-| 端口 | 用途 |
-|------|------|
+| 端口 | 用途                 |
+| ---- | -------------------- |
 | 3000 | Web 服务 + WebSocket |
-| 3306 | MySQL |
+| 3306 | MySQL                |
