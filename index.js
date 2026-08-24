@@ -678,14 +678,14 @@ async function run() {
 
     // --- Phase 2: API 创建 Checkout（注入账单地区），失败时回退 UI 定价页 ---
     const checkoutMode = String(
-      process.env.CHECKOUT_MODE || "api",
+      process.env.CHECKOUT_MODE || "ui",
     ).toLowerCase();
     let checkoutOpened = false;
     let checkoutResult = null;
     const planNameOverride =
       String(CONFIG.planNameOverride || "").trim() || undefined;
 
-    if (checkoutMode !== "ui") {
+    if (checkoutMode === "api" || checkoutMode === "auto") {
       try {
         checkoutResult = await openApiCheckout(page, {
           accessToken: loginInfo.session?.accessToken || CONFIG.chatgptToken,
@@ -698,12 +698,16 @@ async function run() {
         checkoutOpened = true;
       } catch (apiError) {
         console.warn(`[Warn] API Checkout 失败: ${apiError.message}`);
-        if (checkoutMode === "api") {
+        if (checkoutMode === "auto") {
           console.log("[Info] 正在回退到 UI 定价页流程...");
         } else {
           throw apiError;
         }
       }
+    } else {
+      console.log(
+        "[Info] Checkout 走页面升级按钮，由站点自己完成 Sentinel 后再下单",
+      );
     }
 
     if (!checkoutOpened) {

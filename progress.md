@@ -1,3 +1,36 @@
+## 2026-08-24 - Task: 调试任务改为页面升级下单
+
+### What was done
+
+- `spawnCheckoutDebugWorker` 不再写死 `CHECKOUT_MODE=api`。
+- 调试任务走页面 Upgrade，让站点自己带 Sentinel 下单。
+
+### Testing
+
+- `node --check server.js`
+
+### Notes
+
+- `server.js`：`CHECKOUT_MODE: "ui"`。
+- 回滚方式：还原该文件。
+
+## 2026-08-24 - Task: Checkout 默认走页面升级按钮
+
+### What was done
+
+- 浏览器抓包显示 checkout 前必须先 `/sentinel/req`，再带 `openai-sentinel-token`。
+- 不伪造 Sentinel。默认 `CHECKOUT_MODE=ui`，点套餐弹窗 Upgrade，让页面自己下单。
+- `CHECKOUT_MODE=api` 仍走裸 POST；`auto` 才是 API 失败后回退 UI。
+
+### Testing
+
+- `node --check index.js`
+
+### Notes
+
+- `index.js`：默认 UI checkout。
+- 回滚方式：还原该文件。
+
 ## 2026-08-24 - Task: 免费号 checkout 风控后继续 hosted / UI
 
 ### What was done

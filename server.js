@@ -1548,12 +1548,10 @@ app.post("/api/admin/login/send-tg-code", async (req, res) => {
       ip: clientMeta.ip || challenge.ip,
     });
     if (!sendResult.ok) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: sendResult.error || "Telegram 验证码发送失败",
-        });
+      return res.status(400).json({
+        success: false,
+        message: sendResult.error || "Telegram 验证码发送失败",
+      });
     }
     return res.json({
       success: true,
@@ -1847,12 +1845,10 @@ app.post(
         .trim()
         .replace(/^\uFEFF/, "");
       if (!rawSession) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "请粘贴 Session JSON 或 AccessToken",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "请粘贴 Session JSON 或 AccessToken",
+        });
       }
 
       const token = normalizeSessionToken(rawSession);
@@ -2325,12 +2321,10 @@ app.post("/api/admin/subscription/cancel-auto-renew", async (req, res) => {
       .trim()
       .replace(/^\uFEFF/, "");
     if (!rawSession) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "请粘贴 Session JSON 或 AccessToken",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "请粘贴 Session JSON 或 AccessToken",
+      });
     }
 
     const token = normalizeSessionToken(rawSession);
@@ -2368,12 +2362,10 @@ app.post("/api/admin/subscription/enable-auto-renew", async (req, res) => {
       .trim()
       .replace(/^\uFEFF/, "");
     if (!rawSession) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "请粘贴 Session JSON 或 AccessToken",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "请粘贴 Session JSON 或 AccessToken",
+      });
     }
 
     const token = normalizeSessionToken(rawSession);
@@ -2864,12 +2856,10 @@ app.get("/api/admin/gpt-api/status", async (req, res) => {
       store.listRecentGptApiOrders(10),
     ]);
     if (!plansResult.success) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: `套餐查询失败: ${plansResult.error || "未知错误"}`,
-        });
+      return res.status(400).json({
+        success: false,
+        message: `套餐查询失败: ${plansResult.error || "未知错误"}`,
+      });
     }
     const orders = recentOrders.map((order) => ({
       job_key: order.job_key,
@@ -3593,7 +3583,7 @@ function spawnCheckoutDebugWorker({
         ...process.env,
         ...hcaptchaEnv,
         CHECKOUT_DEBUG_ONLY: "1",
-        CHECKOUT_MODE: "api",
+        CHECKOUT_MODE: "ui",
         CHATGPT_TOKEN: token,
         CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
           ? sessionRaw
@@ -4606,12 +4596,10 @@ app.post(
         });
       }
 
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: cdkData?.used_at ? "该 CDK 已使用" : "无效 CDK",
-        });
+      return res.status(403).json({
+        success: false,
+        message: cdkData?.used_at ? "该 CDK 已使用" : "无效 CDK",
+      });
     } catch (error) {
       return res.status(500).json({ success: false, message: error.message });
     }
