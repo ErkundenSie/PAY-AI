@@ -82,6 +82,7 @@ services:
       - ./mysql-store.js:/app/mysql-store.js
       - ./hcaptcha-runtime.js:/app/hcaptcha-runtime.js
       - ./payment-retry.js:/app/payment-retry.js
+      - ./checkout-protocol.js:/app/checkout-protocol.js
       - ./proxy-pool.js:/app/proxy-pool.js
       - ./stripe-payment.js:/app/stripe-payment.js
       - ./hcaptcha-solver.js:/app/hcaptcha-solver.js
@@ -102,7 +103,7 @@ services:
       - ./gpt-api-client.js:/app/gpt-api-client.js
       - ./hcaptcha/solver.py:/app/hcaptcha/solver.py
     # 浏览器自动化 + hCaptcha ML 推理需要较大共享内存
-    shm_size: '2gb'
+    shm_size: "2gb"
     deploy:
       resources:
         limits:

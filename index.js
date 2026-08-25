@@ -3,6 +3,7 @@ require("./load-env");
 const { executePaymentWithRetry } = require("./payment-retry");
 const { openPricingCheckout } = require("./pricing-checkout");
 const { openApiCheckout } = require("./chatgpt");
+const { hydrateCheckoutFromUrl } = require("./checkout-protocol");
 const store = require("./mysql-store");
 const { getRegionConfig, getRegionBrowserProfile } = require("./region-config");
 const {
@@ -678,7 +679,7 @@ async function run() {
 
     // --- Phase 2: API 创建 Checkout（注入账单地区），失败时回退 UI 定价页 ---
     const checkoutMode = String(
-      process.env.CHECKOUT_MODE || "ui",
+      process.env.CHECKOUT_MODE || "auto",
     ).toLowerCase();
     let checkoutOpened = false;
     let checkoutResult = null;
@@ -729,18 +730,23 @@ async function run() {
 
     console.log("✅ [步骤] Checkout 页面已打开，开始信用卡支付流程...");
 
-    const stripeSessionMatch = String(page.url() || "").match(
-      /(oaics_[a-f0-9]+)/i,
-    );
-    const stripeSessionId = stripeSessionMatch ? stripeSessionMatch[1] : null;
+    checkoutResult = hydrateCheckoutFromUrl(checkoutResult, page.url());
+    const stripeSessionId = checkoutResult?.sessionId || null;
+    const accessToken = loginInfo.session?.accessToken || CONFIG.chatgptToken;
+    if (stripeSessionId) {
+      console.log(`[Info] Checkout session: ${stripeSessionId}`);
+    }
 
     // --- Phase 4: Execute Payment with Card Pool Retry ---
-    console.log("[步骤] 正在使用 Stripe 信用卡卡池支付流程（单次尝试）...");
+    console.log("[步骤] 正在使用协议优先支付流程...");
     const paymentResult = await executePaymentWithRetry(page, {
       planType,
       cdkCode,
-      email,
+      email: email || loginInfo.email,
       stripeSessionId,
+      accessToken,
+      checkout: checkoutResult,
+      accountId: checkoutResult?.accountId || loginInfo.accountId,
     });
 
     if (paymentResult.success) {

@@ -742,6 +742,8 @@ class ChatGPTService {
             return {
               sessionId: resolved.sessionId,
               checkoutUrl: resolved.checkoutUrl,
+              accountId,
+              data: parsed.data,
             };
           }
           console.warn(
@@ -830,6 +832,10 @@ class ChatGPTService {
       planType,
       cdkCode,
       email,
+      accessToken: this.token,
+      checkout: options.checkout,
+      accountId: options.accountId,
+      stripeSessionId: options.stripeSessionId,
     });
 
     if (result.success) {
@@ -932,6 +938,10 @@ async function activateSubscription({
     planType,
     cdkCode,
     email,
+    accessToken,
+    checkout,
+    accountId: checkout.accountId,
+    stripeSessionId: checkout.sessionId,
   });
 
   if (result.success) {
@@ -1041,7 +1051,7 @@ async function openApiCheckout(
 
   if (!verifyPage) {
     console.log("✅ [步骤] Checkout Session 已创建（跳过页面打开验证）");
-    return { checkoutUrl: url, sessionId: checkout.sessionId };
+    return { ...checkout, checkoutUrl: url };
   }
 
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 90000 });
@@ -1090,7 +1100,7 @@ async function openApiCheckout(
 
   await assertChatGptLoggedIn(page, "Checkout");
   console.log(`✅ [步骤] Checkout 页面已打开: ${currentUrl.slice(0, 100)}...`);
-  return { checkoutUrl: currentUrl, sessionId: checkout.sessionId };
+  return { ...checkout, checkoutUrl: currentUrl };
 }
 
 module.exports = ChatGPTService;

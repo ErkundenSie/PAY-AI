@@ -249,6 +249,11 @@
         margin: 0 auto;
       }
 
+      #logs.page-view,
+      #automation_tasks.page-view {
+        max-width: none;
+      }
+
       .page-view.active {
         display: block;
         animation: slideIn 0.35s cubic-bezier(0.4, 0, 0.2, 1);
@@ -474,6 +479,65 @@
         overflow-x: auto;
         border: 1px solid var(--divider);
         border-radius: 10px;
+      }
+
+      #logs .table-container,
+      #automation_tasks .table-container {
+        overflow-x: hidden;
+      }
+
+      .task-log-table,
+      .automation-task-table {
+        table-layout: fixed;
+        width: 100%;
+      }
+
+      .task-log-table th,
+      .task-log-table td,
+      .automation-task-table th,
+      .automation-task-table td {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .task-log-table .col-time {
+        width: 168px;
+      }
+
+      .task-log-table .col-cdk,
+      .task-log-table .col-token {
+        width: 18%;
+      }
+
+      .task-log-table .col-progress {
+        width: 108px;
+      }
+
+      .task-log-table .col-status {
+        width: 108px;
+      }
+
+      .task-log-table .col-media {
+        width: 104px;
+      }
+
+      .task-log-table .col-action {
+        width: 72px;
+      }
+
+      .task-log-table .col-cdk code,
+      .task-log-table .col-token code {
+        display: inline-block;
+        max-width: 100%;
+        white-space: normal;
+        word-break: break-all;
+      }
+
+      .task-log-info {
+        line-height: 1.5;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
 
       .table-footer {
@@ -4459,17 +4523,19 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             >
           </div>
           <div class="table-container">
-            <table>
+            <table class="task-log-table">
               <thead>
                 <tr>
-                  <th>执行时间</th>
-                  <th>激活码</th>
-                  <th>Token 摘要</th>
-                  <th>任务信息</th>
-                  <th width="150px">进度</th>
-                  <th>状态</th>
-                  <th width="110px" style="text-align: center">截图/录像</th>
-                  <th width="88px" style="text-align: center">操作</th>
+                  <th class="col-time">执行时间</th>
+                  <th class="col-cdk">激活码</th>
+                  <th class="col-token">Token 摘要</th>
+                  <th class="col-info">任务信息</th>
+                  <th class="col-progress">进度</th>
+                  <th class="col-status">状态</th>
+                  <th class="col-media" style="text-align: center">
+                    截图/录像
+                  </th>
+                  <th class="col-action" style="text-align: center">操作</th>
                 </tr>
               </thead>
               <tbody id="log_body"></tbody>
@@ -4503,7 +4569,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             >
           </div>
           <div class="table-container">
-            <table>
+            <table class="automation-task-table">
               <thead>
                 <tr>
                   <th width="160px">执行时间</th>
@@ -8368,19 +8434,19 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             const infoCell = infoParts.length ? infoParts.join("<br>") : "-";
             return `
                 <tr>
-                    <td>${escapeHtml(l.time || "-")}</td>
-                    <td><code>${escapeHtml(l.cdk || "-")}</code></td>
-                    <td><code>${escapeHtml(l.token || "-")}</code></td>
-                    <td>${infoCell}</td>
-                    <td>
+                    <td class="col-time">${escapeHtml(l.time || "-")}</td>
+                    <td class="col-cdk"><code>${escapeHtml(l.cdk || "-")}</code></td>
+                    <td class="col-token"><code>${escapeHtml(l.token || "-")}</code></td>
+                    <td class="col-info"><div class="task-log-info">${infoCell}</div></td>
+                    <td class="col-progress">
                         <div style="font-size: 12px; margin-bottom: 2px;">${l.progress}%</div>
                         <div class="progress-mini-track">
                             <div class="progress-mini-bar ${l.status}" style="width: ${l.progress}%"></div>
                         </div>
                     </td>
-                    <td>${renderStatus(l.status)}</td>
-                    <td style="text-align:center">${mediaCell}</td>
-                    <td style="text-align:center"><button type="button" class="btn-delete" title="删除此任务记录" data-delete-task="${escapeHtml(l.id)}"><i data-lucide="trash-2"></i></button></td>
+                    <td class="col-status">${renderStatus(l.status)}</td>
+                    <td class="col-media" style="text-align:center">${mediaCell}</td>
+                    <td class="col-action" style="text-align:center"><button type="button" class="btn-delete" title="删除此任务记录" data-delete-task="${escapeHtml(l.id)}"><i data-lucide="trash-2"></i></button></td>
                 </tr>`;
           })
           .join("");

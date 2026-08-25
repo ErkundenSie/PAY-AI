@@ -839,6 +839,8 @@ function analyzeProcessOutput(output, timedOut) {
   const reachedPayment =
     normalized.includes("[Stripe] Step") ||
     normalized.includes("正在使用 Stripe 信用卡") ||
+    normalized.includes("正在使用协议优先支付") ||
+    normalized.includes("走协议支付") ||
     normalized.includes("Checkout 页面已打开") ||
     normalized.includes("chatgpt.com/checkout") ||
     normalized.includes("配置套餐") ||
@@ -1295,6 +1297,8 @@ function getCheckoutProgress(output, status = "running") {
     ["[Stripe] Step 6", 60],
     ["[Stripe] Step 9", 80],
     ["[Stripe] Step 10", 90],
+    ["正在使用协议优先支付流程", 40],
+    ["走协议支付", 50],
     ["正在使用 Stripe 信用卡卡池支付流程", 40],
     ["最终校验：支付成功!", 100],
     ["PAYMENT_SUCCESS", 100],
@@ -3583,7 +3587,7 @@ function spawnCheckoutDebugWorker({
         ...process.env,
         ...hcaptchaEnv,
         CHECKOUT_DEBUG_ONLY: "1",
-        CHECKOUT_MODE: "ui",
+        CHECKOUT_MODE: "auto",
         CHATGPT_TOKEN: token,
         CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
           ? sessionRaw
@@ -4047,6 +4051,7 @@ function spawnActivationWorker({
           ...process.env,
           ...hcaptchaEnv,
           JOB_KEY: task.jobKey,
+          CHECKOUT_MODE: process.env.CHECKOUT_MODE || "auto",
           CHATGPT_TOKEN: token,
           CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
             ? sessionRaw
