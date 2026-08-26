@@ -1,6 +1,6 @@
-# KC GPT 自动充值系统
+# OAI充值系统
 
-> **KC ChatGPT PLUS 訂閱開通平台**  
+> **OAI充值系统**  
 > 使用者貼上 Session 與兌換 CDK 後，可使用本地 Stripe 自動化流程，或啟用第三方代充 API 建立並輪詢代充訂單。  
 > 配套管理後台：卡池管理、CDK 管理、任務監控、帳單稽核、第三方代充積分與套餐狀態、並發控制。
 
@@ -18,7 +18,7 @@
 
 ## 这是什么
 
-`KC-GPT-PAY`（KC GPT 自动充值系统）是一套 **Node.js + Playwright + MySQL** 服务端方案，包含：
+`KC-GPT-PAY`（OAI充值系统）是一套 **Node.js + Playwright + MySQL** 服务端方案，包含：
 
 - **用户前台**（`/public/index.html`）：卡密兑换、Session 提交、订阅自动开通、状态查询
 - **管理后台**（`/admin`）：卡池 / CDK / 任务 / 账单 / 系统配置 / 运行日志
@@ -340,7 +340,7 @@ sudo certbot --nginx -d your-domain.com
          ▼                                    ▼
 ┌─────────────────────┐            ┌─────────────────────┐
 │  product_activator  │            │  public/admin.html  │
-│  任务调度 / 重试     │            │  KC GPT 管理后台     │
+│  任务调度 / 重试     │            │  OAI充值系统管理后台 │
 └─────────────────────┘            └─────────────────────┘
          │
          ▼

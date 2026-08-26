@@ -1,398 +1,512 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>后台登录 | KC GPT自动充值系统</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>后台登录 | OAI充值系统</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <style>
-        :root {
-            --primary: #2563eb;
-            --primary-hover: #1d4ed8;
-            --primary-soft: #eff6ff;
-            --bg: #f4f7fb;
-            --panel: #ffffff;
-            --border: #e5e7eb;
-            --text: #0f172a;
-            --text-dim: #64748b;
-            --error: #ef4444;
-            --success: #059669;
-            --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.10);
-            --shadow-focus: 0 0 0 4px rgba(37, 99, 235, 0.14);
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Outfit', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; }
-        body {
-            min-height: 100vh;
-            display: grid;
-            place-items: center;
-            background:
-                radial-gradient(circle at 12% 8%, rgba(37, 99, 235, 0.10), transparent 45%),
-                radial-gradient(circle at 90% 92%, rgba(14, 165, 233, 0.08), transparent 45%),
-                var(--bg);
-            color: var(--text);
-            padding: 24px;
-        }
-        .card {
-            width: 100%;
-            max-width: 440px;
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 36px;
-            box-shadow: var(--shadow-lg);
-        }
-        h1 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
-        p { color: var(--text-dim); margin-bottom: 20px; line-height: 1.55; font-size: 14px; }
-        label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 8px; font-weight: 600; }
-        input {
-            width: 100%;
-            padding: 12px 14px;
-            border-radius: 12px;
-            border: 1px solid var(--border);
-            background: var(--panel);
-            color: var(--text);
-            outline: none;
-            font-size: 14px;
-            margin-bottom: 14px;
-        }
-        input:focus { border-color: var(--primary); box-shadow: var(--shadow-focus); }
-        button {
-            width: 100%;
-            margin-top: 6px;
-            padding: 12px 16px;
-            border: 1px solid var(--primary);
-            border-radius: 12px;
-            background: var(--primary);
-            color: #fff;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        button.secondary {
-            background: #fff;
-            color: var(--primary);
-            margin-top: 10px;
-        }
-        button:disabled { opacity: 0.6; cursor: not-allowed; }
-        .message { margin-top: 14px; min-height: 22px; font-size: 13px; color: var(--error); }
-        .message.success { color: var(--success); }
-        .step { display: none; }
-        .step.active { display: block; }
-        .method-tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 14px;
-            padding: 4px;
-            background: #f8fafc;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-        }
-        .method-tab {
-            flex: 1;
-            margin: 0;
-            padding: 10px 8px;
-            border: 1px solid transparent;
-            border-radius: 10px;
-            background: transparent;
-            color: var(--text-dim);
-            font-size: 13px;
-            font-weight: 600;
-        }
-        .method-tab.active {
-            background: #fff;
-            color: var(--primary);
-            border-color: #bfdbfe;
-            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
-        }
-        .method-single {
-            margin-bottom: 14px;
-            padding: 10px 12px;
-            border-radius: 10px;
-            background: var(--primary-soft);
-            color: var(--primary);
-            font-size: 13px;
-            font-weight: 600;
-        }
-        .method-hint {
-            margin: -6px 0 14px;
-            font-size: 13px;
-            color: var(--text-dim);
-            line-height: 1.55;
-        }
-        .hint { margin-top: 12px; font-size: 12px; color: var(--text-dim); line-height: 1.55; }
+      :root {
+        --primary: #2563eb;
+        --primary-hover: #1d4ed8;
+        --primary-soft: #eff6ff;
+        --bg: #f4f7fb;
+        --panel: #ffffff;
+        --border: #e5e7eb;
+        --text: #0f172a;
+        --text-dim: #64748b;
+        --error: #ef4444;
+        --success: #059669;
+        --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.1);
+        --shadow-focus: 0 0 0 4px rgba(37, 99, 235, 0.14);
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        font-family:
+          "Outfit",
+          -apple-system,
+          "PingFang SC",
+          "Microsoft YaHei",
+          sans-serif;
+      }
+      body {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(
+            circle at 12% 8%,
+            rgba(37, 99, 235, 0.1),
+            transparent 45%
+          ),
+          radial-gradient(
+            circle at 90% 92%,
+            rgba(14, 165, 233, 0.08),
+            transparent 45%
+          ),
+          var(--bg);
+        color: var(--text);
+        padding: 24px;
+      }
+      .card {
+        width: 100%;
+        max-width: 440px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 36px;
+        box-shadow: var(--shadow-lg);
+      }
+      h1 {
+        font-size: 24px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      p {
+        color: var(--text-dim);
+        margin-bottom: 20px;
+        line-height: 1.55;
+        font-size: 14px;
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        color: var(--text-dim);
+        margin-bottom: 8px;
+        font-weight: 600;
+      }
+      input {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        outline: none;
+        font-size: 14px;
+        margin-bottom: 14px;
+      }
+      input:focus {
+        border-color: var(--primary);
+        box-shadow: var(--shadow-focus);
+      }
+      button {
+        width: 100%;
+        margin-top: 6px;
+        padding: 12px 16px;
+        border: 1px solid var(--primary);
+        border-radius: 12px;
+        background: var(--primary);
+        color: #fff;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #fff;
+        color: var(--primary);
+        margin-top: 10px;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .message {
+        margin-top: 14px;
+        min-height: 22px;
+        font-size: 13px;
+        color: var(--error);
+      }
+      .message.success {
+        color: var(--success);
+      }
+      .step {
+        display: none;
+      }
+      .step.active {
+        display: block;
+      }
+      .method-tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 14px;
+        padding: 4px;
+        background: #f8fafc;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+      }
+      .method-tab {
+        flex: 1;
+        margin: 0;
+        padding: 10px 8px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--text-dim);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .method-tab.active {
+        background: #fff;
+        color: var(--primary);
+        border-color: #bfdbfe;
+        box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
+      }
+      .method-single {
+        margin-bottom: 14px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: var(--primary-soft);
+        color: var(--primary);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .method-hint {
+        margin: -6px 0 14px;
+        font-size: 13px;
+        color: var(--text-dim);
+        line-height: 1.55;
+      }
+      .hint {
+        margin-top: 12px;
+        font-size: 12px;
+        color: var(--text-dim);
+        line-height: 1.55;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <main class="card">
-        <div id="stepLogin" class="step active">
-            <h1>后台登录</h1>
-            <p>使用管理员邮箱和密码登录。若已启用二次验证，登录后还需验证。</p>
-            <label for="email">管理员邮箱</label>
-            <input id="email" type="email" placeholder="请输入管理员邮箱" autocomplete="username">
-            <label for="password">登录密码</label>
-            <input id="password" type="password" placeholder="请输入登录密码" autocomplete="current-password">
-            <button id="loginBtn" type="button">继续</button>
-        </div>
+      <div id="stepLogin" class="step active">
+        <h1>后台登录</h1>
+        <p>使用管理员邮箱和密码登录。若已启用二次验证，登录后还需验证。</p>
+        <label for="email">管理员邮箱</label>
+        <input
+          id="email"
+          type="email"
+          placeholder="请输入管理员邮箱"
+          autocomplete="username"
+        />
+        <label for="password">登录密码</label>
+        <input
+          id="password"
+          type="password"
+          placeholder="请输入登录密码"
+          autocomplete="current-password"
+        />
+        <button id="loginBtn" type="button">继续</button>
+      </div>
 
-        <div id="step2fa" class="step">
-            <h1>二次验证</h1>
-            <p id="step2faHint">请选择验证方式并输入验证码。</p>
-            <div id="methodTabs" class="method-tabs" style="display:none;"></div>
-            <div id="methodSingle" class="method-single" style="display:none;"></div>
-            <div id="methodHint" class="method-hint"></div>
-            <label for="code">验证码</label>
-            <input id="code" type="text" inputmode="numeric" maxlength="8" placeholder="6 位验证码" autocomplete="one-time-code">
-            <button id="sendTgBtn" type="button" class="secondary" style="display:none;">发送 Telegram 验证码</button>
-            <button id="verifyBtn" type="button">验证并登录</button>
-            <button id="backBtn" type="button" class="secondary">返回</button>
-        </div>
+      <div id="step2fa" class="step">
+        <h1>二次验证</h1>
+        <p id="step2faHint">请选择验证方式并输入验证码。</p>
+        <div id="methodTabs" class="method-tabs" style="display: none"></div>
+        <div
+          id="methodSingle"
+          class="method-single"
+          style="display: none"
+        ></div>
+        <div id="methodHint" class="method-hint"></div>
+        <label for="code">验证码</label>
+        <input
+          id="code"
+          type="text"
+          inputmode="numeric"
+          maxlength="8"
+          placeholder="6 位验证码"
+          autocomplete="one-time-code"
+        />
+        <button
+          id="sendTgBtn"
+          type="button"
+          class="secondary"
+          style="display: none"
+        >
+          发送 Telegram 验证码
+        </button>
+        <button id="verifyBtn" type="button">验证并登录</button>
+        <button id="backBtn" type="button" class="secondary">返回</button>
+      </div>
 
-        <div id="message" class="message"></div>
-        <div class="hint">登录失败 5 次将锁定 30 分钟。可在后台「系统配置 → 安全设置」切换验证方式。</div>
+      <div id="message" class="message"></div>
+      <div class="hint">
+        登录失败 5 次将锁定 30 分钟。可在后台「系统配置 →
+        安全设置」切换验证方式。
+      </div>
     </main>
 
     <script>
-        const TOKEN_KEY = 'plus_admin_token';
-        const SECONDARY_TOKEN_KEY = 'plus_admin_secondary_token';
-        const METHOD_LABELS = {
-            totp: 'Google Authenticator',
-            telegram: 'Telegram 验证码'
-        };
-        const METHOD_HINTS = {
-            totp: '请打开 Google Authenticator，输入当前 6 位动态码。',
-            telegram: '点击下方按钮发送验证码到管理员 Telegram，再输入 6 位数字。'
-        };
-        const state = { challengeToken: '', methods: [], selectedMethod: '' };
-        let adminPanelPath = '/admin';
+      const TOKEN_KEY = "plus_admin_token";
+      const SECONDARY_TOKEN_KEY = "plus_admin_secondary_token";
+      const METHOD_LABELS = {
+        totp: "Google Authenticator",
+        telegram: "Telegram 验证码",
+      };
+      const METHOD_HINTS = {
+        totp: "请打开 Google Authenticator，输入当前 6 位动态码。",
+        telegram: "点击下方按钮发送验证码到管理员 Telegram，再输入 6 位数字。",
+      };
+      const state = { challengeToken: "", methods: [], selectedMethod: "" };
+      let adminPanelPath = "/admin";
 
-        async function loadAdminPaths() {
-            try {
-                const response = await fetch('/api/public/admin-paths');
-                const data = await response.json();
-                if (data.success) {
-                    adminPanelPath = data.panelUrl || `/${data.panelPath || 'admin'}`;
-                }
-            } catch (_) { }
+      async function loadAdminPaths() {
+        try {
+          const response = await fetch("/api/public/admin-paths");
+          const data = await response.json();
+          if (data.success) {
+            adminPanelPath = data.panelUrl || `/${data.panelPath || "admin"}`;
+          }
+        } catch (_) {}
+      }
+
+      function goToAdminPanel() {
+        location.href = adminPanelPath;
+      }
+
+      function getBrowserFingerprint() {
+        const parts = [
+          navigator.userAgent,
+          navigator.language,
+          screen.width,
+          screen.height,
+          Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+        ];
+        return btoa(unescape(encodeURIComponent(parts.join("|")))).slice(0, 96);
+      }
+
+      function setMessage(text, isSuccess) {
+        const el = document.getElementById("message");
+        el.textContent = text || "";
+        el.className = "message" + (isSuccess ? " success" : "");
+      }
+
+      function showStep(name) {
+        document
+          .querySelectorAll(".step")
+          .forEach((el) => el.classList.remove("active"));
+        document
+          .getElementById(name === "2fa" ? "step2fa" : "stepLogin")
+          .classList.add("active");
+      }
+
+      function updateMethodUi() {
+        const method = state.selectedMethod;
+        const hintEl = document.getElementById("methodHint");
+        const sendTgBtn = document.getElementById("sendTgBtn");
+        const codeInput = document.getElementById("code");
+
+        hintEl.textContent = METHOD_HINTS[method] || "请输入验证码";
+        sendTgBtn.style.display = method === "telegram" ? "block" : "none";
+        codeInput.placeholder =
+          method === "totp"
+            ? "Google Authenticator 6 位码"
+            : "Telegram 6 位验证码";
+        codeInput.value = "";
+        setMessage("");
+      }
+
+      function selectMethod(method) {
+        if (!state.methods.includes(method)) return;
+        state.selectedMethod = method;
+        document.querySelectorAll(".method-tab").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.method === method);
+        });
+        updateMethodUi();
+      }
+
+      function renderMethods(methods, defaultMethod) {
+        const tabs = document.getElementById("methodTabs");
+        const single = document.getElementById("methodSingle");
+        tabs.innerHTML = "";
+        state.methods = methods || [];
+        state.selectedMethod =
+          defaultMethod && methods.includes(defaultMethod)
+            ? defaultMethod
+            : methods[0] || "";
+
+        if (methods.length <= 1) {
+          tabs.style.display = "none";
+          single.style.display = methods.length ? "block" : "none";
+          single.textContent = methods.length
+            ? `验证方式：${METHOD_LABELS[methods[0]] || methods[0]}`
+            : "";
+        } else {
+          tabs.style.display = "flex";
+          single.style.display = "none";
+          methods.forEach((method) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className =
+              "method-tab" + (method === state.selectedMethod ? " active" : "");
+            btn.dataset.method = method;
+            btn.textContent = METHOD_LABELS[method] || method;
+            btn.onclick = () => selectMethod(method);
+            tabs.appendChild(btn);
+          });
         }
+        updateMethodUi();
+      }
 
-        function goToAdminPanel() {
-            location.href = adminPanelPath;
+      async function verifyExistingToken() {
+        const token = localStorage.getItem(TOKEN_KEY);
+        if (!token) return;
+        try {
+          const response = await fetch("/api/admin/session", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!response.ok) {
+            localStorage.removeItem(TOKEN_KEY);
+            localStorage.removeItem(SECONDARY_TOKEN_KEY);
+            return;
+          }
+          const data = await response.json();
+          if (data.refreshed && data.token) {
+            localStorage.setItem(TOKEN_KEY, data.token);
+          }
+          location.href = adminPanelPath;
+        } catch (_) {
+          localStorage.removeItem(TOKEN_KEY);
+          localStorage.removeItem(SECONDARY_TOKEN_KEY);
         }
+      }
 
-        function getBrowserFingerprint() {
-            const parts = [
-                navigator.userAgent,
-                navigator.language,
-                screen.width,
-                screen.height,
-                Intl.DateTimeFormat().resolvedOptions().timeZone || ''
-            ];
-            return btoa(unescape(encodeURIComponent(parts.join('|')))).slice(0, 96);
+      async function login() {
+        const email = document.getElementById("email").value.trim();
+        const password = document.getElementById("password").value;
+        if (!email || !password) {
+          setMessage("请输入邮箱和密码");
+          return;
         }
-
-        function setMessage(text, isSuccess) {
-            const el = document.getElementById('message');
-            el.textContent = text || '';
-            el.className = 'message' + (isSuccess ? ' success' : '');
+        const loginBtn = document.getElementById("loginBtn");
+        loginBtn.disabled = true;
+        setMessage("");
+        try {
+          const response = await fetch("/api/admin/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email,
+              password,
+              fingerprint: getBrowserFingerprint(),
+            }),
+          });
+          const data = await response.json();
+          if (!response.ok || !data.success) {
+            setMessage(data.message || "登录失败");
+            return;
+          }
+          if (data.requires2fa) {
+            state.challengeToken = data.challengeToken;
+            renderMethods(data.methods || [], data.defaultMethod || "");
+            const modeHint =
+              data.login2faMode === "either" && (data.methods || []).length > 1
+                ? "可在下方切换 Google Authenticator / Telegram 验证。"
+                : "";
+            document.getElementById("step2faHint").textContent =
+              `账号 ${data.email || email} 需要二次验证。${modeHint}`;
+            showStep("2fa");
+            return;
+          }
+          if (data.token) {
+            localStorage.setItem(TOKEN_KEY, data.token);
+            localStorage.removeItem(SECONDARY_TOKEN_KEY);
+            adminPanelPath = data.panelPath || adminPanelPath;
+            goToAdminPanel();
+          }
+        } catch (_) {
+          setMessage("登录请求失败");
+        } finally {
+          loginBtn.disabled = false;
         }
+      }
 
-        function showStep(name) {
-            document.querySelectorAll('.step').forEach((el) => el.classList.remove('active'));
-            document.getElementById(name === '2fa' ? 'step2fa' : 'stepLogin').classList.add('active');
+      async function sendTelegramCode() {
+        if (state.selectedMethod !== "telegram") {
+          setMessage("请先切换到 Telegram 验证码");
+          return;
         }
-
-        function updateMethodUi() {
-            const method = state.selectedMethod;
-            const hintEl = document.getElementById('methodHint');
-            const sendTgBtn = document.getElementById('sendTgBtn');
-            const codeInput = document.getElementById('code');
-
-            hintEl.textContent = METHOD_HINTS[method] || '请输入验证码';
-            sendTgBtn.style.display = method === 'telegram' ? 'block' : 'none';
-            codeInput.placeholder = method === 'totp' ? 'Google Authenticator 6 位码' : 'Telegram 6 位验证码';
-            codeInput.value = '';
-            setMessage('');
+        const btn = document.getElementById("sendTgBtn");
+        btn.disabled = true;
+        try {
+          const response = await fetch("/api/admin/login/send-tg-code", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ challengeToken: state.challengeToken }),
+          });
+          const data = await response.json();
+          setMessage(
+            data.message || (data.success ? "验证码已发送" : "发送失败"),
+            data.success,
+          );
+        } catch (_) {
+          setMessage("发送失败");
+        } finally {
+          btn.disabled = false;
         }
+      }
 
-        function selectMethod(method) {
-            if (!state.methods.includes(method)) return;
-            state.selectedMethod = method;
-            document.querySelectorAll('.method-tab').forEach((btn) => {
-                btn.classList.toggle('active', btn.dataset.method === method);
-            });
-            updateMethodUi();
+      async function verify2fa() {
+        const code = document.getElementById("code").value.trim();
+        if (!code) {
+          setMessage("请输入验证码");
+          return;
         }
-
-        function renderMethods(methods, defaultMethod) {
-            const tabs = document.getElementById('methodTabs');
-            const single = document.getElementById('methodSingle');
-            tabs.innerHTML = '';
-            state.methods = methods || [];
-            state.selectedMethod = defaultMethod && methods.includes(defaultMethod)
-                ? defaultMethod
-                : (methods[0] || '');
-
-            if (methods.length <= 1) {
-                tabs.style.display = 'none';
-                single.style.display = methods.length ? 'block' : 'none';
-                single.textContent = methods.length
-                    ? `验证方式：${METHOD_LABELS[methods[0]] || methods[0]}`
-                    : '';
-            } else {
-                tabs.style.display = 'flex';
-                single.style.display = 'none';
-                methods.forEach((method) => {
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'method-tab' + (method === state.selectedMethod ? ' active' : '');
-                    btn.dataset.method = method;
-                    btn.textContent = METHOD_LABELS[method] || method;
-                    btn.onclick = () => selectMethod(method);
-                    tabs.appendChild(btn);
-                });
-            }
-            updateMethodUi();
+        if (!state.selectedMethod) {
+          setMessage("请选择验证方式");
+          return;
         }
-
-        async function verifyExistingToken() {
-            const token = localStorage.getItem(TOKEN_KEY);
-            if (!token) return;
-            try {
-                const response = await fetch('/api/admin/session', {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (!response.ok) {
-                    localStorage.removeItem(TOKEN_KEY);
-                    localStorage.removeItem(SECONDARY_TOKEN_KEY);
-                    return;
-                }
-                const data = await response.json();
-                if (data.refreshed && data.token) {
-                    localStorage.setItem(TOKEN_KEY, data.token);
-                }
-                location.href = adminPanelPath;
-            } catch (_) {
-                localStorage.removeItem(TOKEN_KEY);
-                localStorage.removeItem(SECONDARY_TOKEN_KEY);
-            }
+        const verifyBtn = document.getElementById("verifyBtn");
+        verifyBtn.disabled = true;
+        setMessage("");
+        try {
+          const response = await fetch("/api/admin/login/verify-2fa", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              challengeToken: state.challengeToken,
+              method: state.selectedMethod,
+              code,
+              fingerprint: getBrowserFingerprint(),
+            }),
+          });
+          const data = await response.json();
+          if (!response.ok || !data.success || !data.token) {
+            setMessage(data.message || "验证失败");
+            return;
+          }
+          localStorage.setItem(TOKEN_KEY, data.token);
+          localStorage.removeItem(SECONDARY_TOKEN_KEY);
+          adminPanelPath = data.panelPath || adminPanelPath;
+          goToAdminPanel();
+        } catch (_) {
+          setMessage("验证请求失败");
+        } finally {
+          verifyBtn.disabled = false;
         }
+      }
 
-        async function login() {
-            const email = document.getElementById('email').value.trim();
-            const password = document.getElementById('password').value;
-            if (!email || !password) {
-                setMessage('请输入邮箱和密码');
-                return;
-            }
-            const loginBtn = document.getElementById('loginBtn');
-            loginBtn.disabled = true;
-            setMessage('');
-            try {
-                const response = await fetch('/api/admin/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password, fingerprint: getBrowserFingerprint() })
-                });
-                const data = await response.json();
-                if (!response.ok || !data.success) {
-                    setMessage(data.message || '登录失败');
-                    return;
-                }
-                if (data.requires2fa) {
-                    state.challengeToken = data.challengeToken;
-                    renderMethods(data.methods || [], data.defaultMethod || '');
-                    const modeHint = data.login2faMode === 'either' && (data.methods || []).length > 1
-                        ? '可在下方切换 Google Authenticator / Telegram 验证。'
-                        : '';
-                    document.getElementById('step2faHint').textContent =
-                        `账号 ${data.email || email} 需要二次验证。${modeHint}`;
-                    showStep('2fa');
-                    return;
-                }
-                if (data.token) {
-                    localStorage.setItem(TOKEN_KEY, data.token);
-                    localStorage.removeItem(SECONDARY_TOKEN_KEY);
-                    adminPanelPath = data.panelPath || adminPanelPath;
-                    goToAdminPanel();
-                }
-            } catch (_) {
-                setMessage('登录请求失败');
-            } finally {
-                loginBtn.disabled = false;
-            }
-        }
+      document.getElementById("loginBtn").addEventListener("click", login);
+      document.getElementById("verifyBtn").addEventListener("click", verify2fa);
+      document
+        .getElementById("sendTgBtn")
+        .addEventListener("click", sendTelegramCode);
+      document
+        .getElementById("backBtn")
+        .addEventListener("click", () => showStep("login"));
+      document.getElementById("password").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") login();
+      });
+      document.getElementById("code").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") verify2fa();
+      });
 
-        async function sendTelegramCode() {
-            if (state.selectedMethod !== 'telegram') {
-                setMessage('请先切换到 Telegram 验证码');
-                return;
-            }
-            const btn = document.getElementById('sendTgBtn');
-            btn.disabled = true;
-            try {
-                const response = await fetch('/api/admin/login/send-tg-code', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ challengeToken: state.challengeToken })
-                });
-                const data = await response.json();
-                setMessage(data.message || (data.success ? '验证码已发送' : '发送失败'), data.success);
-            } catch (_) {
-                setMessage('发送失败');
-            } finally {
-                btn.disabled = false;
-            }
-        }
-
-        async function verify2fa() {
-            const code = document.getElementById('code').value.trim();
-            if (!code) {
-                setMessage('请输入验证码');
-                return;
-            }
-            if (!state.selectedMethod) {
-                setMessage('请选择验证方式');
-                return;
-            }
-            const verifyBtn = document.getElementById('verifyBtn');
-            verifyBtn.disabled = true;
-            setMessage('');
-            try {
-                const response = await fetch('/api/admin/login/verify-2fa', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        challengeToken: state.challengeToken,
-                        method: state.selectedMethod,
-                        code,
-                        fingerprint: getBrowserFingerprint()
-                    })
-                });
-                const data = await response.json();
-                if (!response.ok || !data.success || !data.token) {
-                    setMessage(data.message || '验证失败');
-                    return;
-                }
-                localStorage.setItem(TOKEN_KEY, data.token);
-                localStorage.removeItem(SECONDARY_TOKEN_KEY);
-                adminPanelPath = data.panelPath || adminPanelPath;
-                goToAdminPanel();
-            } catch (_) {
-                setMessage('验证请求失败');
-            } finally {
-                verifyBtn.disabled = false;
-            }
-        }
-
-        document.getElementById('loginBtn').addEventListener('click', login);
-        document.getElementById('verifyBtn').addEventListener('click', verify2fa);
-        document.getElementById('sendTgBtn').addEventListener('click', sendTelegramCode);
-        document.getElementById('backBtn').addEventListener('click', () => showStep('login'));
-        document.getElementById('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
-        document.getElementById('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') verify2fa(); });
-
-        loadAdminPaths().then(() => verifyExistingToken());
+      loadAdminPaths().then(() => verifyExistingToken());
     </script>
-</body>
+  </body>
 </html>

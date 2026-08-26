@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>KC GPT自动充值系统 | 控制台</title>
+    <title>OAI充值系统 | 控制台</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link
       href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
@@ -250,7 +250,7 @@
       }
 
       #logs.page-view,
-      #automation_tasks.page-view {
+      #system_logs.page-view {
         max-width: none;
       }
 
@@ -272,6 +272,51 @@
 
       .page-header {
         margin-bottom: 28px;
+      }
+
+      .page-tabs {
+        display: flex;
+        gap: 4px;
+        background: var(--surface-soft, #f8fafc);
+        padding: 4px;
+        border-radius: 10px;
+        margin-bottom: 16px;
+        border: 1px solid var(--divider);
+        width: fit-content;
+      }
+
+      .page-tab {
+        border: 0;
+        background: transparent;
+        color: var(--text-dim);
+        padding: 8px 14px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: none;
+        overflow: visible;
+      }
+
+      .page-tab:hover {
+        background: rgba(37, 99, 235, 0.06);
+        color: var(--text-main);
+        transform: none;
+        box-shadow: none;
+      }
+
+      .page-tab.active {
+        background: #fff;
+        color: var(--primary);
+        box-shadow: var(--shadow-sm);
+      }
+
+      .page-tab-panel {
+        display: none;
+      }
+
+      .page-tab-panel.active {
+        display: block;
       }
 
       .page-header h1 {
@@ -482,7 +527,7 @@
       }
 
       #logs .table-container,
-      #automation_tasks .table-container {
+      #system_logs .table-container {
         overflow-x: hidden;
       }
 
@@ -1978,7 +2023,7 @@
         <div class="brand-logo">
           <i data-lucide="zap" color="white" fill="white"></i>
         </div>
-        <span class="brand-name">KC GPT自动充值系统</span>
+        <span class="brand-name">OAI充值系统</span>
       </div>
 
       <nav class="nav-menu">
@@ -2063,29 +2108,21 @@
           <i data-lucide="circle-x"></i>
           <span>续费管理</span>
         </div>
-        <div class="nav-item" onclick="switchPage('logs', this)">
+        <div
+          class="nav-item"
+          onclick="switchPage('logs', this)"
+          data-page="logs"
+        >
           <i data-lucide="file-text"></i>
-          <span>任务管理</span>
-        </div>
-        <div class="nav-item" onclick="switchPage('automation_tasks', this)">
-          <i data-lucide="bot"></i>
-          <span>自动化任务</span>
+          <span>任务记录</span>
         </div>
         <div
           class="nav-item"
-          onclick="switchPage('runtime_logs', this)"
-          data-page="runtime_logs"
+          onclick="switchPage('system_logs', this)"
+          data-page="system_logs"
         >
           <i data-lucide="terminal"></i>
-          <span>运行日志</span>
-        </div>
-        <div
-          class="nav-item"
-          onclick="switchPage('admin_login_logs', this)"
-          data-page="admin_login_logs"
-        >
-          <i data-lucide="shield-check"></i>
-          <span>登录日志</span>
+          <span>系统日志</span>
         </div>
       </nav>
 
@@ -2631,31 +2668,6 @@
                 "
               >
                 开启后立即拒绝所有新任务。
-              </p>
-            </div>
-            <div class="form-group" style="margin-top: 22px">
-              <div class="toggle-field">
-                <div class="toggle-label">
-                  <span>网页 Sentinel 开单</span>
-                </div>
-                <label class="toggle-control">
-                  <input
-                    type="checkbox"
-                    id="page_sentinel_checkout"
-                    class="toggle-input"
-                  />
-                  <span class="toggle-switch"></span>
-                </label>
-              </div>
-              <p
-                style="
-                  font-size: 13px;
-                  color: var(--text-dim);
-                  margin-top: 10px;
-                "
-              >
-                协议开单被拦截后，用定价页点击让站点自己带完整 Sentinel
-                开单。默认关闭。
               </p>
             </div>
           </div>
@@ -4011,14 +4023,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             <button
               type="button"
               class="btn btn-secondary"
-              onclick="
-                switchPage(
-                  'runtime_logs',
-                  document.querySelector(
-                    '.nav-item[onclick*=\'runtime_logs\']',
-                  ),
-                )
-              "
+              onclick="switchPage('runtime_logs')"
             >
               打开完整运行日志
             </button>
@@ -4520,97 +4525,109 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
 
       <div id="logs" class="page-view">
         <div class="page-header">
-          <h1>任务管理</h1>
-          <p>查看与管理自助开通任务记录</p>
+          <h1>任务</h1>
+          <p>开通记录与 Playwright 阶段，同一批任务两种视图</p>
         </div>
-        <div class="panel">
-          <div class="runtime-log-toolbar log-page-toolbar">
-            <button
-              type="button"
-              class="btn btn-success"
-              id="admin_refresh_pause_btn"
-              onclick="toggleAdminDataRefresh()"
-            >
-              <i data-lucide="pause"></i>
-              <span id="admin_refresh_pause_label">停止自动刷新</span>
-            </button>
-            <button
-              type="button"
-              class="btn btn-primary"
-              onclick="loadTaskLogs(true)"
-            >
-              <i data-lucide="refresh-cw"></i>
-              立即刷新
-            </button>
-            <span class="log-page-toolbar-hint"
-              >默认每 3
-              秒自动拉取概览与下方表格；停止后仅在你点击「立即刷新」时更新。可在表格中删除单条任务记录。前台自助开通由子进程执行，无法在此强制杀进程，可开维护模式拒绝新单。</span
-            >
-          </div>
-          <div class="table-container">
-            <table class="task-log-table">
-              <thead>
-                <tr>
-                  <th class="col-time">执行时间</th>
-                  <th class="col-cdk">激活码</th>
-                  <th class="col-token">Token 摘要</th>
-                  <th class="col-info">任务信息</th>
-                  <th class="col-progress">进度</th>
-                  <th class="col-status">状态</th>
-                  <th class="col-media" style="text-align: center">
-                    截图/录像
-                  </th>
-                  <th class="col-action" style="text-align: center">操作</th>
-                </tr>
-              </thead>
-              <tbody id="log_body"></tbody>
-            </table>
-          </div>
-          <div id="log_pagination" class="table-footer"></div>
+        <div class="page-tabs" id="task_page_tabs">
+          <button
+            type="button"
+            class="page-tab active"
+            data-tab="records"
+            onclick="switchTaskTab('records')"
+          >
+            开通记录
+          </button>
+          <button
+            type="button"
+            class="page-tab"
+            data-tab="stages"
+            onclick="switchTaskTab('stages')"
+          >
+            自动化阶段
+          </button>
         </div>
-      </div>
-
-      <div id="automation_tasks" class="page-view">
-        <div class="page-header">
-          <h1>自动化任务</h1>
-          <p>
-            查看 Playwright 自动化各阶段是否完成，快速判断 Checkout
-            页面是否已打开、Stripe 表单是否定位成功
-          </p>
+        <div id="task_tab_records" class="page-tab-panel active">
+          <div class="panel">
+            <div class="runtime-log-toolbar log-page-toolbar">
+              <button
+                type="button"
+                class="btn btn-success"
+                id="admin_refresh_pause_btn"
+                onclick="toggleAdminDataRefresh()"
+              >
+                <i data-lucide="pause"></i>
+                <span id="admin_refresh_pause_label">停止自动刷新</span>
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                onclick="loadTaskLogs(true)"
+              >
+                <i data-lucide="refresh-cw"></i>
+                立即刷新
+              </button>
+              <span class="log-page-toolbar-hint"
+                >默认每 3
+                秒自动拉取概览与下方表格；停止后仅在你点击「立即刷新」时更新。可在表格中删除单条任务记录。前台自助开通由子进程执行，无法在此强制杀进程，可开维护模式拒绝新单。</span
+              >
+            </div>
+            <div class="table-container">
+              <table class="task-log-table">
+                <thead>
+                  <tr>
+                    <th class="col-time">执行时间</th>
+                    <th class="col-cdk">激活码</th>
+                    <th class="col-token">Token 摘要</th>
+                    <th class="col-info">任务信息</th>
+                    <th class="col-progress">进度</th>
+                    <th class="col-status">状态</th>
+                    <th class="col-media" style="text-align: center">
+                      截图/录像
+                    </th>
+                    <th class="col-action" style="text-align: center">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="log_body"></tbody>
+              </table>
+            </div>
+            <div id="log_pagination" class="table-footer"></div>
+          </div>
         </div>
-        <div class="panel">
-          <div class="runtime-log-toolbar log-page-toolbar">
-            <button
-              type="button"
-              class="btn btn-primary"
-              onclick="loadTaskLogs(true)"
-            >
-              <i data-lucide="refresh-cw"></i>
-              刷新任务
-            </button>
-            <span class="log-page-toolbar-hint"
-              >绿色阶段=已完成，红色=失败，灰色=未到达。Checkout
-              列可一眼确认支付页是否打开。</span
-            >
+        <div id="task_tab_stages" class="page-tab-panel">
+          <div class="panel">
+            <div class="runtime-log-toolbar log-page-toolbar">
+              <button
+                type="button"
+                class="btn btn-primary"
+                onclick="loadTaskLogs(true)"
+              >
+                <i data-lucide="refresh-cw"></i>
+                刷新任务
+              </button>
+              <span class="log-page-toolbar-hint"
+                >绿色阶段=已完成，红色=失败，灰色=未到达。Checkout
+                列可一眼确认支付页是否打开。</span
+              >
+            </div>
+            <div class="table-container">
+              <table class="automation-task-table">
+                <thead>
+                  <tr>
+                    <th width="160px">执行时间</th>
+                    <th width="130px">任务 ID</th>
+                    <th width="130px">激活码</th>
+                    <th width="110px" style="text-align: center">Checkout</th>
+                    <th>自动化阶段</th>
+                    <th width="120px">当前阶段</th>
+                    <th width="100px">状态</th>
+                    <th width="110px" style="text-align: center">截图/录像</th>
+                  </tr>
+                </thead>
+                <tbody id="automation_body"></tbody>
+              </table>
+            </div>
+            <div id="automation_pagination" class="table-footer"></div>
           </div>
-          <div class="table-container">
-            <table class="automation-task-table">
-              <thead>
-                <tr>
-                  <th width="160px">执行时间</th>
-                  <th width="130px">任务 ID</th>
-                  <th width="130px">激活码</th>
-                  <th width="110px" style="text-align: center">Checkout</th>
-                  <th>自动化阶段</th>
-                  <th width="120px">当前阶段</th>
-                  <th width="100px">状态</th>
-                  <th width="110px" style="text-align: center">截图/录像</th>
-                </tr>
-              </thead>
-              <tbody id="automation_body"></tbody>
-            </table>
-          </div>
-          <div id="automation_pagination" class="table-footer"></div>
         </div>
       </div>
 
@@ -4731,91 +4748,104 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         </div>
       </div>
 
-      <div id="runtime_logs" class="page-view">
+      <div id="system_logs" class="page-view">
         <div class="page-header">
-          <h1>运行日志</h1>
-          <p>
-            子进程标准输出、注册/开通脚本详情与任务节点日志（内存环形缓冲，重启后清空）
-          </p>
+          <h1>日志</h1>
+          <p>运行流水与后台登录安全事件</p>
         </div>
-        <div class="panel">
-          <div class="runtime-log-toolbar">
-            <label class="runtime-log-toggle">
-              <input type="checkbox" id="runtime_log_autoscroll" checked />
-              <span>自动滚动到底部</span>
-            </label>
-            <label class="runtime-log-toggle">
-              <input type="checkbox" id="runtime_log_pause" />
-              <span>暂停拉取</span>
-            </label>
-            <button
-              type="button"
-              class="btn btn-primary"
-              id="runtime_log_refresh_btn"
-              onclick="refreshRuntimeLogsManual()"
-            >
-              <i data-lucide="refresh-cw"></i> 立即刷新
-            </button>
-            <button
-              type="button"
-              class="btn btn-delete"
-              id="runtime_log_clear_btn"
-              onclick="clearRuntimeLogs()"
-            >
-              <i data-lucide="trash-2"></i> 清空日志
-            </button>
-          </div>
-          <p class="runtime-log-hint">
-            与「任务管理」中的数据库记录不同：此处为实时流水，便于排查
-            Playwright / 子进程输出；筛选 Job 可在文本内搜索。
-          </p>
-          <div class="runtime-log-pre-wrap">
-            <pre
-              id="runtime_log_pre"
-              class="runtime-log-pre"
-              spellcheck="false"
-            ></pre>
+        <div class="page-tabs" id="system_log_tabs">
+          <button
+            type="button"
+            class="page-tab active"
+            data-tab="runtime"
+            onclick="switchSystemLogTab('runtime')"
+          >
+            运行日志
+          </button>
+          <button
+            type="button"
+            class="page-tab"
+            data-tab="login"
+            onclick="switchSystemLogTab('login')"
+          >
+            登录日志
+          </button>
+        </div>
+        <div id="system_log_tab_runtime" class="page-tab-panel active">
+          <div class="panel">
+            <div class="runtime-log-toolbar">
+              <label class="runtime-log-toggle">
+                <input type="checkbox" id="runtime_log_autoscroll" checked />
+                <span>自动滚动到底部</span>
+              </label>
+              <label class="runtime-log-toggle">
+                <input type="checkbox" id="runtime_log_pause" />
+                <span>暂停拉取</span>
+              </label>
+              <button
+                type="button"
+                class="btn btn-primary"
+                id="runtime_log_refresh_btn"
+                onclick="refreshRuntimeLogsManual()"
+              >
+                <i data-lucide="refresh-cw"></i> 立即刷新
+              </button>
+              <button
+                type="button"
+                class="btn btn-delete"
+                id="runtime_log_clear_btn"
+                onclick="clearRuntimeLogs()"
+              >
+                <i data-lucide="trash-2"></i> 清空日志
+              </button>
+            </div>
+            <p class="runtime-log-hint">
+              与「任务」中的数据库记录不同：此处为实时流水，便于排查 Playwright
+              / 子进程输出；筛选 Job 可在文本内搜索。
+            </p>
+            <div class="runtime-log-pre-wrap">
+              <pre
+                id="runtime_log_pre"
+                class="runtime-log-pre"
+                spellcheck="false"
+              ></pre>
+            </div>
           </div>
         </div>
-      </div>
-
-      <div id="admin_login_logs" class="page-view">
-        <div class="page-header">
-          <h1>后台登录日志</h1>
-          <p>记录后台登录、二次验证等安全事件（IP、浏览器指纹）</p>
-        </div>
-        <div class="panel">
-          <div class="panel-header">
-            <h2 class="panel-title">最近登录记录</h2>
-            <button class="btn btn-secondary" onclick="loadAdminLoginLogs()">
-              <i data-lucide="refresh-cw"></i>
-              刷新
-            </button>
-          </div>
-          <div style="overflow: auto; margin-top: 14px">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>时间</th>
-                  <th>事件</th>
-                  <th>账号</th>
-                  <th>IP</th>
-                  <th>指纹</th>
-                  <th>浏览器</th>
-                  <th>详情</th>
-                </tr>
-              </thead>
-              <tbody id="admin_login_logs_body">
-                <tr>
-                  <td
-                    colspan="7"
-                    style="text-align: center; color: var(--text-dim)"
-                  >
-                    加载中...
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+        <div id="system_log_tab_login" class="page-tab-panel">
+          <div class="panel">
+            <div class="panel-header">
+              <h2 class="panel-title">最近登录记录</h2>
+              <button class="btn btn-secondary" onclick="loadAdminLoginLogs()">
+                <i data-lucide="refresh-cw"></i>
+                刷新
+              </button>
+            </div>
+            <div style="overflow: auto; margin-top: 14px">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>事件</th>
+                    <th>账号</th>
+                    <th>IP</th>
+                    <th>指纹</th>
+                    <th>浏览器</th>
+                    <th>详情</th>
+                  </tr>
+                </thead>
+                <tbody id="admin_login_logs_body">
+                  <tr>
+                    <td
+                      colspan="7"
+                      style="text-align: center; color: var(--text-dim)"
+                    >
+                      加载中...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -6639,7 +6669,57 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         );
       }
 
+      function switchTaskTab(tab) {
+        const next = tab === "stages" ? "stages" : "records";
+        document
+          .querySelectorAll("#task_page_tabs .page-tab")
+          .forEach((btn) => {
+            btn.classList.toggle("active", btn.dataset.tab === next);
+          });
+        document
+          .getElementById("task_tab_records")
+          ?.classList.toggle("active", next === "records");
+        document
+          .getElementById("task_tab_stages")
+          ?.classList.toggle("active", next === "stages");
+        lucide.createIcons();
+      }
+
+      function switchSystemLogTab(tab) {
+        const next = tab === "login" ? "login" : "runtime";
+        document
+          .querySelectorAll("#system_log_tabs .page-tab")
+          .forEach((btn) => {
+            btn.classList.toggle("active", btn.dataset.tab === next);
+          });
+        document
+          .getElementById("system_log_tab_runtime")
+          ?.classList.toggle("active", next === "runtime");
+        document
+          .getElementById("system_log_tab_login")
+          ?.classList.toggle("active", next === "login");
+        if (next === "runtime") {
+          startRuntimeLogStream();
+        } else {
+          stopRuntimeLogStream();
+          loadAdminLoginLogs().catch(() => {});
+        }
+        lucide.createIcons();
+      }
+
+      function normalizePageId(pId) {
+        if (pId === "automation_tasks") {
+          return "logs";
+        }
+        if (pId === "runtime_logs" || pId === "admin_login_logs") {
+          return "system_logs";
+        }
+        return pId;
+      }
+
       function switchPageInternal(pId, el) {
+        const requestedPageId = pId;
+        pId = normalizePageId(pId);
         document
           .querySelectorAll(".nav-item.active")
           .forEach((i) => i.classList.remove("active"));
@@ -6656,8 +6736,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         expandNavGroupForPage(pId);
         resolveNavItem(pId, el)?.classList.add("active");
 
-        if (pId === "runtime_logs") {
-          startRuntimeLogStream();
+        if (pId === "system_logs") {
+          if (requestedPageId === "admin_login_logs") {
+            switchSystemLogTab("login");
+          } else {
+            switchSystemLogTab("runtime");
+          }
         } else {
           stopRuntimeLogStream();
         }
@@ -6701,17 +6785,18 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           loadAdminSecurityStatus().catch(() => {});
         }
 
-        if (pId === "admin_login_logs") {
-          loadAdminLoginLogs().catch(() => {});
-        }
-
         if (pId === "cdks") {
           loadCdkList().catch((error) => {
             console.error("Failed to load CDK list", error);
           });
         }
 
-        if (pId === "logs" || pId === "automation_tasks") {
+        if (pId === "logs") {
+          if (requestedPageId === "automation_tasks") {
+            switchTaskTab("stages");
+          } else {
+            switchTaskTab("records");
+          }
           loadTaskLogs(false).catch((error) => {
             console.error("Failed to load task logs", error);
           });
@@ -6975,12 +7060,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         loadTelegramConfig(data.telegram || {});
         loadHcaptchaConfig(data.hcaptcha || {});
         lastMaintenanceModeValue = Boolean(cfg.maintenance_mode);
-        const pageSentinelEl = document.getElementById(
-          "page_sentinel_checkout",
-        );
-        if (pageSentinelEl) {
-          pageSentinelEl.checked = Boolean(cfg.page_sentinel_checkout);
-        }
         updateMaintenanceModeUI(
           cfg,
           window.__adminRuntime || { active_activation_jobs: 0 },
@@ -7283,10 +7362,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           showMessage(msg + "，请到「运行日志」查看进度", "success");
           await loadSessions(false);
           await loadAdminData();
-          switchPage(
-            "runtime_logs",
-            document.querySelector('.nav-item[onclick*="runtime_logs"]'),
-          );
+          switchPage("runtime_logs");
         } catch (error) {
           if (resultEl) {
             resultEl.textContent = "";
@@ -7855,9 +7931,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           )
             ? Boolean(overrides.maintenance_mode)
             : document.getElementById("maintenance_mode").checked,
-          page_sentinel_checkout: Boolean(
-            document.getElementById("page_sentinel_checkout")?.checked,
-          ),
         };
       }
 

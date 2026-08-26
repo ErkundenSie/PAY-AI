@@ -298,20 +298,6 @@ async function syncAdminConfigFromEnvironment() {
   );
 }
 
-async function ensureCheckoutConfigDefaults() {
-  await runExecute(
-    `INSERT INTO app_config (config_key, config_value)
-             VALUES (?, ?)
-             ON DUPLICATE KEY UPDATE config_value = config_value`,
-    ["page_sentinel_checkout", "0"],
-  );
-}
-
-async function getPageSentinelCheckoutEnabled() {
-  const fromDb = await getAppConfigValue("page_sentinel_checkout", "0");
-  return parseBooleanConfig(fromDb, false);
-}
-
 async function ensureHcaptchaConfigDefaults() {
   const defaults = [
     ["hcaptcha_solver_enabled", "1"],
@@ -896,7 +882,6 @@ async function ensureReady() {
   await ensureAdminSecurityDefaults();
   await syncAdminConfigFromEnvironment();
   await ensureHcaptchaConfigDefaults();
-  await ensureCheckoutConfigDefaults();
   await ensureGptApiConfigDefaults();
   await syncHcaptchaConfigPersistence();
   await migrateLegacyProxyConfig();
@@ -1297,7 +1282,6 @@ async function getAdminData() {
         "max_background_concurrent",
         "maintenance_mode",
         "maintenance_mode_drain",
-        "page_sentinel_checkout",
         "pool_email_enabled",
         "pool_email_imap_host",
         "pool_email_include_junk",
@@ -1367,8 +1351,6 @@ async function getAdminData() {
       maintenance_mode: String(configMap.maintenance_mode || "0") === "1",
       maintenance_mode_drain:
         String(configMap.maintenance_mode_drain || "0") === "1",
-      page_sentinel_checkout:
-        String(configMap.page_sentinel_checkout || "0") === "1",
       email_source: ["random", "pool", "inbox"].includes(
         String(configMap.email_source || ""),
       )
@@ -1465,12 +1447,6 @@ async function saveConfig(config = {}) {
     configEntries.push([
       "maintenance_mode_drain",
       config.maintenance_mode_drain ? "1" : "0",
-    ]);
-  }
-  if (hasOwn("page_sentinel_checkout")) {
-    configEntries.push([
-      "page_sentinel_checkout",
-      config.page_sentinel_checkout ? "1" : "0",
     ]);
   }
   if (hasOwn("email_source") || hasOwn("pool_email_enabled")) {
@@ -4459,7 +4435,6 @@ module.exports = {
   setAppConfigValue,
   getBrowserPoolEnabled,
   setBrowserPoolEnabled,
-  getPageSentinelCheckoutEnabled,
   getTelegramConfig,
   saveTelegramConfig,
   getGptApiConfig,

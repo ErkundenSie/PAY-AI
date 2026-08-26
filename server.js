@@ -3584,13 +3584,11 @@ function spawnCheckoutDebugWorker({
       const proxy = await store.getActiveProxy();
       const hcaptchaCfg = await store.getHcaptchaConfig();
       const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
-      const pageSentinelCheckout = await store.getPageSentinelCheckoutEnabled();
       const runtimeEnv = {
         ...process.env,
         ...hcaptchaEnv,
         CHECKOUT_DEBUG_ONLY: "1",
         CHECKOUT_MODE: "api",
-        PAGE_SENTINEL_CHECKOUT: pageSentinelCheckout ? "1" : "0",
         CHATGPT_TOKEN: token,
         CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
           ? sessionRaw
@@ -4066,14 +4064,11 @@ function spawnActivationWorker({
         const proxy = await store.getActiveProxy();
         const hcaptchaCfg = await store.getHcaptchaConfig();
         const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
-        const pageSentinelCheckout =
-          await store.getPageSentinelCheckoutEnabled();
         const runtimeEnv = {
           ...process.env,
           ...hcaptchaEnv,
           JOB_KEY: task.jobKey,
           CHECKOUT_MODE: process.env.CHECKOUT_MODE || "api",
-          PAGE_SENTINEL_CHECKOUT: pageSentinelCheckout ? "1" : "0",
           CHATGPT_TOKEN: token,
           CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
             ? sessionRaw
