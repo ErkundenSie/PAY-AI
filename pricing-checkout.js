@@ -8,7 +8,6 @@ const PRICING_URL = "https://chatgpt.com/#pricing";
 const PRICING_FALLBACK_URLS = [
   "https://chatgpt.com/#pricing",
   "https://chatgpt.com/?upgrade=plus",
-  "https://chatgpt.com/",
 ];
 
 const REGION_UI_LABELS = {
@@ -819,32 +818,47 @@ async function pageShowsCurrency(page, regionCode) {
   return pageShowsTargetRegionPricing(page, regionCode);
 }
 
+async function waitForPricingModal(page, timeoutMs = 12000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (
+      (await isPricingModalVisible(page)) ||
+      (await isPersonalPlanView(page))
+    ) {
+      return true;
+    }
+    await page.waitForTimeout(400);
+  }
+  return false;
+}
+
 async function waitForPricingPage(page, timeout = 60000) {
-  if ((await isPricingModalVisible(page)) || (await isPersonalPlanView(page))) {
+  if (await waitForPricingModal(page, 1500)) {
     console.log(
       `✅ [步骤] 套餐弹窗已在当前页: ${String(page.url() || "").slice(0, 80)}`,
     );
     return;
   }
+
   let lastUrl = "";
   for (const url of PRICING_FALLBACK_URLS) {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout });
-    await page
-      .waitForLoadState("networkidle", { timeout: 30000 })
-      .catch(() => {});
-    await page.waitForTimeout(1800);
     lastUrl = page.url();
-
     await clearHumanVerification(page, {
       phase: "pricing-page",
-      maxWaitMs: 120000,
+      maxWaitMs: 20000,
     });
     await assertChatGptLoggedIn(page, "定价页");
 
-    if (
-      (await isPricingModalVisible(page)) ||
-      (await isPersonalPlanView(page))
-    ) {
+    if (!/#pricing|upgrade=plus/i.test(page.url())) {
+      await page
+        .evaluate(() => {
+          if (location.hash !== "#pricing") location.hash = "pricing";
+        })
+        .catch(() => {});
+    }
+
+    if (await waitForPricingModal(page, 12000)) {
       console.log(
         `✅ [步骤] 已打开 ChatGPT 套餐页: ${page.url().slice(0, 80)}`,
       );
@@ -1100,7 +1114,6 @@ async function clickPlanUpgrade(page, planType) {
 
   await assertChatGptLoggedIn(page, "升级前");
   await switchToPersonalPlans(page);
-  await page.waitForTimeout(1000);
 
   if (plan === "plus") {
     if (await clickPlusPlanButton(page)) {

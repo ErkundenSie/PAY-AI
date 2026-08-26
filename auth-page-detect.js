@@ -43,6 +43,29 @@ function shouldBlockLoginNavigation(url, resourceType = "") {
   return false;
 }
 
+function shouldBlockPricingNoise(url, resourceType = "") {
+  const value = String(url || "").toLowerCase();
+  const type = String(resourceType || "").toLowerCase();
+  if (type === "image" || type === "media" || type === "font") {
+    return true;
+  }
+  if (
+    /google-analytics|googletagmanager|doubleclick|facebook\.net|hotjar|segment\.io|sentry\.io|intercom|datadog|newrelic|amplitude|mixpanel|clarity\.ms|statsig|ces\/statsc|browser-intake|oai-assets.*\.(png|jpe?g|webp|gif|svg|woff2?|mp4|webm)/i.test(
+      value,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /\.(png|jpe?g|webp|gif|svg|ico|woff2?|ttf|otf|mp4|webm|m4a)(?:\?|$)/i.test(
+      value,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
 async function isLoginPageContent(page) {
   try {
     const bodyText = String(
@@ -272,6 +295,7 @@ module.exports = {
   isHardLoginRedirectUrl,
   isCheckoutPageUrl,
   shouldBlockLoginNavigation,
+  shouldBlockPricingNoise,
   isLoginPageContent,
   hasVisibleLoginChrome,
   isWorkspacePickerVisible,

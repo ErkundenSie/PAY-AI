@@ -212,7 +212,7 @@ async function ensureChatGptHome(page) {
   const { openPersonalWorkspace } = require("./auth-page-detect");
   const currentUrl = String(page.url() || "");
   if (!currentUrl.startsWith("https://chatgpt.com")) {
-    await page.goto(CHATGPT_HOME_URL, {
+    await page.goto("https://chatgpt.com/#pricing", {
       waitUntil: "domcontentloaded",
       timeout: 60000,
     });
@@ -953,6 +953,12 @@ class ChatGPTService {
       console.warn(
         `[ChatGPT] 套餐页准备失败: ${String((err && err.message) || err)}`,
       );
+      return {
+        ok: false,
+        status: 0,
+        data: {},
+        error: String((err && err.message) || err),
+      };
     }
 
     const waiter = page.waitForResponse(

@@ -6,6 +6,7 @@ const {
   isHardLoginRedirectUrl,
   isCheckoutPageUrl,
   shouldBlockLoginNavigation,
+  shouldBlockPricingNoise,
   isLoginPageContent,
   hasVisibleLoginChrome,
   hasLoggedInChatUi,
@@ -693,6 +694,10 @@ async function installChatGptSession(context, sessionRaw) {
     const url = route.request().url();
     const resourceType = route.request().resourceType();
     if (shouldBlockLoginNavigation(url, resourceType)) {
+      await route.abort();
+      return;
+    }
+    if (shouldBlockPricingNoise(url, resourceType)) {
       await route.abort();
       return;
     }
