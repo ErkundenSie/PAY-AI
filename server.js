@@ -50,6 +50,7 @@ const {
   querySubscriptionBySession,
   validateSessionTokenForQuery,
   cancelAutoRenew,
+  cancelAutoRenewAfterActivation,
   resumeAutoRenew,
 } = require("./subscription-check");
 const gptApi = require("./gpt-api-client");
@@ -3583,11 +3584,13 @@ function spawnCheckoutDebugWorker({
       const proxy = await store.getActiveProxy();
       const hcaptchaCfg = await store.getHcaptchaConfig();
       const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
+      const pageSentinelCheckout = await store.getPageSentinelCheckoutEnabled();
       const runtimeEnv = {
         ...process.env,
         ...hcaptchaEnv,
         CHECKOUT_DEBUG_ONLY: "1",
         CHECKOUT_MODE: "api",
+        PAGE_SENTINEL_CHECKOUT: pageSentinelCheckout ? "1" : "0",
         CHATGPT_TOKEN: token,
         CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
           ? sessionRaw
@@ -3898,6 +3901,22 @@ async function runGptApiWorker({ task, token, session, cdk, planType }) {
       await store.resetCdkFailure(cdk);
       await store.recordCardUsage(reservedCard?.id);
       await store.releaseCard(reservedCard?.id).catch(() => {});
+      try {
+        const cancelResult = await cancelAutoRenewAfterActivation(token, {
+          email: accountEmail,
+        });
+        if (cancelResult.ok) {
+          logTask(jobKey, cancelResult.data?.message || "已关闭自动续费");
+        } else {
+          logTask(
+            jobKey,
+            `关闭自动续费失败: ${cancelResult.error || "未知错误"}`,
+            "warn",
+          );
+        }
+      } catch (cancelError) {
+        logTask(jobKey, `关闭自动续费异常: ${cancelError.message}`, "warn");
+      }
       notifyTaskOutcome({
         event: "success",
         email: accountEmail,
@@ -4047,11 +4066,14 @@ function spawnActivationWorker({
         const proxy = await store.getActiveProxy();
         const hcaptchaCfg = await store.getHcaptchaConfig();
         const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
+        const pageSentinelCheckout =
+          await store.getPageSentinelCheckoutEnabled();
         const runtimeEnv = {
           ...process.env,
           ...hcaptchaEnv,
           JOB_KEY: task.jobKey,
           CHECKOUT_MODE: process.env.CHECKOUT_MODE || "api",
+          PAGE_SENTINEL_CHECKOUT: pageSentinelCheckout ? "1" : "0",
           CHATGPT_TOKEN: token,
           CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
             ? sessionRaw

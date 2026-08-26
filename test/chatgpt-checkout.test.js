@@ -8,6 +8,7 @@ const {
   summarizeCheckoutCookies,
   buildCheckoutWarmupRequests,
   resolveCheckoutModes,
+  readRequestPostData,
 } = require("../chatgpt");
 
 describe("chatgpt checkout helpers", () => {
@@ -101,32 +102,32 @@ describe("chatgpt checkout helpers", () => {
     ]);
   });
 
-  it("warms session, account, subscription, and pricing endpoints", () => {
+  it("warms countries and region pricing only", () => {
     const requests = buildCheckoutWarmupRequests({
-      timezoneOffsetMin: -480,
       country: "PH",
       accountId: "acct-1",
     });
-    expect(requests.map((item) => item.name)).toEqual([
-      "session",
-      "accounts/check",
-      "conversations",
-      "subscriptions",
-      "payments/subscription",
-      "pricing_config",
-      "billing_info",
-      "stripe_bootstrap",
-    ]);
-    expect(
-      requests.find((item) => item.name === "accounts/check").path,
-    ).toContain("timezone_offset_min=-480");
-    expect(
-      requests.find((item) => item.name === "pricing_config").path,
-    ).toContain("/PH");
+    expect(requests.map((item) => item.name)).toEqual(["countries", "PH"]);
+    expect(requests[0].path).toBe(
+      "/backend-api/checkout_pricing_config/countries",
+    );
+    expect(requests[1].path).toBe(
+      "/backend-api/checkout_pricing_config/configs/PH",
+    );
   });
 
   it("uses hosted only when the account already has a paid plan", () => {
     expect(resolveCheckoutModes("chatgptplusplan")).toEqual(["hosted"]);
     expect(resolveCheckoutModes("free")).toEqual(["custom", "hosted"]);
+  });
+
+  it("reads Playwright postData as a sync string", () => {
+    expect(
+      readRequestPostData({
+        postData: () => '{"plan_name":"chatgptplusplan"}',
+      }),
+    ).toBe('{"plan_name":"chatgptplusplan"}');
+    expect(readRequestPostData({ postData: () => null })).toBe("");
+    expect(readRequestPostData({})).toBe("");
   });
 });

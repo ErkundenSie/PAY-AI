@@ -510,6 +510,43 @@ async function cancelAutoRenew(accessToken, options = {}) {
     };
 }
 
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldRetryCancelAutoRenew(result) {
+    if (!result || result.ok) {
+        return false;
+    }
+    const status = Number(result.statusCode || 0);
+    if (status === 400 && /App Store|无法通过 API 取消/.test(String(result.error || ''))) {
+        return false;
+    }
+    if (status === 401) {
+        return false;
+    }
+    return true;
+}
+
+async function cancelAutoRenewAfterActivation(accessToken, options = {}) {
+    const maxAttempts = Math.max(1, Number(options.maxAttempts || 5));
+    const delayMs = Math.max(500, Number(options.delayMs || 2500));
+    let last = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        last = await cancelAutoRenew(accessToken, options);
+        if (last.ok) {
+            return last;
+        }
+        if (!shouldRetryCancelAutoRenew(last) || attempt === maxAttempts) {
+            return last;
+        }
+        await sleep(delayMs);
+    }
+
+    return last;
+}
+
 async function resumeAutoRenew(accessToken, options = {}) {
     const token = String(accessToken || '').trim();
     if (!token) {
@@ -686,5 +723,6 @@ module.exports = {
     validateSessionTokenForQuery,
     querySubscriptionBySession,
     cancelAutoRenew,
+    cancelAutoRenewAfterActivation,
     resumeAutoRenew
 };

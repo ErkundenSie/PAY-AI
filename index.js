@@ -17,6 +17,7 @@ const {
   closeTaskBrowser,
 } = require("./browser-runtime");
 const { preparePlaywrightProxy } = require("./playwright-proxy");
+const { cancelAutoRenewAfterActivation } = require("./subscription-check");
 const fs = require("fs");
 const path = require("path");
 
@@ -617,34 +618,6 @@ async function run() {
   }, fingerprint);
 
   try {
-    // --- Phase 0: Proxy Connectivity Check ---
-    if (proxyConfig) {
-      console.log("正在检查代理连通性...");
-      try {
-        const probeResponse = await context.request.get(
-          "http://api.ipify.org/?format=text",
-          {
-            timeout: 15000,
-          },
-        );
-        if (probeResponse.ok()) {
-          const ip = (await probeResponse.text()).trim();
-          const ipMasked = String(ip).replace(
-            /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/,
-            "***.***.$3.$4",
-          );
-          console.log(`✅ [系统] 代理连接成功! 代理公网 IP: ${ipMasked}`);
-        } else {
-          throw new Error(`代理响应异常: HTTP ${probeResponse.status()}`);
-        }
-      } catch (proxyError) {
-        console.log(
-          "    [!] 请检查 PROXY 配置是否正确，或者账号余额是否充足。",
-        );
-        throw proxyError;
-      }
-    }
-
     // --- Phase 1: Resolve payment parameters ---
     const debugOnly = process.env.CHECKOUT_DEBUG_ONLY === "1";
     if (debugOnly) {
@@ -770,6 +743,20 @@ async function run() {
     if (paymentResult.success) {
       paymentSucceeded = true;
       console.log(`    [+] 最终校验：支付成功! (stripe_card_payment)`);
+      console.log("[步骤] 正在关闭自动续费...");
+      const cancelResult = await cancelAutoRenewAfterActivation(accessToken, {
+        accountId: checkoutResult?.accountId || loginInfo.accountId,
+        email: email || loginInfo.email,
+      });
+      if (cancelResult.ok) {
+        console.log(
+          `✅ [步骤] ${cancelResult.data?.message || "已关闭自动续费"}`,
+        );
+      } else {
+        console.warn(
+          `⚠️ [步骤] 关闭自动续费失败: ${cancelResult.error || "未知错误"}`,
+        );
+      }
       console.log("PAYMENT_SUCCESS");
       for (const screenshotPath of paymentResult.screenshots || []) {
         console.log(`SUCCESS_SCREENSHOT: ${screenshotPath}`);

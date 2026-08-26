@@ -2633,6 +2633,31 @@
                 开启后立即拒绝所有新任务。
               </p>
             </div>
+            <div class="form-group" style="margin-top: 22px">
+              <div class="toggle-field">
+                <div class="toggle-label">
+                  <span>网页 Sentinel 开单</span>
+                </div>
+                <label class="toggle-control">
+                  <input
+                    type="checkbox"
+                    id="page_sentinel_checkout"
+                    class="toggle-input"
+                  />
+                  <span class="toggle-switch"></span>
+                </label>
+              </div>
+              <p
+                style="
+                  font-size: 13px;
+                  color: var(--text-dim);
+                  margin-top: 10px;
+                "
+              >
+                协议开单被拦截后，用定价页点击让站点自己带完整 Sentinel
+                开单。默认关闭。
+              </p>
+            </div>
           </div>
         </div>
 
@@ -6950,6 +6975,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         loadTelegramConfig(data.telegram || {});
         loadHcaptchaConfig(data.hcaptcha || {});
         lastMaintenanceModeValue = Boolean(cfg.maintenance_mode);
+        const pageSentinelEl = document.getElementById(
+          "page_sentinel_checkout",
+        );
+        if (pageSentinelEl) {
+          pageSentinelEl.checked = Boolean(cfg.page_sentinel_checkout);
+        }
         updateMaintenanceModeUI(
           cfg,
           window.__adminRuntime || { active_activation_jobs: 0 },
@@ -7824,6 +7855,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           )
             ? Boolean(overrides.maintenance_mode)
             : document.getElementById("maintenance_mode").checked,
+          page_sentinel_checkout: Boolean(
+            document.getElementById("page_sentinel_checkout")?.checked,
+          ),
         };
       }
 

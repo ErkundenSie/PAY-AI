@@ -266,16 +266,6 @@ async function injectChatGptCookies(context, cookieSpecs) {
     return { injected: 0, hasSessionToken: false, failed: [] };
   }
 
-  const warmup = await context.newPage();
-  try {
-    await warmup.goto(`${CHATGPT_COOKIE_URL}/`, {
-      waitUntil: "domcontentloaded",
-      timeout: 90000,
-    });
-  } catch (_) {
-    /* 代理慢时仍尝试写 Cookie */
-  }
-
   const playwrightCookies = cookieSpecs
     .map((spec) => toPlaywrightCookie(spec))
     .filter(Boolean);
@@ -300,7 +290,6 @@ async function injectChatGptCookies(context, cookieSpecs) {
 
   const stored = await context.cookies(CHATGPT_COOKIE_URL);
   const hasSessionToken = hasStoredSessionToken(stored);
-  await warmup.close().catch(() => {});
 
   return {
     injected,
@@ -438,69 +427,23 @@ function isChallengeLike({ status = 0, headerText = "", bodyText = "" } = {}) {
 }
 
 async function verifyRealSessionApi(context) {
-  const probe = await context.newPage();
   try {
-    const home = await probe
-      .goto(`${CHATGPT_COOKIE_URL}/`, {
-        waitUntil: "domcontentloaded",
-        timeout: 60000,
-      })
-      .catch(() => null);
-    const homeHeaders = home?.headers?.() || {};
-    const homeHeaderText = Object.keys(homeHeaders)
-      .map((k) => `${k}:${homeHeaders[k]}`)
+    const response = await context.request.get(
+      `${CHATGPT_COOKIE_URL}/api/auth/session`,
+      {
+        timeout: 15000,
+        headers: { accept: "application/json" },
+      },
+    );
+    const status = Number(response.status() || 0);
+    const headerText = Object.entries(response.headers() || {})
+      .map(([key, value]) => `${key}:${value}`)
       .join("\n")
       .toLowerCase();
-    const homeBody = await probe
-      .evaluate(() => document.body?.innerText || "")
-      .catch(() => "");
-    if (
-      isChallengeLike({
-        status: home?.status() || 0,
-        headerText: homeHeaderText,
-        bodyText: homeBody,
-      })
-    ) {
-      return {
-        ok: false,
-        status: home?.status() || 0,
-        challenge: true,
-        error: `Cloudflare 人机验证拦截（HTTP ${home?.status() || 0}）。当前出口/代理 IP 被 ChatGPT 风控，请更换干净的住宅代理后重试`,
-      };
-    }
-
-    const result = await probe.evaluate(async () => {
-      try {
-        const response = await fetch("/api/auth/session", {
-          credentials: "include",
-          headers: { accept: "application/json" },
-        });
-        return {
-          status: response.status,
-          headerText: [...response.headers.entries()]
-            .map(([key, value]) => `${key}:${value}`)
-            .join("\n"),
-          bodyText: await response.text(),
-        };
-      } catch (err) {
-        return {
-          status: 0,
-          headerText: "",
-          bodyText: "",
-          error: String((err && err.message) || err),
-        };
-      }
-    });
-
-    const status = Number(result.status || 0);
-    const headerText = String(result.headerText || "").toLowerCase();
-    const bodyText = String(result.bodyText || "");
+    const bodyText = await response.text().catch(() => "");
     const data = parseSessionPayload(bodyText);
     if (hasSessionUser(data)) {
       return { ok: true, data, status };
-    }
-    if (result.error) {
-      return { ok: false, error: `无法验证 session Cookie: ${result.error}` };
     }
     if (isChallengeLike({ status, headerText, bodyText })) {
       return {
@@ -518,8 +461,6 @@ async function verifyRealSessionApi(context) {
     };
   } catch (err) {
     return { ok: false, error: `无法验证 session Cookie: ${err.message}` };
-  } finally {
-    await probe.close().catch(() => {});
   }
 }
 
@@ -810,11 +751,23 @@ async function bootstrapChatGptSession(page, sessionRaw, options = {}) {
   console.log("🔐 [步骤] 正在使用 Session 登录 ChatGPT...");
   attachLoginRedirectGuard(page);
 
+  if (options.cookieVerified === true) {
+    const resolvedEmail =
+      sessionData?.user?.email ||
+      email ||
+      extractProfileFromToken(resolved.accessToken).email;
+    console.log(`✅ [步骤] Session 登录成功: ${resolvedEmail}`);
+    return {
+      email: resolvedEmail,
+      session: sessionData,
+      hasSessionCookie: true,
+    };
+  }
+
   await page.goto(`${CHATGPT_ORIGIN}/`, {
     waitUntil: "domcontentloaded",
     timeout: 90000,
   });
-  await page.waitForTimeout(2500);
 
   const { clearHumanVerification } = require("./human-verification");
   const captchaResult = await clearHumanVerification(page, {
@@ -839,7 +792,6 @@ async function bootstrapChatGptSession(page, sessionRaw, options = {}) {
   const { openPersonalWorkspace } = require("./auth-page-detect");
   await openPersonalWorkspace(page);
 
-  const cookieVerified = options.cookieVerified === true;
   const uiReady = await waitForLoggedInChatUi(page, 12000);
   const apiReady = await hasLoggedInSessionApi(page);
 

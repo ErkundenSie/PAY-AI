@@ -77,6 +77,9 @@ const SKIP_REGION_BUTTON_TEXT =
 const PLAN_UPGRADE_PATTERNS = {
   plus: [
     /Get Plus/i,
+    /Regain Plus/i,
+    /Resume Plus/i,
+    /Rejoin Plus/i,
     /升级至\s*Plus/i,
     /Upgrade to Plus/i,
     /Subscribe to Plus/i,
@@ -131,7 +134,7 @@ async function isPricingModalVisible(page) {
   const dialogText = String(
     (await dialog.innerText({ timeout: 2000 }).catch(() => "")) || "",
   );
-  return /ChatGPT Plus|Upgrade to Plus|Get Plus|Subscribe to Plus|Your current plan|Personal|Business/i.test(
+  return /ChatGPT Plus|Upgrade to Plus|Get Plus|Regain Plus|Resume Plus|Rejoin Plus|Subscribe to Plus|Your current plan|Personal|Business/i.test(
     dialogText,
   );
 }
@@ -225,7 +228,9 @@ async function isPersonalPlanView(page) {
       hasText: /ChatGPT Plus|^Plus$/,
     })
     .filter({
-      has: page.getByRole("button", { name: /Upgrade|升级|Subscribe|Get/i }),
+      has: page.getByRole("button", {
+        name: /Upgrade|升级|Subscribe|Get|Regain|Resume/i,
+      }),
     })
     .first()
     .isVisible({ timeout: 1000 })
@@ -242,7 +247,7 @@ async function isPersonalPlanView(page) {
     .catch(() => false);
   const plusBtn = await page
     .getByRole("button", {
-      name: /Upgrade to Plus|升级至\s*Plus|Get Plus|Subscribe to Plus/i,
+      name: /Upgrade to Plus|升级至\s*Plus|Get Plus|Regain Plus|Resume Plus|Rejoin Plus|Subscribe to Plus/i,
     })
     .first()
     .isVisible({ timeout: 800 })
@@ -928,54 +933,94 @@ async function selectPricingRegion(page, regionCode) {
   );
 }
 
-async function clickVisibleButton(page, pattern) {
-  const btn = page.getByRole("button", { name: pattern }).first();
-  if (!(await btn.isVisible({ timeout: 2500 }).catch(() => false))) {
-    return false;
+const PLUS_CTA_RE =
+  /Get Plus|Regain Plus|Resume Plus|Rejoin Plus|Upgrade to Plus|Subscribe to Plus|升级至\s*Plus|^Upgrade$/i;
+
+async function clickVisibleButton(page, pattern, options = {}) {
+  const root = options.root || page;
+  const locators = [
+    root.getByRole("button", { name: pattern }),
+    root.getByRole("link", { name: pattern }),
+  ];
+  for (const group of locators) {
+    const btn = group.first();
+    if (!(await btn.isVisible({ timeout: 1500 }).catch(() => false))) {
+      continue;
+    }
+    await btn.scrollIntoViewIfNeeded().catch(() => {});
+    await btn.click({ timeout: 10000 });
+    return true;
   }
-  await btn.scrollIntoViewIfNeeded().catch(() => {});
-  await btn.click({ timeout: 10000 });
-  return true;
+  return false;
+}
+
+async function findPlusPlanCard(page) {
+  const dialog = page.locator('[role="dialog"]').first();
+  const surface = (await dialog.isVisible({ timeout: 800 }).catch(() => false))
+    ? dialog
+    : page;
+  const cards = surface.locator("div").filter({
+    has: page.getByText(/^ChatGPT Plus$/i),
+  });
+  const count = await cards.count().catch(() => 0);
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const card = cards.nth(i);
+    const hasCta = await card
+      .getByText(
+        /Get Plus|Regain Plus|Resume Plus|Rejoin Plus|Upgrade to Plus|Subscribe to Plus|升级至\s*Plus|^Upgrade$/i,
+      )
+      .first()
+      .isVisible({ timeout: 400 })
+      .catch(() => false);
+    if (hasCta) return card;
+  }
+  return cards.last();
 }
 
 async function clickPlusPlanButton(page) {
+  const plusTitle = page.getByText(/^ChatGPT Plus$/i).first();
+  await plusTitle.waitFor({ state: "visible", timeout: 8000 }).catch(() => {});
+  await plusTitle.scrollIntoViewIfNeeded().catch(() => {});
+  await page.waitForTimeout(600);
+
   const named = [
+    /^Rejoin Plus$/i,
+    /Rejoin Plus/i,
+    /^Regain Plus$/i,
+    /Regain Plus/i,
     /^Get Plus$/i,
     /Get Plus/i,
     /Upgrade to Plus/i,
     /升级至\s*Plus/i,
     /Subscribe to Plus/i,
+    /Resume Plus/i,
   ];
-  for (const pattern of named) {
-    if (await clickVisibleButton(page, pattern)) {
-      console.log(`✅ [步骤] 已点击 Plus 按钮: ${pattern}`);
-      return true;
+  const plusCard = await findPlusPlanCard(page);
+  const searchRoots = [plusCard, page].filter(Boolean);
+  for (const root of searchRoots) {
+    for (const pattern of named) {
+      if (await clickVisibleButton(page, pattern, { root })) {
+        console.log(`✅ [步骤] 已点击 Plus 按钮: ${pattern}`);
+        return true;
+      }
+      const textBtn = root.getByText(pattern).first();
+      if (await textBtn.isVisible({ timeout: 800 }).catch(() => false)) {
+        await textBtn.scrollIntoViewIfNeeded().catch(() => {});
+        await textBtn.click({ timeout: 10000 }).catch(() => {});
+        console.log(`✅ [步骤] 已点击 Plus 文案: ${pattern}`);
+        return true;
+      }
     }
   }
 
-  const dialog = page.locator('[role="dialog"]').first();
-  const surface = (await dialog.isVisible({ timeout: 800 }).catch(() => false))
-    ? dialog
-    : page;
-  const plusCard = surface
-    .locator("div")
-    .filter({ has: page.getByText(/^ChatGPT Plus$/i) })
-    .filter({
-      has: page.getByRole("button", {
-        name: /Get Plus|Upgrade to Plus|升级至\s*Plus/i,
-      }),
-    })
-    .last();
-  const plusBtn = plusCard
-    .getByRole("button", {
-      name: /Get Plus|Upgrade to Plus|升级至\s*Plus/i,
-    })
-    .first();
-  if (await plusBtn.isVisible({ timeout: 2500 }).catch(() => false)) {
-    await plusBtn.scrollIntoViewIfNeeded().catch(() => {});
-    await plusBtn.click({ timeout: 10000 });
-    console.log("✅ [步骤] 已点击 Plus 卡片按钮");
-    return true;
+  if (plusCard) {
+    const plusBtn = plusCard.getByText(PLUS_CTA_RE).last();
+    if (await plusBtn.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await plusBtn.scrollIntoViewIfNeeded().catch(() => {});
+      await plusBtn.click({ timeout: 10000 });
+      console.log("✅ [步骤] 已点击 Plus 卡片按钮");
+      return true;
+    }
   }
 
   const clicked = await page
@@ -984,26 +1029,64 @@ async function clickPlusPlanButton(page) {
         String(el.innerText || el.textContent || "")
           .replace(/\s+/g, " ")
           .trim();
-      const buttons = Array.from(
-        document.querySelectorAll('button, [role="button"]'),
-      );
-      const plusBtn = buttons.find((el) =>
-        /^(Get Plus|Upgrade to Plus|Subscribe to Plus|升级至 Plus)$/i.test(
-          label(el),
+      const isExactPlusCta = (text) =>
+        /^(Get Plus|Regain Plus|Resume Plus|Rejoin Plus|Upgrade to Plus|Subscribe to Plus|升级至 Plus)$/i.test(
+          text,
+        );
+      const isCardUpgrade = (text) => /^Upgrade$/i.test(text);
+      const clickable = Array.from(
+        document.querySelectorAll(
+          'button, a, [role="button"], [role="link"], [type="button"]',
         ),
       );
-      if (plusBtn) {
-        plusBtn.scrollIntoView({ block: "center" });
-        plusBtn.click();
-        return label(plusBtn);
+      let target = clickable.find((el) => isExactPlusCta(label(el)));
+      if (!target) {
+        const plusHeading = Array.from(
+          document.querySelectorAll("h1, h2, h3, div, span, p"),
+        ).find((el) => /^ChatGPT Plus$/i.test(label(el)));
+        const card = plusHeading
+          ? plusHeading.closest('[role="dialog"]') ||
+            plusHeading.closest("section") ||
+            plusHeading.parentElement
+          : null;
+        const scope = card
+          ? Array.from(card.querySelectorAll("button, a, [role='button']"))
+          : clickable;
+        target = scope.find((el) => isCardUpgrade(label(el)));
       }
-      return "";
+      if (!target) {
+        return "";
+      }
+      const hit =
+        target.closest("button, a, [role='button'], [role='link']") || target;
+      hit.scrollIntoView({ block: "center" });
+      hit.click();
+      return label(hit);
     })
     .catch(() => "");
   if (clicked) {
     console.log(`✅ [步骤] 已点击 Plus 按钮: ${clicked}`);
     return true;
   }
+
+  const visibleCtas = await page
+    .evaluate(() => {
+      const label = (el) =>
+        String(el.innerText || el.textContent || "")
+          .replace(/\s+/g, " ")
+          .trim();
+      const dialog = document.querySelector('[role="dialog"]') || document.body;
+      return Array.from(
+        dialog.querySelectorAll('button, a, [role="button"], [role="link"]'),
+      )
+        .map((el) => label(el))
+        .filter((text) => text && text.length < 40)
+        .slice(0, 30);
+    })
+    .catch(() => []);
+  console.warn(
+    `[Warn] Plus CTA 未命中，可见按钮: ${(visibleCtas || []).join(" | ") || "none"}`,
+  );
   return false;
 }
 
@@ -1024,7 +1107,7 @@ async function clickPlanUpgrade(page, planType) {
       return;
     }
     throw new Error(
-      "未找到 Plus 套餐按钮（Get Plus）。避免误点 Go/Business Upgrade",
+      "未找到 Plus 套餐按钮（Get Plus / Regain Plus / Rejoin Plus）。避免误点 Go/Business Upgrade",
     );
   }
 
