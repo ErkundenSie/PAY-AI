@@ -222,6 +222,74 @@ async function ensureChatGptHome(page) {
     .catch(() => {});
 }
 
+async function installSentinelCapture(page) {
+  if (!page || page.__kcSentinelInstalled) return;
+  page.__kcSentinelInstalled = true;
+  page.__kcSentinelToken = "";
+  page.on("request", (req) => {
+    try {
+      const headers = req.headers() || {};
+      const token = String(
+        headers["openai-sentinel-token"] ||
+          headers["OpenAI-Sentinel-Token"] ||
+          "",
+      ).trim();
+      if (token) page.__kcSentinelToken = token;
+    } catch (_) {
+      /* ignore */
+    }
+  });
+  await page
+    .evaluate(() => {
+      if (window.__kcSentinelHook) return;
+      window.__kcSentinelHook = true;
+      window.__kcSentinelToken = "";
+      const origFetch = window.fetch.bind(window);
+      window.fetch = async function (input, init = {}) {
+        try {
+          const headers = (init && init.headers) || {};
+          const read = (name) => {
+            if (!headers) return "";
+            if (typeof headers.get === "function") {
+              return headers.get(name) || "";
+            }
+            return (
+              headers[name] ||
+              headers[name.toLowerCase()] ||
+              headers[name.toUpperCase()] ||
+              ""
+            );
+          };
+          const token =
+            read("openai-sentinel-token") ||
+            read("OpenAI-Sentinel-Token") ||
+            "";
+          if (token) window.__kcSentinelToken = String(token);
+        } catch (_) {
+          /* ignore */
+        }
+        return origFetch(input, init);
+      };
+    })
+    .catch(() => {});
+}
+
+async function readCapturedSentinel(page) {
+  if (!page) return "";
+  const fromNode = String(page.__kcSentinelToken || "").trim();
+  if (fromNode) return fromNode;
+  if (typeof page.evaluate !== "function") return "";
+  return page
+    .evaluate(() => String(window.__kcSentinelToken || "").trim())
+    .catch(() => "");
+}
+
+function isCheckoutBlocked(detail = "") {
+  return /unusual activity|forbidden|sentinel|blocked|403/i.test(
+    String(detail || ""),
+  );
+}
+
 async function waitForCheckoutCookies(page, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   let summary = summarizeCheckoutCookies(
@@ -369,6 +437,7 @@ async function openPricingModalForWarmup(page) {
 async function warmupCheckoutContext(page, accessToken, options = {}) {
   const country = String(options.country || "PH").toUpperCase();
   await ensureChatGptHome(page);
+  await installSentinelCapture(page);
   let cookies = await waitForCheckoutCookies(page);
   if (!cookies.hasOaiDid) {
     await page
@@ -380,7 +449,7 @@ async function warmupCheckoutContext(page, accessToken, options = {}) {
     cookies = await waitForCheckoutCookies(page, 8000);
   }
 
-  const modal = await openPricingModalForWarmup(page);
+  const modal = "skip";
   cookies = summarizeCheckoutCookies(
     await page.context().cookies(CHATGPT_HOME_URL),
   );
@@ -635,6 +704,10 @@ class ChatGPTService {
   }
 
   async postCheckoutFromPage(page, payload) {
+    await installSentinelCapture(page);
+    const sentinel = await readCapturedSentinel(page);
+    const headers = { ...this.headers };
+    if (sentinel) headers["openai-sentinel-token"] = sentinel;
     const result = await page.evaluate(
       async ({ path, payload, headers }) => {
         try {
@@ -647,30 +720,40 @@ class ChatGPTService {
           return {
             status: response.status,
             bodyText: await response.text(),
+            sentinelBytes: String(headers["openai-sentinel-token"] || "")
+              .length,
           };
         } catch (err) {
           return {
             status: 0,
             bodyText: "",
             error: String((err && err.message) || err),
+            sentinelBytes: String(headers["openai-sentinel-token"] || "")
+              .length,
           };
         }
       },
       {
         path: CHECKOUT_API_PATH,
         payload,
-        headers: this.headers,
+        headers,
       },
     );
     if (result.error && !result.bodyText) {
       throw new Error(result.error);
     }
+    if (result.sentinelBytes) {
+      console.log(
+        `[ChatGPT] 正常网页 Checkout 已提交: HTTP ${result.status}, Sentinel=${result.sentinelBytes} bytes`,
+      );
+    }
     return parseCheckoutApiBody(result.status, result.bodyText);
   }
 
-  async postCheckoutRequest(payload, page) {
-    if (page && typeof page.evaluate === "function") {
+  async postCheckoutRequest(payload, page, { forcePage = false } = {}) {
+    if (forcePage && page && typeof page.evaluate === "function") {
       await ensureChatGptHome(page);
+      await installSentinelCapture(page);
       return this.postCheckoutFromPage(page, payload);
     }
 
@@ -728,13 +811,31 @@ class ChatGPTService {
           uiMode,
           accountId,
         });
-        const parsed = await this.postCheckoutRequest(payload, options.page);
+        console.log(`[ChatGPT] 尝试 checkout 模式: ${planType}-${uiMode}`);
+        let parsed = await this.postCheckoutRequest(payload, null);
         lastParsed = parsed;
+        if (
+          !parsed.ok &&
+          isCheckoutBlocked(parsed.error) &&
+          options.page &&
+          typeof options.page.evaluate === "function"
+        ) {
+          console.log(
+            "[ChatGPT] 协议创建订单被拦截；正在按正常网页上下文重新创建一次。",
+          );
+          console.log(
+            "[ChatGPT] 启动 Chromium 浏览器执行 Sentinel Checkout...",
+          );
+          parsed = await this.postCheckoutRequest(payload, options.page, {
+            forcePage: true,
+          });
+          lastParsed = parsed;
+        }
         if (parsed.ok) {
           const resolved = this.resolveCheckoutUrl(parsed.data, country);
           if (resolved.checkoutUrl) {
             console.log(
-              `✅ 订单创建成功 (mode=${uiMode}, session: ${resolved.sessionId ? resolved.sessionId.slice(0, 24) + "..." : "unknown"})`,
+              `✅ 订单创建成功 (${planType}-browser-sentinel, session: ${resolved.sessionId ? resolved.sessionId.slice(0, 24) + "..." : "unknown"})`,
             );
             console.log(
               `    支付链接: ${resolved.checkoutUrl.slice(0, 120)}...`,
@@ -775,12 +876,6 @@ class ChatGPTService {
           console.error(
             "❌ [提示] Checkout 被风控拦截，当前出口 IP / 账号组合被判定异常",
           );
-          if (hasActiveCheckoutPlan(warmupPlan)) {
-            console.error(
-              `❌ [提示] accounts/check 显示当前套餐已是 ${warmupPlan}，再打 checkout 会被风控`,
-            );
-            return { sessionId: null, checkoutUrl: null, error: detail };
-          }
           continue;
         }
       }
@@ -1049,8 +1144,17 @@ async function openApiCheckout(
   const url = checkout.checkoutUrl;
   console.log(`🔗 [步骤] 正在打开支付链接: ${url.slice(0, 120)}...`);
 
-  if (!verifyPage) {
-    console.log("✅ [步骤] Checkout Session 已创建（跳过页面打开验证）");
+  if (!verifyPage || checkout.sessionId) {
+    if (checkout.sessionId) {
+      await page
+        .goto(url, { waitUntil: "domcontentloaded", timeout: 90000 })
+        .catch(() => {});
+      console.log(
+        `✅ [步骤] Checkout session 已创建，走协议支付: ${checkout.sessionId}`,
+      );
+    } else {
+      console.log("✅ [步骤] Checkout Session 已创建（跳过页面打开验证）");
+    }
     return { ...checkout, checkoutUrl: url };
   }
 

@@ -679,7 +679,7 @@ async function run() {
 
     // --- Phase 2: API 创建 Checkout（注入账单地区），失败时回退 UI 定价页 ---
     const checkoutMode = String(
-      process.env.CHECKOUT_MODE || "auto",
+      process.env.CHECKOUT_MODE || "api",
     ).toLowerCase();
     let checkoutOpened = false;
     let checkoutResult = null;

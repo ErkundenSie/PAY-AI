@@ -3587,7 +3587,7 @@ function spawnCheckoutDebugWorker({
         ...process.env,
         ...hcaptchaEnv,
         CHECKOUT_DEBUG_ONLY: "1",
-        CHECKOUT_MODE: "auto",
+        CHECKOUT_MODE: "api",
         CHATGPT_TOKEN: token,
         CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
           ? sessionRaw
@@ -4051,7 +4051,7 @@ function spawnActivationWorker({
           ...process.env,
           ...hcaptchaEnv,
           JOB_KEY: task.jobKey,
-          CHECKOUT_MODE: process.env.CHECKOUT_MODE || "auto",
+          CHECKOUT_MODE: process.env.CHECKOUT_MODE || "api",
           CHATGPT_TOKEN: token,
           CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
             ? sessionRaw
