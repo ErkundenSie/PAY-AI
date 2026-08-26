@@ -779,6 +779,10 @@
         width: 108px;
       }
 
+      .task-log-table .col-duration {
+        width: 92px;
+      }
+
       .task-log-table .col-status {
         width: 108px;
       }
@@ -806,6 +810,40 @@
       #logs .task-log-table .col-media,
       #logs .task-log-table .col-action {
         white-space: nowrap;
+      }
+
+      .task-filter-bar {
+        display: grid;
+        grid-template-columns: 150px minmax(160px, 1fr) minmax(
+            180px,
+            1fr
+          ) 150px auto;
+        gap: 10px;
+        align-items: end;
+        margin: 14px 0;
+      }
+
+      .task-filter-field label {
+        margin-bottom: 5px;
+        font-size: 12px;
+      }
+
+      .task-filter-field .asset-input {
+        height: 36px;
+        padding: 7px 10px;
+        font-size: 13px;
+      }
+
+      .task-filter-reset {
+        height: 36px;
+        margin-bottom: 0;
+        white-space: nowrap;
+      }
+
+      @media (max-width: 900px) {
+        .task-filter-bar {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
 
       .task-media-actions,
@@ -4742,6 +4780,61 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               秒自动拉取；点击详情可查看执行日志、阶段与媒体信息。</span
             >
           </div>
+          <div class="task-filter-bar" aria-label="任务筛选">
+            <div class="task-filter-field">
+              <label for="task_filter_type">任务类型</label>
+              <select
+                id="task_filter_type"
+                class="asset-input"
+                onchange="updateTaskLogFilter('type', this.value)"
+              >
+                <option value="all">全部类型</option>
+                <option value="CDK 开通">CDK 开通</option>
+                <option value="链接调试">链接调试</option>
+                <option value="支付调试">支付调试</option>
+              </select>
+            </div>
+            <div class="task-filter-field">
+              <label for="task_filter_cdk">激活码</label>
+              <input
+                id="task_filter_cdk"
+                class="asset-input"
+                type="search"
+                placeholder="筛选激活码"
+                oninput="updateTaskLogFilter('cdk', this.value)"
+              />
+            </div>
+            <div class="task-filter-field">
+              <label for="task_filter_account">充值账号</label>
+              <input
+                id="task_filter_account"
+                class="asset-input"
+                type="search"
+                placeholder="筛选充值账号"
+                oninput="updateTaskLogFilter('account', this.value)"
+              />
+            </div>
+            <div class="task-filter-field">
+              <label for="task_filter_status">状态</label>
+              <select
+                id="task_filter_status"
+                class="asset-input"
+                onchange="updateTaskLogFilter('status', this.value)"
+              >
+                <option value="all">全部状态</option>
+                <option value="running">进行中</option>
+                <option value="success">成功</option>
+                <option value="failed">失败</option>
+              </select>
+            </div>
+            <button
+              type="button"
+              class="btn btn-secondary task-filter-reset"
+              onclick="clearTaskLogFilters()"
+            >
+              重置筛选
+            </button>
+          </div>
           <div class="table-container">
             <table class="task-log-table">
               <thead>
@@ -4751,6 +4844,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                   <th class="col-cdk">激活码</th>
                   <th class="col-token">充值账号</th>
                   <th class="col-progress">进度</th>
+                  <th class="col-duration">用时</th>
                   <th class="col-status">状态</th>
                   <th class="col-media" style="text-align: center">
                     截图/录像
@@ -5030,6 +5124,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       const tableSearch = {
         cdk: "",
         product: "",
+      };
+      const taskLogFilters = {
+        type: "all",
+        cdk: "",
+        account: "",
+        status: "all",
       };
       let adminRefreshTimer = null;
       let uptimeTickTimer = null;
@@ -6413,6 +6513,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               "执行进度",
               `${Number(task.progress ?? listTask?.progress ?? 0)}%`,
             ],
+            [
+              "任务用时",
+              formatDurationText(
+                task.durationSeconds ?? listTask?.durationSeconds ?? 0,
+              ),
+            ],
             ["当前阶段", currentPhase],
             ["支付卡尾号", task.cardLast4 ? `**** ${task.cardLast4}` : "-"],
           ];
@@ -6603,6 +6709,59 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           totalPages,
           start,
         };
+      }
+
+      function getFilteredTaskLogs(logs) {
+        const type = String(taskLogFilters.type || "all");
+        const cdk = String(taskLogFilters.cdk || "")
+          .trim()
+          .toLowerCase();
+        const account = String(taskLogFilters.account || "")
+          .trim()
+          .toLowerCase();
+        const status = String(taskLogFilters.status || "all");
+        return (Array.isArray(logs) ? logs : []).filter((task) => {
+          if (type !== "all" && getTaskType(task) !== type) return false;
+          if (
+            cdk &&
+            !String(task.cdk || "")
+              .toLowerCase()
+              .includes(cdk)
+          ) {
+            return false;
+          }
+          if (
+            account &&
+            !String(task.token || "")
+              .toLowerCase()
+              .includes(account)
+          ) {
+            return false;
+          }
+          return status === "all" || String(task.status || "") === status;
+        });
+      }
+
+      function updateTaskLogFilter(key, value) {
+        if (!(key in taskLogFilters)) return;
+        taskLogFilters[key] = String(value || "");
+        paginationState.log.page = 1;
+        renderLogTable(window.__adminLogs || []);
+      }
+
+      function clearTaskLogFilters() {
+        Object.assign(taskLogFilters, {
+          type: "all",
+          cdk: "",
+          account: "",
+          status: "all",
+        });
+        ["type", "cdk", "account", "status"].forEach((key) => {
+          const input = document.getElementById(`task_filter_${key}`);
+          if (input) input.value = taskLogFilters[key];
+        });
+        paginationState.log.page = 1;
+        renderLogTable(window.__adminLogs || []);
       }
 
       function isAssetActive(item) {
@@ -8826,10 +8985,10 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         if (!tbody) {
           return;
         }
-        const pageData = getPageItems(logs, "log");
+        const pageData = getPageItems(getFilteredTaskLogs(logs), "log");
         if (!pageData.items.length) {
           tbody.innerHTML =
-            '<tr><td colspan="8" style="text-align:center; color: var(--text-dim); padding: 36px 0;">暂无任务记录</td></tr>';
+            '<tr><td colspan="9" style="text-align:center; color: var(--text-dim); padding: 36px 0;">暂无符合筛选条件的任务记录</td></tr>';
           renderPagination("log_pagination", "log", 0);
           return;
         }
@@ -8855,6 +9014,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                             <div class="progress-mini-bar ${l.status}" style="width: ${l.progress}%"></div>
                         </div>
                     </td>
+                    <td class="col-duration">${escapeHtml(formatDurationText(l.durationSeconds))}</td>
                     <td class="col-status">${renderStatus(l.status)}</td>
                     <td class="col-media" style="text-align:center">${mediaCell}</td>
                     <td class="col-action" style="text-align:center">

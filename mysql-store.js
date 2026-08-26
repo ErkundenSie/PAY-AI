@@ -1225,6 +1225,7 @@ function formatAdminTaskLogRow(row) {
     cardLast4: row.card_last4 || "",
     status: row.status,
     progress: Number(row.progress || 0),
+    durationSeconds: Math.max(0, Number(row.duration_seconds || 0)),
     screenshots,
     videos,
     automation,
@@ -1234,7 +1235,10 @@ function formatAdminTaskLogRow(row) {
 async function listAdminTaskLogs(limit = 200) {
   const rows = await runQuery(
     `SELECT l.job_key, l.display_time, l.token_preview, l.cdk_code, l.phone, l.card_last4,
-                l.status, l.message, l.progress, l.failure_screenshots, l.raw_output, c.type AS cdk_type
+                l.status, l.message, l.progress, l.failure_screenshots, l.raw_output,
+                GREATEST(0, TIMESTAMPDIFF(SECOND, l.created_at,
+                  CASE WHEN l.status = 'running' THEN NOW() ELSE l.updated_at END)) AS duration_seconds,
+                c.type AS cdk_type
          FROM task_logs l
          LEFT JOIN cdk_codes c ON l.cdk_code = c.cdk_code
          WHERE (l.cdk_code IS NULL OR l.cdk_code NOT LIKE 'ADMIN_PRODUCT_GEN:%')
@@ -3499,6 +3503,8 @@ async function createTaskLog({
 async function getTaskStatus(jobKey) {
   const rows = await runQuery(
     `SELECT status, message, progress, raw_output, cdk_code, phone, card_last4, failure_screenshots,
+                GREATEST(0, TIMESTAMPDIFF(SECOND, created_at,
+                  CASE WHEN status = 'running' THEN NOW() ELSE updated_at END)) AS duration_seconds,
                 gpt_api_order_id, gpt_api_task_id, gpt_api_raw, gpt_api_topup_code
          FROM task_logs
          WHERE job_key = ?

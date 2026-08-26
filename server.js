@@ -1404,6 +1404,18 @@ function normalizeTaskProgress(progress, status = "running", previous = 0) {
   return Math.max(Math.max(0, Number(previous) || 0), cappedProgress);
 }
 
+function timestampTaskOutput(chunk) {
+  const stamp = new Date()
+    .toLocaleString("zh-CN", { hour12: false })
+    .replace(/\//g, "-");
+  return String(chunk)
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => (line ? `[${stamp}] ${line}` : ""))
+    .join("\n");
+}
+
 function runCheckoutScript(
   jobKey,
   scriptPath,
@@ -1444,7 +1456,7 @@ function runCheckoutScript(
       }
       idleTimer = setTimeout(() => {
         timedOut = true;
-        output += "\n[TIMEOUT] 超过 3 分钟没有打印，任务终止。\n";
+        output += `\n${timestampTaskOutput("[TIMEOUT] 超过 3 分钟没有打印，任务终止。\n")}`;
         logTask(
           jobKey,
           `attempt=${attempt} 超过 ${PROCESS_IDLE_TIMEOUT_MS / 1000} 秒无输出，终止子进程`,
@@ -1456,7 +1468,11 @@ function runCheckoutScript(
 
     const appendChunk = (source, chunk) => {
       const text = chunk.toString();
-      output += text;
+      const timestamped = timestampTaskOutput(text);
+      if (output && !output.endsWith("\n") && timestamped) {
+        output += "\n";
+      }
+      output += timestamped;
       logTaskChunk(jobKey, attempt, source, text);
       if (onProgress) {
         onProgress(getCheckoutProgress(output), output).catch((error) =>
@@ -1470,7 +1486,7 @@ function runCheckoutScript(
     child.stdout.on("data", (chunk) => appendChunk("stdout", chunk));
     child.stderr.on("data", (chunk) => appendChunk("stderr", chunk));
     child.on("error", (error) => {
-      output += `\n[SPAWN_ERROR] ${error.message}\n`;
+      output += `\n${timestampTaskOutput(`[SPAWN_ERROR] ${error.message}\n`)}`;
       logTask(
         jobKey,
         `attempt=${attempt} 子进程启动失败: ${error.message}`,
@@ -2339,6 +2355,7 @@ app.get("/api/admin/task-logs/:jobKey", async (req, res) => {
         status: task.status,
         message: task.message,
         progress: Number(task.progress || 0),
+        durationSeconds: Math.max(0, Number(task.duration_seconds || 0)),
         cdk: task.cdk_code || "",
         phone: task.phone || "",
         cardLast4: task.card_last4 || "",
