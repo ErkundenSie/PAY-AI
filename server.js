@@ -4,6 +4,8 @@ const express = require("express");
 const { spawn, execFileSync } = require("child_process");
 const path = require("path");
 const crypto = require("crypto");
+const dns = require("dns").promises;
+const net = require("net");
 const fs = require("fs");
 const os = require("os");
 const WebSocket = require("ws");
@@ -197,6 +199,80 @@ function getClientIp(req) {
     .replace(/^::ffff:/, "")
     .replace(/^::1$/, "127.0.0.1")
     .trim();
+}
+
+function safeEqualString(left, right) {
+  const leftBuffer = Buffer.from(String(left || ""));
+  const rightBuffer = Buffer.from(String(right || ""));
+  return (
+    leftBuffer.length === rightBuffer.length &&
+    crypto.timingSafeEqual(leftBuffer, rightBuffer)
+  );
+}
+
+function isPrivateNetworkAddress(address) {
+  const value = String(address || "").toLowerCase();
+  if (net.isIPv4(value)) {
+    const [a, b] = value.split(".").map(Number);
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && (b === 0 || b === 168)) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      a >= 224
+    );
+  }
+  return (
+    value === "::" ||
+    value === "::1" ||
+    value.startsWith("fc") ||
+    value.startsWith("fd") ||
+    value.startsWith("fe80:")
+  );
+}
+
+async function validateExternalApiBaseUrl(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(String(rawUrl || "").trim());
+  } catch (_) {
+    return "外部 API 地址格式无效";
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+    return "外部 API 仅支持不含账号密码的 HTTPS 地址";
+  }
+  try {
+    const addresses = await dns.lookup(parsed.hostname, {
+      all: true,
+      verbatim: true,
+    });
+    if (
+      !addresses.length ||
+      addresses.some(({ address }) => isPrivateNetworkAddress(address))
+    ) {
+      return "外部 API 地址不能指向内网或本机地址";
+    }
+  } catch (_) {
+    return "外部 API 域名无法解析";
+  }
+  return "";
+}
+
+function resolvePathWithin(root, relativePath) {
+  const resolved = path.resolve(root, relativePath);
+  const relative = path.relative(root, resolved);
+  if (
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    return "";
+  }
+  return resolved;
 }
 
 const publicRequestWindows = new Map();
@@ -1712,6 +1788,35 @@ app.get("/api/admin/runtime-logs", authenticateAdmin, (req, res) => {
   }
 });
 
+app.get("/api/admin/runtime-logs/export", authenticateAdmin, (req, res) => {
+  try {
+    const errorsOnly = String(req.query.scope || "") === "errors";
+    const entries = runtimeLog.tail(15000).filter((entry) => {
+      if (!errorsOnly) {
+        return true;
+      }
+      return (
+        /^(error|warn)$/i.test(String(entry.level || "")) ||
+        /错误|失败|异常|❌|\[ERROR\]/i.test(String(entry.text || ""))
+      );
+    });
+    const content = entries
+      .map((entry) => {
+        const timestamp = new Date(entry.ts).toLocaleString("zh-CN", {
+          hour12: false,
+        });
+        return `[${timestamp}] [${entry.level || "log"}] [${entry.source || "server"}]${entry.jobKey ? ` [${entry.jobKey}]` : ""} ${entry.text}`;
+      })
+      .join("\n");
+    const filename = errorsOnly ? "runtime-errors.log" : "runtime-logs.log";
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(`\uFEFF${content}${content ? "\n" : ""}`);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 app.post("/api/admin/runtime-logs/clear", authenticateAdmin, (req, res) => {
   try {
     runtimeLog.clear();
@@ -1783,46 +1888,50 @@ app.post("/api/admin/proxy/test", authenticateAdmin, async (req, res) => {
 });
 
 // ─── External Card Pool Webhook (X-API-Key auth) ────────────────────────────
-app.post("/api/external/cards/push", async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const apiKey = String(req.headers["x-api-key"] || "").trim();
-    if (!apiKey) {
-      return res
-        .status(401)
-        .json({ success: false, error: "API Key 无效或缺失" });
-    }
-    const expectedKey = await store.getAppConfigValue(
-      "external_card_api_key",
-      "",
-    );
-    if (!expectedKey || apiKey !== expectedKey) {
-      return res
-        .status(401)
-        .json({ success: false, error: "API Key 无效或缺失" });
-    }
+app.post(
+  "/api/external/cards/push",
+  limitPublicRequests("external-cards-push", 20, 60 * 1000),
+  async (req, res) => {
+    try {
+      await ensureStoreReady();
+      const apiKey = String(req.headers["x-api-key"] || "").trim();
+      if (!apiKey) {
+        return res
+          .status(401)
+          .json({ success: false, error: "API Key 无效或缺失" });
+      }
+      const expectedKey = await store.getAppConfigValue(
+        "external_card_api_key",
+        "",
+      );
+      if (!expectedKey || !safeEqualString(apiKey, expectedKey)) {
+        return res
+          .status(401)
+          .json({ success: false, error: "API Key 无效或缺失" });
+      }
 
-    const cards = Array.isArray(req.body?.cards) ? req.body.cards : [];
-    if (cards.length === 0) {
-      return res
-        .status(400)
-        .json({ success: false, error: "缺少 cards 数组或为空" });
-    }
-    if (cards.length > 500) {
-      return res
-        .status(400)
-        .json({ success: false, error: "单次导入上限 500 条" });
-    }
+      const cards = Array.isArray(req.body?.cards) ? req.body.cards : [];
+      if (cards.length === 0) {
+        return res
+          .status(400)
+          .json({ success: false, error: "缺少 cards 数组或为空" });
+      }
+      if (cards.length > 500) {
+        return res
+          .status(400)
+          .json({ success: false, error: "单次导入上限 500 条" });
+      }
 
-    const result = await store.importCards(cards);
-    res.json({ success: true, ...result });
-  } catch (error) {
-    if (error.message === "单次导入上限 500 条") {
-      return res.status(400).json({ success: false, error: error.message });
+      const result = await store.importCards(cards);
+      res.json({ success: true, ...result });
+    } catch (error) {
+      if (error.message === "单次导入上限 500 条") {
+        return res.status(400).json({ success: false, error: error.message });
+      }
+      res.status(500).json({ success: false, message: error.message });
     }
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
+  },
+);
 
 /** 公开 API：必须挂在 app.use('/api/admin', authenticateAdmin) 之前，否则部分环境下会 404 */
 app.get("/api/public/admin-paths", async (req, res) => {
@@ -1974,7 +2083,7 @@ app.get("/api/admin/security/status", async (req, res) => {
   }
 });
 
-app.get("/api/admin/login-logs", async (req, res) => {
+app.get("/api/admin/login-logs", authenticateAdmin, async (req, res) => {
   try {
     await ensureStoreReady();
     const limit = Number(req.query.limit) || 100;
@@ -2200,6 +2309,47 @@ app.get("/api/admin/task-logs", async (req, res) => {
   }
 });
 
+function redactTaskDetailOutput(value) {
+  return String(value || "")
+    .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)\S+/gi, "$1[REDACTED]")
+    .replace(
+      /(["']?(?:access_?token|session|cookie|card_(?:number|cvc))["']?\s*[:=]\s*["']?)[^\s,"'}]+/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/\b\d{12,19}\b/g, "[REDACTED_CARD]")
+    .slice(-200000);
+}
+
+app.get("/api/admin/task-logs/:jobKey", async (req, res) => {
+  try {
+    await ensureStoreReady();
+    const jobKey = decodeURIComponent(String(req.params.jobKey || "").trim());
+    if (!jobKey) {
+      return res.status(400).json({ success: false, message: "缺少任务标识" });
+    }
+    const task = await store.getTaskStatus(jobKey);
+    if (!task) {
+      return res
+        .status(404)
+        .json({ success: false, message: "未找到任务记录" });
+    }
+    return res.json({
+      success: true,
+      task: {
+        status: task.status,
+        message: task.message,
+        progress: Number(task.progress || 0),
+        cdk: task.cdk_code || "",
+        phone: task.phone || "",
+        cardLast4: task.card_last4 || "",
+        output: redactTaskDetailOutput(task.raw_output),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 app.get("/api/admin/data", async (req, res) => {
   try {
     await ensureStoreReady();
@@ -2278,7 +2428,13 @@ app.post("/api/admin/browser-pool/reload", async (req, res) => {
     await ensureStoreReady();
     const requestedSize = req.body?.size;
     if (requestedSize != null) {
-      browserPool.setRuntimePoolSize(requestedSize);
+      const size = Number(requestedSize);
+      const maxSize = browserPool.getStats().maxPoolSize;
+      if (!Number.isInteger(size) || size < 1 || size > maxSize) {
+        throw new Error(`浏览器池槽位数量必须为 1–${maxSize} 的整数`);
+      }
+      const normalizedSize = browserPool.setRuntimePoolSize(size);
+      await store.setBrowserPoolSize(normalizedSize);
     }
     const result = await browserPool.reloadBrowserPool(requestedSize);
     res.json({
@@ -2488,20 +2644,19 @@ app.get("/api/admin/screenshots", async (req, res) => {
         .json({ success: false, message: "无效的截图路径" });
     }
     const root = path.join(__dirname, "debug_screenshots");
-    let fullPath = path.join(root, rel);
-    if (!fullPath.startsWith(root) || !fs.existsSync(fullPath)) {
+    let fullPath = resolvePathWithin(root, rel);
+    if (!fullPath || !fs.existsSync(fullPath)) {
       if (rel.startsWith("激活/")) {
-        const altPath = path.join(
+        const altPath = resolvePathWithin(
           root,
-          "activation",
-          rel.slice("激活/".length),
+          path.join("activation", rel.slice("激活/".length)),
         );
-        if (altPath.startsWith(root) && fs.existsSync(altPath)) {
+        if (altPath && fs.existsSync(altPath)) {
           fullPath = altPath;
         }
       }
     }
-    if (!fullPath.startsWith(root) || !fs.existsSync(fullPath)) {
+    if (!fullPath || !fs.existsSync(fullPath)) {
       return res.status(404).json({ success: false, message: "截图不存在" });
     }
     res.setHeader("Cache-Control", "private, max-age=3600");
@@ -2522,8 +2677,8 @@ app.get("/api/admin/video", async (req, res) => {
         .json({ success: false, message: "无效的录像路径" });
     }
     const root = path.join(__dirname, "debug_screenshots");
-    const fullPath = path.join(root, rel);
-    if (!fullPath.startsWith(root) || !fs.existsSync(fullPath)) {
+    const fullPath = resolvePathWithin(root, rel);
+    if (!fullPath || !fs.existsSync(fullPath)) {
       return res.status(404).json({ success: false, message: "录像不存在" });
     }
     res.setHeader("Content-Type", "video/webm");
@@ -2548,14 +2703,9 @@ app.get("/api/admin/screenshots/:subdir/:filename", async (req, res) => {
         .status(400)
         .json({ success: false, message: "无效的截图路径" });
     }
-    const fullPath = path.join(
-      __dirname,
-      "debug_screenshots",
-      subdir,
-      filename,
-    );
     const root = path.join(__dirname, "debug_screenshots");
-    if (!fullPath.startsWith(root) || !fs.existsSync(fullPath)) {
+    const fullPath = resolvePathWithin(root, path.join(subdir, filename));
+    if (!fullPath || !fs.existsSync(fullPath)) {
       return res.status(404).json({ success: false, message: "截图不存在" });
     }
     res.setHeader("Cache-Control", "private, max-age=3600");
@@ -2806,6 +2956,10 @@ app.post("/api/admin/gpt-api", async (req, res) => {
   try {
     await ensureStoreReady();
     const body = req.body || {};
+    const baseUrlError = await validateExternalApiBaseUrl(body.base_url);
+    if (baseUrlError) {
+      return res.status(400).json({ success: false, message: baseUrlError });
+    }
     await store.saveGptApiConfig({
       enabled: Boolean(body.enabled),
       base_url: body.base_url,
@@ -2829,6 +2983,10 @@ app.post("/api/admin/gpt-api/test", async (req, res) => {
       base_url: String(body.base_url || "").trim() || saved.base_url,
       api_key: String(body.api_key || "").trim() || saved.api_key,
     };
+    const baseUrlError = await validateExternalApiBaseUrl(merged.base_url);
+    if (baseUrlError) {
+      return res.status(400).json({ success: false, message: baseUrlError });
+    }
     const result = await gptApi.testConnection(merged);
     if (!result.success) {
       return res
@@ -3060,6 +3218,123 @@ app.post("/api/admin/checkout/generate", async (req, res) => {
   }
 });
 
+app.post("/api/admin/checkout/pay", async (req, res) => {
+  try {
+    await ensureStoreReady();
+    const body = req.body || {};
+    const rawSession = String(body.session || "").trim();
+    if (!rawSession) {
+      return res
+        .status(400)
+        .json({ success: false, error: "请提供 Session JSON" });
+    }
+
+    const sessionJson = parseSessionJson(rawSession);
+    const token = normalizeSessionToken(rawSession);
+    if (!token) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Session 无效，无法提取 accessToken" });
+    }
+    const tokenCheck = validateAccessToken(token);
+    if (!tokenCheck.valid) {
+      return res
+        .status(400)
+        .json({ success: false, error: tokenCheck.message });
+    }
+
+    const planType = String(body.plan_type || "plus").trim();
+    const planNameOverride = body.plan_name
+      ? String(body.plan_name).trim()
+      : "";
+    const resolvedPlanName =
+      planNameOverride || store.resolvePlanName(planType);
+    const regionCode = String(
+      body.country || body.region || (await store.getPaymentRegion()),
+    ).toUpperCase();
+    if (!isSupportedRegion(regionCode)) {
+      return res
+        .status(400)
+        .json({ success: false, error: `不支持的地区: ${regionCode}` });
+    }
+
+    if (VERIFY_OPENAI_TOKEN_ON_ACTIVATION) {
+      const verification = await querySubscriptionBySession(token, {
+        email: extractEmailFromSession(rawSession) || tokenCheck.email || "",
+      });
+      if (!verification.ok) {
+        return res.status(401).json({
+          success: false,
+          error: "Session 无法通过 OpenAI 服务验证，请确认有效后重试",
+        });
+      }
+    }
+
+    const maintenanceModeState = await store.getMaintenanceModeState();
+    if (maintenanceModeState.enabled) {
+      return res
+        .status(503)
+        .json({ success: false, error: "系统维护中，请稍后再试" });
+    }
+    const maxConcurrentActivations = await store.getMaxConcurrentActivations();
+    if (activeForegroundJobs.size >= maxConcurrentActivations) {
+      return res
+        .status(429)
+        .json({ success: false, error: "当前任务过多，请稍后再试" });
+    }
+    if (!(await store.hasAvailableCard())) {
+      return res.status(503).json({
+        success: false,
+        error: "银行卡池暂无可用卡片，请先在后台「银行卡池」导入银行卡后再试",
+      });
+    }
+
+    const storedSession = buildStoredSessionPayload(
+      rawSession,
+      sessionJson,
+      token,
+    );
+    const email = extractEmailFromSession(sessionJson);
+    const task = await store.createTaskLog({
+      tokenPreview: extractSessionPreview(storedSession),
+      sessionPayload: storedSession,
+      cdkCode: "[payment-debug]",
+      phone: null,
+      cardLast4: null,
+      status: "running",
+      progress: 5,
+    });
+    await store.updateTaskLog(task.jobKey, {
+      status: "running",
+      message: `付款调试：${planType} / ${regionCode}`,
+      progress: 5,
+    });
+    logTask(
+      task.jobKey,
+      `付款调试任务已创建 plan=${planType} plan_name=${resolvedPlanName} region=${regionCode} email=${email || "-"}`,
+    );
+    reserveForegroundSlot(task.jobKey);
+    spawnCheckoutPaymentWorker({
+      task,
+      token,
+      sessionRaw: storedSession,
+      planType,
+      region: regionCode,
+      planNameOverride: resolvedPlanName,
+      email,
+    });
+
+    return res.json({
+      success: true,
+      jobKey: task.jobKey,
+      email: email || null,
+      message: "付款调试任务已启动，请查看下方运行日志",
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.get("/api/admin/checkout/status/:jobKey", async (req, res) => {
   try {
     await ensureStoreReady();
@@ -3185,7 +3460,7 @@ app.delete("/api/admin/cards/:id", requireSecondaryAuth, async (req, res) => {
 
 // ─── Proxy Pool CRUD API ────────────────────────────────────────────────────
 
-app.get("/api/admin/proxies", async (req, res) => {
+app.get("/api/admin/proxies", authenticateAdmin, async (req, res) => {
   try {
     await ensureStoreReady();
     const proxies = await store.listProxyAssets();
@@ -3195,7 +3470,7 @@ app.get("/api/admin/proxies", async (req, res) => {
   }
 });
 
-app.post("/api/admin/proxies", async (req, res) => {
+app.post("/api/admin/proxies", authenticateAdmin, async (req, res) => {
   try {
     await ensureStoreReady();
     const input =
@@ -3224,13 +3499,22 @@ app.put("/api/admin/proxies/:id", async (req, res) => {
       }
       return res.json(result);
     }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "proxy_url")) {
+      const result = await store.updateProxyAsset(id, req.body.proxy_url);
+      if (!result.success) {
+        return res
+          .status(result.error === "代理不存在" ? 404 : 400)
+          .json(result);
+      }
+      return res.json(result);
+    }
     return res.status(400).json({ success: false, error: "缺少可更新字段" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-app.post("/api/admin/proxies/:id/test", async (req, res) => {
+app.post("/api/admin/proxies/:id/test", authenticateAdmin, async (req, res) => {
   try {
     await ensureStoreReady();
     const row = await store.getProxyAssetById(req.params.id);
@@ -3245,7 +3529,7 @@ app.post("/api/admin/proxies/:id/test", async (req, res) => {
   }
 });
 
-app.delete("/api/admin/proxies/:id", async (req, res) => {
+app.delete("/api/admin/proxies/:id", authenticateAdmin, async (req, res) => {
   try {
     await ensureStoreReady();
     const result = await store.deleteProxyAsset(req.params.id);
@@ -3348,8 +3632,10 @@ app.post("/api/admin/change-password", async (req, res) => {
     return res.status(400).json({ success: false, message: "请输入原密码" });
   }
 
-  if (newPassword.length < 6) {
-    return res.status(400).json({ success: false, message: "新密码至少 6 位" });
+  if (newPassword.length < 12) {
+    return res
+      .status(400)
+      .json({ success: false, message: "新密码至少 12 位" });
   }
 
   try {
@@ -3540,6 +3826,10 @@ app.delete("/api/admin/billing/:id", async (req, res) => {
 
 async function syncBrowserPoolModeFromStore() {
   const enabled = await store.getBrowserPoolEnabled();
+  const savedSize = await store.getBrowserPoolSize();
+  if (savedSize != null) {
+    browserPool.setRuntimePoolSize(savedSize);
+  }
   browserPool.setRuntimeEnabled(enabled);
   if (!enabled) {
     await browserPool.shutdownBrowserPool().catch(() => {});
@@ -3664,6 +3954,104 @@ function spawnCheckoutDebugWorker({
   })();
 }
 
+function spawnCheckoutPaymentWorker({
+  task,
+  token,
+  sessionRaw,
+  planType,
+  region,
+  planNameOverride,
+  email,
+}) {
+  (async () => {
+    const checkoutScript = path.join(__dirname, "index.js");
+    try {
+      const proxy = await store.getActiveProxy();
+      const hcaptchaCfg = await store.getHcaptchaConfig();
+      const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
+      const runtimeEnv = {
+        ...process.env,
+        ...hcaptchaEnv,
+        CHECKOUT_MODE: "api",
+        CHATGPT_TOKEN: token,
+        CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
+          ? sessionRaw
+          : "",
+        CDK_CODE: "",
+        CDK_PLAN_TYPE: planType,
+        PAYMENT_REGION_OVERRIDE: region,
+        PLAN_NAME_OVERRIDE: planNameOverride || "",
+        ACTIVATION_EMAIL: email || "",
+        PROXY: proxy,
+      };
+
+      logTask(
+        task.jobKey,
+        `启动付款调试 Playwright 浏览器 proxy=${proxy ? "yes" : "no"}`,
+      );
+      const run = await spawnWorkerWithBrowser({
+        jobKey: task.jobKey,
+        runtimeEnv,
+        runScript: (workerEnv) =>
+          runCheckoutScript(
+            task.jobKey,
+            checkoutScript,
+            workerEnv,
+            1,
+            async (progress) => {
+              if (progress > 0) {
+                await store.updateTaskLog(task.jobKey, {
+                  status: "running",
+                  message: "付款调试进行中...",
+                  progress: Math.min(progress, 99),
+                });
+              }
+            },
+          ),
+      });
+
+      const analysis = analyzeProcessOutput(run.output, run.timedOut);
+      const finalStatus =
+        analysis.status === "retry" ? "failed" : analysis.status || "failed";
+      const taskMedia = extractTaskMediaFromOutput(run.output);
+      const cardLast4 = extractCardLast4FromOutput(run.output);
+      const finalProgress =
+        finalStatus === "success"
+          ? 100
+          : Math.min(getCheckoutProgress(run.output, finalStatus), 99);
+
+      await store.updateTaskLog(task.jobKey, {
+        status: finalStatus,
+        message: analysis.message || "付款调试失败",
+        rawOutput: run.output,
+        progress: finalProgress,
+        cardLast4,
+        failureScreenshots: [...taskMedia.screenshots, ...taskMedia.videos],
+      });
+      logTask(
+        task.jobKey,
+        `付款调试结束 status=${finalStatus} card=${cardLast4 || "-"}`,
+      );
+    } catch (error) {
+      console.error(`[Checkout Payment Debug] ${task.jobKey}:`, error);
+      logTask(task.jobKey, `付款调试任务异常: ${error.message}`, "error");
+      await store.updateTaskLog(task.jobKey, {
+        status: "failed",
+        message: error.message,
+        progress: 0,
+      });
+    } finally {
+      releaseForegroundSlot(task.jobKey);
+      if (getTotalActiveJobs() === 0) {
+        const maintenanceModeState = await store.getMaintenanceModeState();
+        if (maintenanceModeState.enabled && maintenanceModeState.drain) {
+          await store.setMaintenanceModeState(true, false);
+        }
+      }
+    }
+  })();
+}
+
 /**
  * 第三方 GPT 代充 API 任务 Worker（协议见 协议api.md）
  *
@@ -3746,7 +4134,7 @@ async function runGptApiWorker({ task, token, session, cdk, planType }) {
     }
     logTask(
       jobKey,
-      "Session 本機格式／有效期檢查通過；上游將於代充任務中驗證登入狀態",
+      "Session 本机格式／有效期检查通过；上游将在代充任务中验证登录状态",
     );
 
     const proxy = await store.getActiveProxy();

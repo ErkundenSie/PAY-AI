@@ -4,27 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OAI充值系统 | 控制台</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=3" />
     <link
-      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-      /* ============================================================
-         * Enterprise Blue SaaS Theme — 后台控制台
-         * ============================================================ */
+      /* DESIGN.md — 简约中文 SaaS 后台 */
       :root {
-        --sidebar-width: 260px;
-
-        /* 主色 */
+        --sidebar-width: 224px;
+        --sidebar-collapsed-width: 76px;
         --primary: #2563eb;
         --primary-hover: #1d4ed8;
         --primary-soft: #eff6ff;
-        --accent: #2563eb;
-        --accent-glow: rgba(37, 99, 235, 0.18);
-
-        /* 中性色 */
+        --accent: #0ea5e9;
         --bg-page: #f4f7fb;
         --bg-dark: #f4f7fb;
         --sidebar-bg: #ffffff;
@@ -35,14 +29,10 @@
         --glass-border: #e5e7eb;
         --border-strong: #cbd5e1;
         --divider: #eef2f7;
-
-        /* 文本 */
         --text-main: #0f172a;
         --text-secondary: #334155;
         --text-dim: #64748b;
         --text-muted: #94a3b8;
-
-        /* 状态色 */
         --success: #10b981;
         --success-soft: #ecfdf5;
         --error: #ef4444;
@@ -51,33 +41,43 @@
         --warning-soft: #fffbeb;
         --info: #0ea5e9;
         --info-soft: #f0f9ff;
-
-        /* 阴影 */
+        --on-primary: #ffffff;
+        --radius-sm: 6px;
+        --radius-md: 8px;
+        --radius-lg: 10px;
+        --radius-pill: 999px;
+        --space-xs: 4px;
+        --space-sm: 8px;
+        --space-md: 12px;
+        --space-lg: 16px;
+        --space-xl: 24px;
+        --space-xxl: 32px;
+        --action-gap: var(--space-sm);
+        --action-compact-gap: 6px;
         --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
         --shadow:
           0 4px 16px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
         --shadow-lg:
           0 12px 32px rgba(15, 23, 42, 0.1), 0 4px 12px rgba(15, 23, 42, 0.05);
         --shadow-focus: 0 0 0 4px rgba(37, 99, 235, 0.14);
+        --font-sans:
+          "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+        --font-mono: "SFMono-Regular", "Cascadia Code", Consolas, monospace;
       }
 
       * {
         margin: 0;
         padding: 0;
         box-sizing: border-box;
-        font-family:
-          "Outfit",
-          -apple-system,
-          BlinkMacSystemFont,
-          "Segoe UI",
-          "PingFang SC",
-          "Microsoft YaHei",
-          sans-serif;
+        font-family: var(--font-sans);
       }
 
       html,
       body {
         font-size: 14px;
+        line-height: 1.5;
+        font-family: var(--font-sans);
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
       }
@@ -91,24 +91,6 @@
         overflow: hidden;
       }
 
-      .bg-glow {
-        position: fixed;
-        inset: 0;
-        z-index: -1;
-        background:
-          radial-gradient(
-            circle at 0% 0%,
-            rgba(37, 99, 235, 0.06) 0%,
-            transparent 45%
-          ),
-          radial-gradient(
-            circle at 100% 100%,
-            rgba(14, 165, 233, 0.05) 0%,
-            transparent 45%
-          );
-        pointer-events: none;
-      }
-
       /* ============ 侧边栏 ============ */
       .sidebar {
         width: var(--sidebar-width);
@@ -119,6 +101,11 @@
         padding: 28px 18px;
         z-index: 10;
         overflow-y: auto;
+        flex-shrink: 0;
+        position: relative;
+        transition:
+          width 0.2s ease,
+          padding 0.2s ease;
       }
 
       .sidebar-brand {
@@ -130,14 +117,17 @@
       }
 
       .brand-logo {
-        width: 38px;
-        height: 38px;
-        background: linear-gradient(135deg, var(--primary), #3b82f6);
-        border-radius: 10px;
+        width: 32px;
+        height: 32px;
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 6px 14px var(--accent-glow);
+      }
+
+      .brand-logo img {
+        display: block;
+        width: 32px;
+        height: 32px;
       }
 
       .brand-name {
@@ -145,9 +135,47 @@
         font-weight: 700;
         letter-spacing: -0.2px;
         color: var(--text-main);
-        background: none;
-        -webkit-background-clip: initial;
-        -webkit-text-fill-color: var(--text-main);
+      }
+
+      .sidebar-toggle {
+        position: absolute;
+        top: 50%;
+        right: 6px;
+        display: inline-flex;
+        width: 28px;
+        height: 28px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        color: var(--text-dim);
+        box-shadow: var(--shadow-sm);
+        cursor: pointer;
+        z-index: 2;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-50%);
+        transition:
+          border-color 0.18s ease,
+          color 0.18s ease,
+          opacity 0.18s ease;
+      }
+
+      .sidebar:hover .sidebar-toggle,
+      .sidebar-toggle:focus-visible {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .sidebar-toggle:hover {
+        border-color: var(--primary);
+        color: var(--primary);
+      }
+
+      .sidebar-toggle i {
+        width: 16px;
+        height: 16px;
       }
 
       .nav-menu {
@@ -162,7 +190,7 @@
         align-items: center;
         gap: 12px;
         padding: 10px 14px;
-        border-radius: 10px;
+        border-radius: var(--radius-md);
         color: var(--text-secondary);
         text-decoration: none;
         cursor: pointer;
@@ -176,13 +204,11 @@
       .nav-item:hover {
         background: var(--primary-soft);
         color: var(--primary);
-        transform: none;
       }
 
       .nav-item.active {
         background: var(--primary);
-        color: #ffffff;
-        box-shadow: 0 4px 10px var(--accent-glow);
+        color: var(--on-primary);
         font-weight: 600;
       }
 
@@ -191,48 +217,32 @@
         height: 18px;
       }
 
-      .nav-group {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-
-      .nav-group-toggle {
-        justify-content: flex-start;
-      }
-
-      .nav-group-toggle .nav-chevron {
-        width: 16px;
-        height: 16px;
-        margin-left: auto;
-        transition: transform 0.2s ease;
-      }
-
-      .nav-group.expanded .nav-group-toggle .nav-chevron {
-        transform: rotate(180deg);
-      }
-
-      .nav-subitems {
-        display: none;
-        flex-direction: column;
-        gap: 2px;
-        padding-left: 10px;
-        margin-top: 2px;
-      }
-
-      .nav-group.expanded .nav-subitems {
-        display: flex;
-      }
-
-      .nav-subitem {
-        padding: 8px 14px 8px 38px;
-        font-size: 13px;
-      }
-
       .sidebar-footer {
         margin-top: auto;
         padding-top: 16px;
         border-top: 1px solid var(--glass-border);
+      }
+
+      .sidebar.collapsed {
+        width: var(--sidebar-collapsed-width);
+        padding-right: 12px;
+        padding-left: 12px;
+      }
+
+      .sidebar.collapsed .sidebar-brand {
+        justify-content: center;
+        padding: 0;
+      }
+
+      .sidebar.collapsed .brand-name,
+      .sidebar.collapsed .nav-item span {
+        display: none;
+      }
+
+      .sidebar.collapsed .nav-item {
+        justify-content: center;
+        padding-right: 10px;
+        padding-left: 10px;
       }
 
       /* ============ 主体内容 ============ */
@@ -249,29 +259,12 @@
         margin: 0 auto;
       }
 
-      #logs.page-view,
-      #system_logs.page-view {
-        max-width: none;
-      }
-
       .page-view.active {
         display: block;
-        animation: slideIn 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-      }
-
-      @keyframes slideIn {
-        from {
-          opacity: 0;
-          transform: translateY(12px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
       }
 
       .page-header {
-        margin-bottom: 28px;
+        margin-bottom: var(--space-xl);
       }
 
       .page-tabs {
@@ -279,7 +272,7 @@
         gap: 4px;
         background: var(--surface-soft, #f8fafc);
         padding: 4px;
-        border-radius: 10px;
+        border-radius: var(--radius-md);
         margin-bottom: 16px;
         border: 1px solid var(--divider);
         width: fit-content;
@@ -290,7 +283,7 @@
         background: transparent;
         color: var(--text-dim);
         padding: 8px 14px;
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         font-size: 13px;
         font-weight: 600;
         cursor: pointer;
@@ -322,6 +315,7 @@
       .page-header h1 {
         font-size: 24px;
         font-weight: 700;
+        line-height: 1.25;
         margin-bottom: 6px;
         color: var(--text-main);
         letter-spacing: -0.3px;
@@ -335,30 +329,28 @@
       /* ============ 统计卡片 ============ */
       .stat-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 16px;
-        margin-bottom: 32px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--space-lg);
+        margin-bottom: var(--space-xxl);
       }
 
       .stat-card {
         background: var(--card-bg);
         border: 1px solid var(--glass-border);
-        border-radius: 14px;
+        border-radius: var(--radius-lg);
         padding: 20px;
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: var(--space-md);
         transition:
           border-color 0.2s,
-          box-shadow 0.2s,
-          transform 0.2s;
+          box-shadow 0.2s;
         box-shadow: var(--shadow-sm);
       }
 
       .stat-card:hover {
-        border-color: #cbd5e1;
+        border-color: var(--border-strong);
         box-shadow: var(--shadow);
-        transform: translateY(-2px);
       }
 
       .stat-header {
@@ -370,7 +362,7 @@
       .stat-icon {
         width: 40px;
         height: 40px;
-        border-radius: 10px;
+        border-radius: var(--radius-md);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -380,6 +372,7 @@
         font-size: 13px;
         color: var(--text-dim);
         font-weight: 600;
+        line-height: 1.35;
       }
 
       .stat-value {
@@ -387,15 +380,247 @@
         font-weight: 700;
         color: var(--text-main);
         line-height: 1.1;
+        font-variant-numeric: tabular-nums;
+      }
+
+      #dashboard .stat-card {
+        position: relative;
+      }
+
+      #dashboard.active {
+        display: grid;
+        gap: var(--space-lg);
+      }
+
+      #dashboard .page-header,
+      #dashboard .stat-grid,
+      #dashboard .panel {
+        margin-bottom: 0;
+      }
+
+      #dashboard .stat-card .stat-header {
+        margin-bottom: 2px;
+      }
+
+      #dashboard .stat-card .stat-icon {
+        width: 32px;
+        height: 32px;
+        border-radius: var(--radius-sm);
+        background: var(--primary-soft);
+        color: var(--primary);
+      }
+
+      #dashboard .stat-card .stat-icon i {
+        width: 16px;
+        height: 16px;
+      }
+
+      .dashboard-primary-stats {
+        margin-bottom: 0;
+      }
+
+      .dashboard-business-panel {
+        margin-top: 0;
+      }
+
+      .dashboard-business-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: var(--space-lg);
+      }
+
+      .dashboard-business-grid .stat-card {
+        padding: 16px;
+        gap: var(--space-sm);
+      }
+
+      #dashboard #stat_success,
+      #dashboard #stat_billing_revenue {
+        color: #047857;
+      }
+
+      #dashboard #stat_failed {
+        color: #b91c1c;
+      }
+
+      .dashboard-insights {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-lg);
+      }
+
+      .dashboard-chart-panel {
+        min-height: 190px;
+      }
+
+      .dashboard-task-track {
+        display: flex;
+        height: 12px;
+        overflow: hidden;
+        border-radius: var(--radius-pill);
+        background: var(--surface-hover);
+        margin: 24px 0 18px;
+      }
+
+      .dashboard-task-segment {
+        min-width: 0;
+        transition: width 0.2s ease;
+      }
+
+      .dashboard-task-success {
+        background: var(--success);
+      }
+
+      .dashboard-task-running {
+        background: var(--primary);
+      }
+
+      .dashboard-task-failed {
+        background: var(--error);
+      }
+
+      .dashboard-chart-legend {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-sm);
+      }
+
+      .dashboard-chart-legend-item {
+        display: grid;
+        gap: 2px;
+        font-size: 12px;
+        color: var(--text-dim);
+      }
+
+      .dashboard-chart-legend-value {
+        color: var(--text-main);
+        font-size: 18px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .dashboard-resource-list {
+        display: grid;
+        gap: 18px;
+        margin-top: 18px;
+      }
+
+      .dashboard-resource-row {
+        display: grid;
+        grid-template-columns: 48px minmax(0, 1fr) 42px;
+        align-items: center;
+        gap: var(--space-sm);
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+
+      .dashboard-resource-track {
+        height: 8px;
+        overflow: hidden;
+        border-radius: var(--radius-pill);
+        background: var(--surface-hover);
+      }
+
+      .dashboard-resource-fill {
+        width: 0;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--primary);
+        transition: width 0.2s ease;
+      }
+
+      .dashboard-resource-fill.warning {
+        background: var(--warning);
+      }
+
+      .dashboard-resource-fill.danger {
+        background: var(--error);
+      }
+
+      #browser_pool_summary_stats {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      #browser_pool_summary_stats .stat-card {
+        min-width: 0;
+        padding: 16px;
+        gap: 10px;
+      }
+
+      .browser-pool-config-hint {
+        margin-top: 12px;
+        color: var(--text-dim);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .browser-pool-config-row {
+        display: flex;
+        align-items: center;
+        gap: var(--action-gap);
+        flex-wrap: wrap;
+      }
+
+      .browser-pool-size-field {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-sm);
+        min-height: 38px;
+        margin: 0;
+        white-space: nowrap;
+      }
+
+      .browser-pool-size-field .asset-input {
+        width: 120px;
+        min-height: 38px;
+        padding-top: 0;
+        padding-bottom: 0;
+      }
+
+      .browser-pool-reload-hint {
+        align-self: center;
+        font-size: 13px;
+        color: var(--text-dim);
+      }
+
+      @media (max-width: 1100px) {
+        #browser_pool_summary_stats,
+        .stat-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .dashboard-business-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .browser-pool-config-hint {
+          white-space: normal;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .stat-grid,
+        #browser_pool_summary_stats {
+          grid-template-columns: 1fr;
+        }
+
+        .dashboard-insights {
+          grid-template-columns: 1fr;
+        }
+
+        .dashboard-business-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
 
       /* ============ 面板 ============ */
       .panel {
         background: var(--card-bg);
         border: 1px solid var(--glass-border);
-        border-radius: 14px;
-        padding: 24px 28px;
-        margin-bottom: 20px;
+        border-radius: var(--radius-lg);
+        padding: var(--space-xl);
+        margin-bottom: var(--space-xl);
         box-shadow: var(--shadow-sm);
       }
 
@@ -410,7 +635,8 @@
 
       .panel-title {
         font-size: 16px;
-        font-weight: 700;
+        font-weight: 600;
+        line-height: 1.35;
         color: var(--text-main);
         display: flex;
         align-items: center;
@@ -457,7 +683,7 @@
         align-items: flex-start;
         gap: 14px;
         border: 1px solid var(--divider);
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
         padding: 14px 16px;
         background: var(--surface-soft);
         cursor: pointer;
@@ -523,12 +749,7 @@
         width: 100%;
         overflow-x: auto;
         border: 1px solid var(--divider);
-        border-radius: 10px;
-      }
-
-      #logs .table-container,
-      #system_logs .table-container {
-        overflow-x: hidden;
+        border-radius: var(--radius-md);
       }
 
       .task-log-table,
@@ -563,11 +784,11 @@
       }
 
       .task-log-table .col-media {
-        width: 104px;
+        width: 132px;
       }
 
       .task-log-table .col-action {
-        width: 72px;
+        width: 112px;
       }
 
       .task-log-table .col-cdk code,
@@ -576,6 +797,45 @@
         max-width: 100%;
         white-space: normal;
         word-break: break-all;
+      }
+
+      #logs .task-log-table td {
+        vertical-align: middle;
+      }
+
+      #logs .task-log-table .col-media,
+      #logs .task-log-table .col-action {
+        white-space: nowrap;
+      }
+
+      .task-media-actions,
+      .task-action-buttons {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        min-height: 32px;
+      }
+
+      .task-media-actions .btn,
+      .task-action-buttons .btn,
+      .task-action-buttons .btn-delete {
+        height: 32px;
+        margin: 0;
+        padding: 0 10px;
+        border-radius: 7px;
+        font-size: 12px;
+        line-height: 1;
+        white-space: nowrap;
+      }
+
+      .task-action-buttons .btn-delete {
+        width: 32px;
+        min-width: 32px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
       }
 
       .task-log-info {
@@ -609,7 +869,7 @@
       .pagination button {
         min-width: 36px;
         padding: 7px 12px;
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         border: 1px solid var(--glass-border);
         background: var(--surface);
         color: var(--text-secondary);
@@ -642,8 +902,7 @@
       .pagination button.active {
         background: var(--primary);
         border-color: var(--primary);
-        color: #ffffff;
-        box-shadow: 0 2px 6px var(--accent-glow);
+        color: var(--on-primary);
       }
 
       .pagination span {
@@ -721,7 +980,7 @@
         width: 100%;
         background: var(--surface);
         border: 1px solid var(--glass-border);
-        border-radius: 10px;
+        border-radius: var(--radius-md);
         padding: 10px 14px;
         color: var(--text-main);
         font-size: 14px;
@@ -773,15 +1032,16 @@
 
       /* 通用按钮 */
       .btn {
-        padding: 9px 18px;
-        border-radius: 10px;
+        height: 38px;
+        min-height: 38px;
+        padding: 0 16px;
+        border-radius: var(--radius-md);
         font-weight: 600;
         font-size: 13px;
         cursor: pointer;
         transition:
           background 0.18s,
-          box-shadow 0.18s,
-          transform 0.1s;
+          box-shadow 0.18s;
         border: 1px solid transparent;
         display: inline-flex;
         align-items: center;
@@ -789,10 +1049,6 @@
         font-family: inherit;
         line-height: 1.3;
         white-space: nowrap;
-      }
-
-      .btn:active {
-        transform: scale(0.98);
       }
 
       .btn:disabled {
@@ -811,7 +1067,7 @@
         margin-bottom: 20px;
         padding: 20px;
         border: 1px solid var(--glass-border);
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
         background: var(--surface-soft);
       }
 
@@ -868,7 +1124,7 @@
         display: flex;
         align-items: center;
         justify-content: flex-end;
-        gap: 10px;
+        gap: var(--action-gap);
         margin-top: 14px;
         flex-wrap: wrap;
       }
@@ -876,19 +1132,15 @@
       /* 主按钮 */
       .btn-primary {
         background: var(--primary);
-        color: #ffffff;
-        box-shadow: 0 1px 2px rgba(37, 99, 235, 0.16);
+        color: var(--on-primary);
         border-color: var(--primary);
       }
 
       .btn-primary:hover:not(:disabled) {
         background: var(--primary-hover);
         border-color: var(--primary-hover);
-        box-shadow: 0 4px 12px var(--accent-glow);
-        transform: none;
       }
 
-      /* 次要按钮（白底灰边） */
       .btn-secondary {
         background: var(--surface);
         color: var(--text-secondary);
@@ -929,7 +1181,10 @@
       .btn-delete {
         width: 32px;
         height: 32px;
-        border-radius: 8px;
+        min-width: 32px;
+        min-height: 32px;
+        padding: 0;
+        border-radius: var(--radius-sm);
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -955,10 +1210,10 @@
       .btn.btn-delete {
         width: auto;
         min-width: auto;
-        height: auto;
+        height: 38px;
         min-height: 38px;
-        border-radius: 10px;
-        padding: 9px 16px;
+        border-radius: var(--radius-md);
+        padding: 0 16px;
         gap: 6px;
         font-weight: 600;
         font-size: 13px;
@@ -1127,7 +1382,7 @@
       /* 批量操作栏 */
       .batch-actions {
         display: flex;
-        gap: 8px;
+        gap: var(--action-gap);
         flex-wrap: wrap;
         margin: 0 0 14px;
       }
@@ -1341,7 +1596,7 @@
       /* 状态徽标 */
       .status-badge {
         padding: 4px 10px;
-        border-radius: 6px;
+        border-radius: var(--radius-pill);
         font-size: 11px;
         font-weight: 600;
         display: inline-flex;
@@ -1377,7 +1632,7 @@
       .screenshot-modal-overlay {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.72);
+        background: rgba(15, 23, 42, 0.42);
         display: none;
         align-items: center;
         justify-content: center;
@@ -1393,10 +1648,11 @@
         width: min(1100px, 96vw);
         max-height: 92vh;
         overflow: auto;
-        background: var(--panel-bg, #111827);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 16px;
+        background: var(--surface);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius-lg);
         padding: 20px;
+        box-shadow: var(--shadow-lg);
       }
 
       .screenshot-modal-header {
@@ -1409,18 +1665,18 @@
 
       .screenshot-modal-body img {
         width: 100%;
-        border-radius: 10px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--glass-border);
         margin-bottom: 16px;
-        background: #000;
+        background: var(--surface-soft);
       }
 
       .session-modal-pre {
         margin: 0;
         padding: 14px;
-        border-radius: 10px;
-        background: rgba(0, 0, 0, 0.35);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: var(--radius-md);
+        background: var(--surface-soft);
+        border: 1px solid var(--glass-border);
         max-height: 60vh;
         overflow: auto;
         font-size: 12px;
@@ -1437,11 +1693,30 @@
         text-underline-offset: 2px;
       }
 
+      .proxy-edit-modal {
+        width: min(680px, 96vw);
+        background: var(--surface);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius-lg);
+        padding: 20px;
+        box-shadow: var(--shadow-lg);
+      }
+
+      .proxy-edit-modal textarea {
+        width: 100%;
+        min-height: 112px;
+        resize: vertical;
+      }
+
       .table-action-group {
         display: inline-flex;
-        gap: 6px;
+        gap: var(--action-compact-gap);
         flex-wrap: wrap;
         justify-content: center;
+      }
+
+      #logs .table-action-group {
+        flex-wrap: nowrap;
       }
 
       code {
@@ -1775,18 +2050,30 @@
       .runtime-log-toggle {
         display: inline-flex;
         align-items: center;
-        gap: 8px;
+        justify-content: center;
+        height: 38px;
+        min-height: 38px;
+        padding: 0 16px;
+        gap: 6px;
         font-size: 13px;
         color: var(--text-secondary);
-        font-weight: 500;
+        font-weight: 600;
+        line-height: 1;
         cursor: pointer;
+        box-sizing: border-box;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        flex-shrink: 0;
         -webkit-user-select: none;
         user-select: none;
       }
 
       .runtime-log-toggle input {
-        width: 16px;
-        height: 16px;
+        width: 14px;
+        height: 14px;
+        margin: 0;
+        flex-shrink: 0;
         accent-color: var(--primary);
         cursor: pointer;
       }
@@ -1834,22 +2121,70 @@
 
       /* 工具栏内按钮统一高度（避免 btn-primary / btn-delete 混用高度不一致） */
       .runtime-log-toolbar .btn,
-      .log-page-toolbar .btn {
+      .log-page-toolbar .btn,
+      .checkout-debug-log-toolbar .btn {
         min-height: 38px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: 6px;
-        padding: 9px 16px;
+        gap: var(--action-compact-gap);
+        padding: 0 16px;
         box-sizing: border-box;
         box-shadow: none;
         flex-shrink: 0;
       }
 
       .runtime-log-toolbar .btn i,
-      .log-page-toolbar .btn i {
-        width: 16px;
-        height: 16px;
+      .log-page-toolbar .btn i,
+      .checkout-debug-log-toolbar .btn i {
+        width: 14px;
+        height: 14px;
+      }
+
+      .checkout-debug-log-toolbar {
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-md);
+        margin-bottom: 8px;
+      }
+
+      .runtime-log-actions {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        flex-wrap: nowrap;
+        gap: var(--action-gap);
+        margin-left: auto;
+      }
+
+      .checkout-debug-log-meta {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: var(--space-md);
+        margin: 0 0 12px;
+      }
+
+      .checkout-debug-log-hint {
+        font-size: 12px;
+        color: var(--text-dim);
+        margin: 0;
+        line-height: 1;
+        padding-bottom: 0;
+      }
+
+      @media (max-width: 760px) {
+        .checkout-debug-log-toolbar {
+          align-items: flex-start;
+        }
+
+        .runtime-log-actions {
+          width: 100%;
+          justify-content: flex-start;
+          margin-left: 0;
+          flex-wrap: wrap;
+        }
       }
 
       /* 与控制台风格统一的确认框（替代原生 confirm） */
@@ -1862,8 +2197,6 @@
         justify-content: center;
         padding: 24px;
         background: rgba(15, 23, 42, 0.42);
-        backdrop-filter: blur(5px);
-        -webkit-backdrop-filter: blur(5px);
       }
 
       .admin-confirm-overlay.is-open {
@@ -1899,14 +2232,13 @@
       .admin-confirm-actions {
         display: flex;
         justify-content: flex-end;
-        gap: 10px;
+        gap: var(--action-gap);
         flex-wrap: wrap;
       }
     </style>
   </head>
 
   <body>
-    <div class="bg-glow"></div>
     <div id="message_container" class="message-container"></div>
 
     <div
@@ -2018,22 +2350,126 @@
       </div>
     </div>
 
+    <div
+      id="task_detail_modal_overlay"
+      class="screenshot-modal-overlay"
+      role="presentation"
+      onclick="if (event.target === this) closeTaskDetailModal();"
+    >
+      <div
+        class="screenshot-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="task_detail_modal_title"
+        onclick="event.stopPropagation()"
+      >
+        <div class="screenshot-modal-header">
+          <h3 id="task_detail_modal_title" style="margin: 0; font-size: 18px">
+            任务详情
+          </h3>
+          <button
+            type="button"
+            class="btn btn-success"
+            onclick="closeTaskDetailModal()"
+          >
+            关闭
+          </button>
+        </div>
+        <div
+          id="task_detail_modal_meta"
+          style="
+            display: grid;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 14px;
+          "
+        ></div>
+        <pre id="task_detail_modal_output" class="session-modal-pre"></pre>
+      </div>
+    </div>
+
+    <div
+      id="proxy_edit_modal_overlay"
+      class="screenshot-modal-overlay"
+      role="presentation"
+      onclick="if (event.target === this) closeProxyEditModal();"
+    >
+      <div
+        class="proxy-edit-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="proxy_edit_modal_title"
+        onclick="event.stopPropagation()"
+      >
+        <div class="screenshot-modal-header">
+          <h3 id="proxy_edit_modal_title" style="margin: 0; font-size: 18px">
+            编辑代理
+          </h3>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            onclick="closeProxyEditModal()"
+          >
+            取消
+          </button>
+        </div>
+        <label for="proxy_edit_input">代理 URL</label>
+        <textarea
+          id="proxy_edit_input"
+          class="asset-input"
+          spellcheck="false"
+        ></textarea>
+        <div class="admin-confirm-actions" style="margin-top: 16px">
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick="saveProxyEdit()"
+          >
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
+
     <aside class="sidebar">
       <div class="sidebar-brand">
         <div class="brand-logo">
-          <i data-lucide="zap" color="white" fill="white"></i>
+          <img src="/favicon.svg?v=3" alt="" />
         </div>
         <span class="brand-name">OAI充值系统</span>
       </div>
+      <button
+        id="sidebar_toggle"
+        class="sidebar-toggle"
+        type="button"
+        aria-label="收起菜单栏"
+        title="收起菜单栏"
+        onclick="toggleSidebar()"
+      >
+        <i data-lucide="chevron-left"></i>
+      </button>
 
       <nav class="nav-menu">
         <div class="nav-item active" onclick="switchPage('dashboard', this)">
           <i data-lucide="layout-dashboard"></i>
           <span>概览中心</span>
         </div>
-        <div class="nav-item" onclick="switchPage('config', this)">
-          <i data-lucide="settings"></i>
-          <span>系统配置</span>
+        <div
+          class="nav-item"
+          onclick="switchPage('cards', this)"
+          data-page="cards"
+        >
+          <i data-lucide="credit-card"></i>
+          <span>银行卡池</span>
+        </div>
+        <div
+          class="nav-item"
+          onclick="switchPage('tax_addresses', this)"
+          data-page="tax_addresses"
+        >
+          <i data-lucide="map-pin"></i>
+          <span>免税地址</span>
         </div>
         <div class="nav-item" onclick="switchPage('proxies', this)">
           <i data-lucide="globe"></i>
@@ -2045,61 +2481,20 @@
         </div>
         <div
           class="nav-item"
-          onclick="switchPage('tax_addresses', this)"
-          data-page="tax_addresses"
+          onclick="switchPage('checkout_debug', this)"
+          data-page="checkout_debug"
         >
-          <i data-lucide="map-pin"></i>
-          <span>免税地址</span>
+          <i data-lucide="link-2"></i>
+          <span>支付调试</span>
         </div>
-
-        <div class="nav-group" id="nav_group_business">
-          <div
-            class="nav-item nav-group-toggle"
-            onclick="toggleNavGroup('nav_group_business', event)"
-          >
-            <i data-lucide="layers"></i>
-            <span>支付与资产</span>
-            <i data-lucide="chevron-down" class="nav-chevron"></i>
-          </div>
-          <div class="nav-subitems">
-            <div
-              class="nav-item nav-subitem"
-              onclick="switchPage('checkout_debug', this)"
-              data-page="checkout_debug"
-            >
-              <span>支付链接调试</span>
-            </div>
-            <div
-              class="nav-item nav-subitem"
-              onclick="switchPage('cards', this)"
-              data-page="cards"
-            >
-              <span>银行卡池</span>
-            </div>
-            <div
-              class="nav-item nav-subitem"
-              onclick="switchPage('cdks', this)"
-              data-page="cdks"
-            >
-              <span>CDK 管理</span>
-            </div>
-            <div
-              class="nav-item nav-subitem"
-              onclick="switchPage('sessions', this)"
-              data-page="sessions"
-            >
-              <span>Session 管理</span>
-            </div>
-            <div
-              class="nav-item nav-subitem"
-              onclick="switchPage('billing', this)"
-              data-page="billing"
-            >
-              <span>账单记录</span>
-            </div>
-          </div>
+        <div
+          class="nav-item"
+          onclick="switchPage('billing', this)"
+          data-page="billing"
+        >
+          <i data-lucide="receipt"></i>
+          <span>账单记录</span>
         </div>
-
         <div
           class="nav-item"
           onclick="switchPage('cancel_renewal', this)"
@@ -2107,6 +2502,14 @@
         >
           <i data-lucide="circle-x"></i>
           <span>续费管理</span>
+        </div>
+        <div
+          class="nav-item"
+          onclick="switchPage('cdks', this)"
+          data-page="cdks"
+        >
+          <i data-lucide="ticket"></i>
+          <span>CDK 管理</span>
         </div>
         <div
           class="nav-item"
@@ -2123,6 +2526,10 @@
         >
           <i data-lucide="terminal"></i>
           <span>系统日志</span>
+        </div>
+        <div class="nav-item" onclick="switchPage('config', this)">
+          <i data-lucide="settings"></i>
+          <span>系统配置</span>
         </div>
       </nav>
 
@@ -2150,48 +2557,18 @@
           <p>实时监控任务执行状态与资源分配情况</p>
         </div>
 
-        <div class="stat-grid">
+        <div class="stat-grid dashboard-primary-stats">
           <div class="stat-card">
-            <div class="stat-header">
-              <span class="stat-label">CPU 占用率</span>
-              <div
-                class="stat-icon"
-                style="background: rgba(244, 114, 182, 0.1); color: #f472b6"
-              >
-                <i data-lucide="cpu"></i>
-              </div>
-            </div>
-            <div
-              id="stat_cpu_percent"
-              class="stat-value"
-              style="color: #f9a8d4"
-            >
-              0%
-            </div>
+            <span class="stat-label">CPU 占用率</span>
+            <div id="stat_cpu_percent" class="stat-value">0%</div>
             <div
               id="stat_cpu_meta"
               style="font-size: 13px; color: var(--text-dim)"
-            >
-              实时 CPU 使用率
-            </div>
+            ></div>
           </div>
           <div class="stat-card">
-            <div class="stat-header">
-              <span class="stat-label">内存占用率</span>
-              <div
-                class="stat-icon"
-                style="background: rgba(34, 197, 94, 0.1); color: #4ade80"
-              >
-                <i data-lucide="memory-stick"></i>
-              </div>
-            </div>
-            <div
-              id="stat_memory_percent"
-              class="stat-value"
-              style="color: #86efac"
-            >
-              0%
-            </div>
+            <span class="stat-label">内存占用率</span>
+            <div id="stat_memory_percent" class="stat-value">0%</div>
             <div
               id="stat_memory_meta"
               style="font-size: 13px; color: var(--text-dim)"
@@ -2200,22 +2577,8 @@
             </div>
           </div>
           <div class="stat-card">
-            <div class="stat-header">
-              <span class="stat-label">硬盘占用率</span>
-              <div
-                class="stat-icon"
-                style="background: rgba(251, 191, 36, 0.1); color: #fbbf24"
-              >
-                <i data-lucide="hard-drive"></i>
-              </div>
-            </div>
-            <div
-              id="stat_disk_percent"
-              class="stat-value"
-              style="color: #fde68a"
-            >
-              0%
-            </div>
+            <span class="stat-label">硬盘占用率</span>
+            <div id="stat_disk_percent" class="stat-value">0%</div>
             <div
               id="stat_disk_meta"
               style="font-size: 13px; color: var(--text-dim)"
@@ -2224,213 +2587,140 @@
             </div>
           </div>
           <div class="stat-card">
-            <div class="stat-header">
-              <span class="stat-label">运行时间</span>
-              <div
-                class="stat-icon"
-                style="background: rgba(45, 212, 191, 0.1); color: #5eead4"
-              >
-                <i data-lucide="timer"></i>
+            <span class="stat-label">运行时间</span>
+            <div id="stat_uptime_text" class="stat-value">0秒</div>
+          </div>
+        </div>
+
+        <div class="dashboard-insights">
+          <div class="panel dashboard-chart-panel">
+            <h2 class="panel-title">任务状态</h2>
+            <div class="dashboard-task-track" aria-label="任务状态分布">
+              <span
+                id="dashboard_task_success_bar"
+                class="dashboard-task-segment dashboard-task-success"
+              ></span>
+              <span
+                id="dashboard_task_running_bar"
+                class="dashboard-task-segment dashboard-task-running"
+              ></span>
+              <span
+                id="dashboard_task_failed_bar"
+                class="dashboard-task-segment dashboard-task-failed"
+              ></span>
+            </div>
+            <div class="dashboard-chart-legend">
+              <div class="dashboard-chart-legend-item">
+                <span>成功</span>
+                <strong
+                  id="dashboard_task_success"
+                  class="dashboard-chart-legend-value"
+                  >0</strong
+                >
+              </div>
+              <div class="dashboard-chart-legend-item">
+                <span>进行中</span>
+                <strong
+                  id="dashboard_task_running"
+                  class="dashboard-chart-legend-value"
+                  >0</strong
+                >
+              </div>
+              <div class="dashboard-chart-legend-item">
+                <span>失败</span>
+                <strong
+                  id="dashboard_task_failed"
+                  class="dashboard-chart-legend-value"
+                  >0</strong
+                >
               </div>
             </div>
-            <div
-              id="stat_uptime_text"
-              class="stat-value"
-              style="color: #99f6e4; font-size: 28px"
-            >
-              0秒
-            </div>
-            <div
-              id="stat_uptime_meta"
-              style="font-size: 13px; color: var(--text-dim)"
-            >
-              服务持续运行时间
+          </div>
+          <div class="panel dashboard-chart-panel">
+            <h2 class="panel-title">系统资源</h2>
+            <div class="dashboard-resource-list">
+              <div class="dashboard-resource-row">
+                <span>CPU</span>
+                <div class="dashboard-resource-track">
+                  <div
+                    id="dashboard_cpu_bar"
+                    class="dashboard-resource-fill"
+                  ></div>
+                </div>
+                <strong id="dashboard_cpu_value">0%</strong>
+              </div>
+              <div class="dashboard-resource-row">
+                <span>内存</span>
+                <div class="dashboard-resource-track">
+                  <div
+                    id="dashboard_memory_bar"
+                    class="dashboard-resource-fill"
+                  ></div>
+                </div>
+                <strong id="dashboard_memory_value">0%</strong>
+              </div>
+              <div class="dashboard-resource-row">
+                <span>硬盘</span>
+                <div class="dashboard-resource-track">
+                  <div
+                    id="dashboard_disk_bar"
+                    class="dashboard-resource-fill"
+                  ></div>
+                </div>
+                <strong id="dashboard_disk_value">0%</strong>
+              </div>
             </div>
           </div>
-          <div class="stat-card">
-            <div class="stat-header">
+        </div>
+
+        <div class="panel dashboard-business-panel">
+          <div class="panel-header">
+            <h2 class="panel-title">业务概览</h2>
+          </div>
+          <div class="dashboard-business-grid">
+            <div class="stat-card">
               <span class="stat-label">总任务量</span>
-              <div
-                class="stat-icon"
-                style="
-                  background: rgba(99, 102, 241, 0.1);
-                  color: var(--accent);
-                "
-              >
-                <i data-lucide="activity"></i>
-              </div>
+              <div id="stat_total" class="stat-value">0</div>
             </div>
-            <div id="stat_total" class="stat-value">0</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">
+            <div class="stat-card">
               <span class="stat-label">成功任务</span>
-              <div
-                class="stat-icon"
-                style="
-                  background: rgba(16, 185, 129, 0.1);
-                  color: var(--success);
-                "
-              >
-                <i data-lucide="check-circle"></i>
-              </div>
+              <div id="stat_success" class="stat-value">0</div>
             </div>
-            <div
-              id="stat_success"
-              class="stat-value"
-              style="color: var(--success)"
-            >
-              0
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">
+            <div class="stat-card">
               <span class="stat-label">失败任务</span>
-              <div
-                class="stat-icon"
-                style="background: rgba(239, 68, 68, 0.1); color: var(--error)"
-              >
-                <i data-lucide="x-circle"></i>
-              </div>
+              <div id="stat_failed" class="stat-value">0</div>
             </div>
-            <div
-              id="stat_failed"
-              class="stat-value"
-              style="color: var(--error)"
-            >
-              0
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">
+            <div class="stat-card">
               <span class="stat-label">卡密总数</span>
-              <div
-                class="stat-icon"
-                style="background: rgba(59, 130, 246, 0.1); color: #60a5fa"
-              >
-                <i data-lucide="tickets"></i>
-              </div>
+              <div id="stat_cdk_total" class="stat-value">0</div>
             </div>
-            <div id="stat_cdk_total" class="stat-value" style="color: #93c5fd">
-              0
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">
+            <div class="stat-card">
               <span class="stat-label">已使用卡密</span>
-              <div
-                class="stat-icon"
-                style="
-                  background: rgba(16, 185, 129, 0.1);
-                  color: var(--success);
-                "
-              >
-                <i data-lucide="badge-check"></i>
-              </div>
+              <div id="stat_cdk_used" class="stat-value">0</div>
             </div>
-            <div
-              id="stat_cdk_used"
-              class="stat-value"
-              style="color: var(--success)"
-            >
-              0
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">
+            <div class="stat-card">
               <span class="stat-label">未使用卡密</span>
-              <div
-                class="stat-icon"
-                style="background: rgba(245, 158, 11, 0.1); color: #f59e0b"
-              >
-                <i data-lucide="badge-plus"></i>
-              </div>
+              <div id="stat_cdk_unused" class="stat-value">0</div>
             </div>
-            <div id="stat_cdk_unused" class="stat-value" style="color: #fbbf24">
-              0
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">
+            <div class="stat-card">
               <span class="stat-label">银行卡数量</span>
-              <div
-                class="stat-icon"
-                style="background: rgba(168, 85, 247, 0.1); color: #c084fc"
-              >
-                <i data-lucide="credit-card"></i>
-              </div>
+              <div id="stat_card_total" class="stat-value">0</div>
             </div>
-            <div id="stat_card_total" class="stat-value" style="color: #d8b4fe">
-              0
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">
+            <div class="stat-card">
               <span class="stat-label">成功收款</span>
+              <div id="stat_billing_revenue" class="stat-value">0</div>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">成功支付</span>
+              <div id="stat_billing_paid_count" class="stat-value">0</div>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">前台并发</span>
+              <div id="stat_foreground_slots" class="stat-value">0/0</div>
               <div
-                class="stat-icon"
-                style="
-                  background: rgba(16, 185, 129, 0.1);
-                  color: var(--success);
-                "
-              >
-                <i data-lucide="wallet"></i>
-              </div>
-            </div>
-            <div
-              id="stat_billing_revenue"
-              class="stat-value"
-              style="color: var(--success); font-size: 28px"
-            >
-              0
-            </div>
-            <div
-              id="stat_billing_revenue_meta"
-              style="font-size: 13px; color: var(--text-dim)"
-            >
-              成功账单累计
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">
-              <span class="stat-label">成功支付笔数</span>
-              <div
-                class="stat-icon"
-                style="background: rgba(45, 212, 191, 0.1); color: #5eead4"
-              >
-                <i data-lucide="receipt"></i>
-              </div>
-            </div>
-            <div
-              id="stat_billing_paid_count"
-              class="stat-value"
-              style="color: #99f6e4"
-            >
-              0
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-header">
-              <span class="stat-label">前台并发槽位信息</span>
-              <div
-                class="stat-icon"
-                style="background: rgba(59, 130, 246, 0.1); color: #60a5fa"
-              >
-                <i data-lucide="activity"></i>
-              </div>
-            </div>
-            <div
-              id="stat_foreground_slots"
-              class="stat-value"
-              style="color: #60a5fa; font-size: 30px"
-            >
-              0/0
-            </div>
-            <div
-              id="stat_foreground_slots_meta"
-              style="font-size: 13px; color: var(--text-dim)"
-            >
-              前台占用/最大前台并发
+                id="stat_foreground_slots_meta"
+                style="font-size: 13px; color: var(--text-dim)"
+              ></div>
             </div>
           </div>
         </div>
@@ -2452,13 +2742,13 @@
         <div class="panel">
           <h2 class="panel-title">第三方代充 API（协议对接）</h2>
           <p style="font-size: 13px; color: var(--text-dim); margin-top: 10px">
-            開啟後，前台兌換開通將呼叫第三方 GPT
-            代充平台提交訂單並輪詢狀態；將不再使用本地開通流程。
-            銀行卡與代理會從「銀行卡池」「代理池」自動取得並隨訂單提交。
+            开启后，前台兑换开通将调用第三方 GPT
+            代充平台提交订单并轮询状态；将不再使用本地开通流程。
+            银行卡与代理会从「银行卡池」「代理池」自动获取并随订单提交。
           </p>
           <div class="toggle-field" style="margin-top: 18px">
             <div class="toggle-label">
-              <span>啟用第三方代充 API（開啟後不再使用本地開通）</span>
+              <span>启用第三方代充 API（开启后不再使用本地开通）</span>
             </div>
             <label class="toggle-control">
               <input
@@ -2515,13 +2805,13 @@
                 flex-wrap: wrap;
               "
             >
-              <strong>供應商帳戶狀態</strong>
+              <strong>供应商账户状态</strong>
               <button
                 type="button"
                 class="btn btn-secondary"
                 onclick="refreshGptApiStatus()"
               >
-                <i data-lucide="refresh-cw"></i>重新整理
+                <i data-lucide="refresh-cw"></i>刷新
               </button>
             </div>
             <div
@@ -2534,7 +2824,7 @@
             >
               <div>
                 <div style="font-size: 12px; color: var(--text-dim)">
-                  可用積分
+                  可用积分
                 </div>
                 <div
                   id="gpt_api_credits"
@@ -2545,7 +2835,7 @@
               </div>
               <div>
                 <div style="font-size: 12px; color: var(--text-dim)">
-                  USD 餘額
+                  USD 余额
                 </div>
                 <div
                   id="gpt_api_balance_usd"
@@ -2567,7 +2857,7 @@
               </div>
               <div>
                 <div style="font-size: 12px; color: var(--text-dim)">
-                  積分套餐
+                  积分套餐
                 </div>
                 <div
                   id="gpt_api_credit_plans"
@@ -2580,13 +2870,13 @@
             <div
               style="margin-top: 14px; font-size: 12px; color: var(--text-dim)"
             >
-              最近失敗代充（僅顯示供應商回傳的卡密前綴）
+              最近失败代充（仅显示供应商返回的卡密前缀）
             </div>
             <div
               id="gpt_api_recent_orders"
               style="font-size: 13px; margin-top: 7px; overflow-x: auto"
             >
-              尚未查詢
+              尚未查询
             </div>
             <div
               id="gpt_api_status_hint"
@@ -2608,7 +2898,7 @@
               onclick="testGptApiConnection()"
             >
               <i data-lucide="activity"></i>
-              测试连接
+              测试
             </button>
             <button
               type="button"
@@ -2616,7 +2906,7 @@
               onclick="saveGptApiConfig()"
             >
               <i data-lucide="save"></i>
-              保存 API 配置
+              保存配置
             </button>
           </div>
         </div>
@@ -2643,6 +2933,35 @@
                 "
               >
                 超过该数量时，前台将提示「当前任务过多，请稍后再试」。
+              </p>
+            </div>
+            <div class="form-group" style="margin-top: 22px">
+              <label>默认时区</label>
+              <select id="default_timezone" class="asset-input">
+                <option value="Asia/Shanghai">北京时间（Asia/Shanghai）</option>
+                <option value="Asia/Hong_Kong">
+                  香港时间（Asia/Hong_Kong）
+                </option>
+                <option value="Asia/Singapore">
+                  新加坡时间（Asia/Singapore）
+                </option>
+                <option value="Asia/Tokyo">东京时间（Asia/Tokyo）</option>
+                <option value="Europe/London">伦敦时间（Europe/London）</option>
+                <option value="America/New_York">
+                  纽约时间（America/New_York）
+                </option>
+                <option value="America/Los_Angeles">
+                  洛杉矶时间（America/Los_Angeles）
+                </option>
+              </select>
+              <p
+                style="
+                  font-size: 13px;
+                  color: var(--text-dim);
+                  margin-top: 10px;
+                "
+              >
+                用于后台日志、任务和账单时间展示；默认使用北京时间。
               </p>
             </div>
             <div class="form-group" style="margin-top: 22px">
@@ -2683,7 +3002,7 @@
         >
           <button class="btn btn-primary" onclick="saveAllConfigs()">
             <i data-lucide="save"></i>
-            保存全局配置
+            保存全局
           </button>
         </div>
 
@@ -2798,7 +3117,7 @@
               onclick="testTelegramNotification()"
             >
               <i data-lucide="send"></i>
-              发送测试消息
+              测试发送
             </button>
             <button
               type="button"
@@ -2806,7 +3125,7 @@
               onclick="saveTelegramConfig()"
             >
               <i data-lucide="save"></i>
-              保存 Telegram 配置
+              保存通知
             </button>
           </div>
         </div>
@@ -3015,7 +3334,7 @@
               onclick="refreshHcaptchaLogs()"
             >
               <i data-lucide="scroll-text"></i>
-              刷新验证日志
+              刷新日志
             </button>
             <button
               type="button"
@@ -3023,7 +3342,7 @@
               onclick="testHcaptchaSolver()"
             >
               <i data-lucide="activity"></i>
-              检测 Solver 环境
+              检测环境
             </button>
             <button
               type="button"
@@ -3031,7 +3350,7 @@
               onclick="testHcaptchaVlm()"
             >
               <i data-lucide="brain"></i>
-              测试 VLM 连通性
+              测试 VLM
             </button>
             <button
               type="button"
@@ -3039,7 +3358,7 @@
               onclick="testHcaptchaCaptchaPlatform()"
             >
               <i data-lucide="shield-check"></i>
-              测试打码平台
+              测试打码
             </button>
             <button
               type="button"
@@ -3047,7 +3366,7 @@
               onclick="saveHcaptchaConfig()"
             >
               <i data-lucide="save"></i>
-              保存 hCaptcha 配置
+              保存验证
             </button>
           </div>
         </div>
@@ -3142,7 +3461,7 @@
             </p>
             <button class="btn btn-secondary" onclick="saveAdminPaths()">
               <i data-lucide="link"></i>
-              保存入口路径
+              保存路径
             </button>
           </div>
           <div
@@ -3167,7 +3486,7 @@
                 onclick="saveAdmin2faLoginMode()"
               >
                 <i data-lucide="save"></i>
-                保存验证方式
+                保存验证
               </button>
             </div>
             <div
@@ -3182,7 +3501,7 @@
             </div>
             <button class="btn btn-secondary" onclick="setupAdmin2fa()">
               <i data-lucide="smartphone"></i>
-              绑定 Google Authenticator
+              绑定验证
             </button>
             <button
               class="btn btn-delete"
@@ -3190,7 +3509,7 @@
               onclick="disableAdmin2fa()"
             >
               <i data-lucide="shield-off"></i>
-              关闭 2FA
+              关闭验证
             </button>
             <div
               id="totp_setup_box"
@@ -3235,7 +3554,7 @@
                 style="margin-top: 10px"
                 onclick="confirmAdmin2fa()"
               >
-                确认启用
+                确认绑定
               </button>
             </div>
           </div>
@@ -3267,12 +3586,15 @@
               "
             >
               <label style="margin-bottom: 6px">当前支付地区</label>
-              <select id="region_selector" class="asset-input">
-                <option value="PH">菲律宾 (PH) — PHP</option>
-                <option value="US">美国 (US) — USD</option>
-                <option value="SG">新加坡 (SG) — SGD</option>
-                <option value="MY">马来西亚 (MY) — MYR</option>
-              </select>
+              <input
+                id="region_selector"
+                type="search"
+                list="payment_region_options"
+                class="asset-input"
+                placeholder="搜索地区或输入 ISO 代码"
+                autocomplete="off"
+              />
+              <datalist id="payment_region_options"></datalist>
             </div>
             <button
               class="btn btn-primary"
@@ -3311,6 +3633,7 @@
           >
             粘贴一条或多条代理
             URL（一行一条），点保存后立即写入代理池并在下方列表显示。
+            <code>#备注</code> 会自动忽略。
           </p>
           <textarea
             id="proxy_add_input"
@@ -3324,6 +3647,7 @@
             placeholder="一行一条，例如：
 http://user:pass@host:port
 socks5://user:pass@host:port
+socks://user:pass@host:port#备注
 http://USER-session-{session}:PASS@proxy.example.com:1000"
           ></textarea>
           <div
@@ -3341,14 +3665,14 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               onclick="saveProxyPool()"
             >
               <i data-lucide="plus"></i>
-              保存到代理池
+              保存代理
             </button>
             <button
               type="button"
               class="btn btn-secondary"
               onclick="document.getElementById('proxy_add_input').value = ''"
             >
-              清空输入
+              清空
             </button>
             <span
               id="proxy_add_hint"
@@ -3379,7 +3703,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 onclick="testAllSavedProxies()"
               >
                 <i data-lucide="zap"></i>
-                批量检测活跃
+                批量检测
               </button>
             </div>
           </div>
@@ -3394,12 +3718,14 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                   <th width="88px" style="text-align: center">延迟</th>
                   <th width="88px" style="text-align: center">协议</th>
                   <th>代理地址</th>
-                  <th width="180px" style="text-align: center">操作</th>
+                  <th width="58px" style="text-align: center">编辑</th>
+                  <th width="76px" style="text-align: center">检测</th>
+                  <th width="58px" style="text-align: center">删除</th>
                 </tr>
               </thead>
               <tbody id="proxy_pool_body">
                 <tr>
-                  <td colspan="7">加载中...</td>
+                  <td colspan="9">加载中...</td>
                 </tr>
               </tbody>
             </table>
@@ -3491,12 +3817,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               </tbody>
             </table>
             <p style="margin: 14px 0 0; font-size: 13px">
-              <strong>持久化：</strong>在服务器 <code>.env</code> 设置
-              <code>BROWSER_POOL_SIZE=8</code>、<code
-                >MAX_CONCURRENT_ACTIVATIONS=8</code
-              >
-              后 <code>docker compose up -d --force-recreate app</code>。
-              本页「应用并重载」仅改运行时，重启容器仍以 .env 为准。
+              <strong>持久化：</strong
+              >本页重载会保存槽位数量，服务重启后自动恢复；
+              <code>BROWSER_POOL_MAX_SIZE</code> 仅用于设置可选上限。
             </p>
           </div>
         </div>
@@ -3514,15 +3837,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           </div>
           <div class="stat-card">
             <div class="stat-label">空闲 / 忙碌</div>
-            <div id="bp_stat_usage" class="stat-value" style="color: #86efac">
-              0 / 0
-            </div>
+            <div id="bp_stat_usage" class="stat-value">0 / 0</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">排队任务</div>
-            <div id="bp_stat_waiting" class="stat-value" style="color: #fbbf24">
-              0
-            </div>
+            <div id="bp_stat_waiting" class="stat-value">0</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">累计借用</div>
@@ -3544,7 +3863,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               class="btn btn-secondary"
               onclick="loadBrowserPoolPage(true)"
             >
-              <i data-lucide="refresh-cw"></i> 立即刷新
+              <i data-lucide="refresh-cw"></i> 刷新
             </button>
           </div>
           <div
@@ -3605,30 +3924,15 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           <div class="panel-header">
             <h2 class="panel-title">池配置</h2>
           </div>
-          <div
-            style="
-              display: flex;
-              gap: 12px;
-              flex-wrap: wrap;
-              align-items: flex-end;
-            "
-          >
-            <label
-              style="
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
-                font-size: 13px;
-              "
-            >
-              槽位数量（1–<span id="bp_max_size">24</span>）
+          <div class="browser-pool-config-row">
+            <label class="browser-pool-size-field">
+              槽位数量（1 – <span id="bp_max_size">24</span>）
               <input
                 id="bp_pool_size_input"
                 type="number"
                 min="1"
                 max="48"
                 class="asset-input"
-                style="width: 120px"
               />
             </label>
             <button
@@ -3636,16 +3940,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               class="btn btn-primary"
               onclick="reloadBrowserPool()"
             >
-              <i data-lucide="rotate-cw"></i> 应用并重载池
+              <i data-lucide="rotate-cw"></i> 重载
             </button>
-            <span
-              id="bp_reload_hint"
-              style="font-size: 13px; color: var(--text-dim)"
-            ></span>
+            <span id="bp_reload_hint" class="browser-pool-reload-hint"></span>
           </div>
-          <p style="font-size: 12px; color: var(--text-dim); margin-top: 12px">
-            重载会关闭所有空闲槽位并重新预热；有任务占用时需等待结束。修改后写入运行时配置（重启容器仍以
-            <code>BROWSER_POOL_SIZE</code> 环境变量为准，可在 .env 持久化）。
+          <p class="browser-pool-config-hint">
+            修改后立即重载，并保存到系统配置；重启服务后仍会生效。
           </p>
         </div>
 
@@ -3698,7 +3998,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 onclick="generateRandomUsAddresses()"
               >
                 <i data-lucide="shuffle"></i>
-                批量生成（10 条）
+                批量生成
               </button>
               <button
                 type="button"
@@ -3707,7 +4007,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 title="删除所有从未支付成功绑定过的地址"
               >
                 <i data-lucide="eraser"></i>
-                清空未绑定
+                清空未绑
               </button>
               <button class="btn btn-success" onclick="showAddressForm()">
                 <i data-lucide="plus"></i>
@@ -3876,14 +4176,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         </div>
       </div>
 
-      <!-- 支付链接调试 -->
+      <!-- 支付调试 -->
       <div id="checkout_debug" class="page-view">
         <div class="page-header">
-          <h1>支付链接调试</h1>
-          <p>
-            启动 Playwright 浏览器，注入 Session 后调用 Checkout API
-            生成支付链接（不执行填卡/订阅，正式开通请走前台 CDK）
-          </p>
+          <h1>支付调试</h1>
+          <p>使用 Session 验证支付链接，或直接发起卡池付款流程。</p>
         </div>
 
         <div class="panel">
@@ -3922,16 +4219,15 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             </div>
             <div class="form-group" style="margin-bottom: 0">
               <label style="margin-bottom: 6px">支付地区</label>
-              <select
+              <input
                 id="checkout_region_selector"
+                type="search"
+                list="payment_region_options"
                 class="asset-input"
                 onchange="onCheckoutRegionChange()"
-              >
-                <option value="PH">菲律宾 (PH) — PHP</option>
-                <option value="US">美国 (US) — USD</option>
-                <option value="SG">新加坡 (SG) — SGD</option>
-                <option value="MY">马来西亚 (MY) — MYR</option>
-              </select>
+                placeholder="搜索地区或输入 ISO 代码"
+                autocomplete="off"
+              />
             </div>
           </div>
           <p
@@ -3964,19 +4260,29 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             "
           >
             <button
+              type="button"
               class="btn btn-primary"
               onclick="startCheckoutDebug()"
-              id="checkout_generate_btn"
+              id="checkout_link_debug_btn"
             >
               <i data-lucide="play"></i>
-              启动浏览器调试
+              链接调试
+            </button>
+            <button
+              type="button"
+              class="btn btn-success"
+              onclick="startCheckoutPayment()"
+              id="checkout_payment_debug_btn"
+            >
+              <i data-lucide="credit-card"></i>
+              支付调试
             </button>
             <button
               type="button"
               class="btn btn-secondary"
               onclick="clearCheckoutDebugForm()"
             >
-              清空
+              清空文本
             </button>
             <span
               id="checkout_job_hint"
@@ -4007,32 +4313,21 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         </div>
 
         <div class="panel" style="margin-top: 24px">
-          <div class="runtime-log-toolbar">
-            <h2 class="panel-title" style="margin: 0">运行日志</h2>
-            <label class="runtime-log-toggle">
-              <input type="checkbox" id="checkout_log_autoscroll" checked />
-              <span>自动滚动</span>
-            </label>
-            <button
-              type="button"
-              class="btn btn-primary"
-              onclick="refreshCheckoutDebugLogs()"
-            >
-              <i data-lucide="refresh-cw"></i> 刷新
-            </button>
+          <div class="panel-header checkout-debug-log-toolbar">
+            <h2 class="panel-title">运行日志</h2>
+          </div>
+          <div class="checkout-debug-log-meta">
+            <p class="checkout-debug-log-hint">
+              仅显示当前调试任务的 Playwright 子进程输出；失败时会自动保存截图。
+            </p>
             <button
               type="button"
               class="btn btn-secondary"
-              onclick="switchPage('runtime_logs')"
+              onclick="copyCheckoutDebugLogs()"
             >
-              打开完整运行日志
+              <i data-lucide="copy"></i> 复制日志
             </button>
           </div>
-          <p
-            style="font-size: 12px; color: var(--text-dim); margin: 8px 0 12px"
-          >
-            仅显示当前调试任务的 Playwright 子进程输出；失败时会自动保存截图。
-          </p>
           <div class="runtime-log-pre-wrap">
             <pre
               id="checkout_debug_log_pre"
@@ -4046,7 +4341,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       <!-- 银行卡池 -->
       <div id="cards" class="page-view">
         <div class="page-header">
-          <h1>银行卡池管理</h1>
+          <h1>银行卡池</h1>
           <p>管理 Stripe 支付使用的银行卡资源（通过 API 导入与维护）</p>
         </div>
 
@@ -4055,45 +4350,25 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             <div class="stat-header">
               <span class="stat-label">卡片总数</span>
             </div>
-            <div id="card_stat_total" class="stat-value" style="color: #d8b4fe">
-              0
-            </div>
+            <div id="card_stat_total" class="stat-value">0</div>
           </div>
           <div class="stat-card">
             <div class="stat-header">
               <span class="stat-label">可用</span>
             </div>
-            <div
-              id="card_stat_active"
-              class="stat-value"
-              style="color: var(--success)"
-            >
-              0
-            </div>
+            <div id="card_stat_active" class="stat-value">0</div>
           </div>
           <div class="stat-card">
             <div class="stat-header">
               <span class="stat-label">冷却中</span>
             </div>
-            <div
-              id="card_stat_cooldown"
-              class="stat-value"
-              style="color: #fbbf24"
-            >
-              0
-            </div>
+            <div id="card_stat_cooldown" class="stat-value">0</div>
           </div>
           <div class="stat-card">
             <div class="stat-header">
               <span class="stat-label">已报废</span>
             </div>
-            <div
-              id="card_stat_exhausted"
-              class="stat-value"
-              style="color: #f87171"
-            >
-              0
-            </div>
+            <div id="card_stat_exhausted" class="stat-value">0</div>
           </div>
         </div>
 
@@ -4101,7 +4376,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           <div class="panel-header">
             <h2 class="panel-title">银行卡列表</h2>
             <button class="btn btn-success" onclick="toggleCardPoolImportBox()">
-              <i data-lucide="upload"></i>
+              <i data-lucide="file-input"></i>
               批量导入
             </button>
           </div>
@@ -4130,7 +4405,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 onclick="importCardPool()"
               >
                 <i data-lucide="check-check"></i>
-                解析并导入
+                解析导入
               </button>
             </div>
           </div>
@@ -4187,7 +4462,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 刷新
               </button>
               <button class="btn btn-success" onclick="toggleImportBox('cdk')">
-                <i data-lucide="upload"></i>
+                <i data-lucide="file-input"></i>
                 批量导入
               </button>
               <input
@@ -4237,7 +4512,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             <div class="import-actions">
               <button class="btn btn-success" onclick="importCDKs()">
                 <i data-lucide="check-check"></i>
-                解析并导入
+                解析导入
               </button>
             </div>
           </div>
@@ -4322,11 +4597,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               onclick="togglePageSelection('cdk')"
             >
               <i data-lucide="check-square"></i>
-              本页全选/取消
+              本页切换
             </button>
             <button class="btn btn-success" onclick="selectUnusedOnPage('cdk')">
               <i data-lucide="square-check"></i>
-              选中本页未使用
+              选未使用
             </button>
             <button class="btn btn-success" onclick="batchCopyCDKs()">
               <i data-lucide="copy"></i>
@@ -4355,91 +4630,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             </table>
           </div>
           <div id="cdk_pagination" class="table-footer"></div>
-        </div>
-      </div>
-
-      <div id="sessions" class="page-view">
-        <div class="page-header">
-          <h1>Session 管理</h1>
-          <p>
-            手动提交 CDK + Session 启动 Playwright
-            自动化开通；下方列表为历史记录
-          </p>
-        </div>
-        <div class="panel" style="margin-bottom: 20px">
-          <div class="panel-header">
-            <h2 class="panel-title">手动启动自助开通</h2>
-          </div>
-          <div style="padding: 0 20px 20px">
-            <p
-              style="font-size: 13px; color: var(--text-dim); margin: 0 0 12px"
-            >
-              粘贴从 <code>chatgpt.com/api/auth/session</code> 复制的
-              JSON，或只贴 AccessToken。启动后请到「运行日志」查看实时输出。
-            </p>
-            <div style="display: grid; gap: 12px; max-width: 720px">
-              <input
-                type="text"
-                id="admin_activation_cdk"
-                class="asset-input"
-                placeholder="输入未使用的自助 CDK"
-              />
-              <textarea
-                id="admin_activation_session"
-                class="import-textarea"
-                rows="5"
-                placeholder="粘贴 Session JSON 或 AccessToken"
-              ></textarea>
-              <div
-                style="
-                  display: flex;
-                  gap: 12px;
-                  align-items: center;
-                  flex-wrap: wrap;
-                "
-              >
-                <button
-                  type="button"
-                  class="btn btn-success"
-                  id="admin_activation_btn"
-                  onclick="triggerAdminActivation()"
-                >
-                  <i data-lucide="play"></i>
-                  启动自动化开通
-                </button>
-                <span
-                  id="admin_activation_result"
-                  style="font-size: 13px; color: var(--text-dim)"
-                ></span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="panel-header">
-            <h2 class="panel-title">Session 记录列表</h2>
-            <button class="btn btn-primary" onclick="loadSessions(true)">
-              <i data-lucide="refresh-cw"></i>
-              刷新
-            </button>
-          </div>
-          <div class="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th width="180px">执行时间</th>
-                  <th width="150px">激活码</th>
-                  <th>Session</th>
-                  <th width="100px" style="text-align: center">卡尾号</th>
-                  <th>任务信息</th>
-                  <th width="120px">状态</th>
-                  <th width="100px" style="text-align: center">自动续费</th>
-                  <th width="340px" style="text-align: center">操作</th>
-                </tr>
-              </thead>
-              <tbody id="session_body"></tbody>
-            </table>
-          </div>
         </div>
       </div>
 
@@ -4481,7 +4671,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               onclick="submitCancelRenewalPage()"
             >
               <i data-lucide="circle-x"></i>
-              取消自动续费
+              取消续费
             </button>
             <button
               type="button"
@@ -4490,7 +4680,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               onclick="submitEnableRenewalPage()"
             >
               <i data-lucide="refresh-cw"></i>
-              开启自动续费
+              开启续费
             </button>
             <button
               type="button"
@@ -4526,108 +4716,52 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       <div id="logs" class="page-view">
         <div class="page-header">
           <h1>任务</h1>
-          <p>开通记录与 Playwright 阶段，同一批任务两种视图</p>
+          <p>每次 CDK 开通、链接调试或支付调试均保留一条独立记录</p>
         </div>
-        <div class="page-tabs" id="task_page_tabs">
-          <button
-            type="button"
-            class="page-tab active"
-            data-tab="records"
-            onclick="switchTaskTab('records')"
-          >
-            开通记录
-          </button>
-          <button
-            type="button"
-            class="page-tab"
-            data-tab="stages"
-            onclick="switchTaskTab('stages')"
-          >
-            自动化阶段
-          </button>
-        </div>
-        <div id="task_tab_records" class="page-tab-panel active">
-          <div class="panel">
-            <div class="runtime-log-toolbar log-page-toolbar">
-              <button
-                type="button"
-                class="btn btn-success"
-                id="admin_refresh_pause_btn"
-                onclick="toggleAdminDataRefresh()"
-              >
-                <i data-lucide="pause"></i>
-                <span id="admin_refresh_pause_label">停止自动刷新</span>
-              </button>
-              <button
-                type="button"
-                class="btn btn-primary"
-                onclick="loadTaskLogs(true)"
-              >
-                <i data-lucide="refresh-cw"></i>
-                立即刷新
-              </button>
-              <span class="log-page-toolbar-hint"
-                >默认每 3
-                秒自动拉取概览与下方表格；停止后仅在你点击「立即刷新」时更新。可在表格中删除单条任务记录。前台自助开通由子进程执行，无法在此强制杀进程，可开维护模式拒绝新单。</span
-              >
-            </div>
-            <div class="table-container">
-              <table class="task-log-table">
-                <thead>
-                  <tr>
-                    <th class="col-time">执行时间</th>
-                    <th class="col-cdk">激活码</th>
-                    <th class="col-token">Token 摘要</th>
-                    <th class="col-info">任务信息</th>
-                    <th class="col-progress">进度</th>
-                    <th class="col-status">状态</th>
-                    <th class="col-media" style="text-align: center">
-                      截图/录像
-                    </th>
-                    <th class="col-action" style="text-align: center">操作</th>
-                  </tr>
-                </thead>
-                <tbody id="log_body"></tbody>
-              </table>
-            </div>
-            <div id="log_pagination" class="table-footer"></div>
+        <div class="panel">
+          <div class="runtime-log-toolbar log-page-toolbar">
+            <button
+              type="button"
+              class="btn btn-success"
+              id="admin_refresh_pause_btn"
+              onclick="toggleAdminDataRefresh()"
+            >
+              <i data-lucide="pause"></i>
+              <span id="admin_refresh_pause_label">停止刷新</span>
+            </button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              onclick="loadTaskLogs(true)"
+            >
+              <i data-lucide="refresh-cw"></i>
+              刷新
+            </button>
+            <span class="log-page-toolbar-hint"
+              >默认每 3
+              秒自动拉取；点击详情可查看执行日志、阶段与媒体信息。</span
+            >
           </div>
-        </div>
-        <div id="task_tab_stages" class="page-tab-panel">
-          <div class="panel">
-            <div class="runtime-log-toolbar log-page-toolbar">
-              <button
-                type="button"
-                class="btn btn-primary"
-                onclick="loadTaskLogs(true)"
-              >
-                <i data-lucide="refresh-cw"></i>
-                刷新任务
-              </button>
-              <span class="log-page-toolbar-hint"
-                >绿色阶段=已完成，红色=失败，灰色=未到达。Checkout
-                列可一眼确认支付页是否打开。</span
-              >
-            </div>
-            <div class="table-container">
-              <table class="automation-task-table">
-                <thead>
-                  <tr>
-                    <th width="160px">执行时间</th>
-                    <th width="130px">任务 ID</th>
-                    <th width="130px">激活码</th>
-                    <th width="110px" style="text-align: center">Checkout</th>
-                    <th>自动化阶段</th>
-                    <th width="120px">当前阶段</th>
-                    <th width="100px">状态</th>
-                    <th width="110px" style="text-align: center">截图/录像</th>
-                  </tr>
-                </thead>
-                <tbody id="automation_body"></tbody>
-              </table>
-            </div>
-            <div id="automation_pagination" class="table-footer"></div>
+          <div class="table-container">
+            <table class="task-log-table">
+              <thead>
+                <tr>
+                  <th class="col-time">执行时间</th>
+                  <th width="110px">任务类型</th>
+                  <th class="col-cdk">激活码</th>
+                  <th class="col-token">充值账号</th>
+                  <th class="col-progress">进度</th>
+                  <th class="col-status">状态</th>
+                  <th class="col-media" style="text-align: center">
+                    截图/录像
+                  </th>
+                  <th class="col-action" style="text-align: center">操作</th>
+                </tr>
+              </thead>
+              <tbody id="log_body"></tbody>
+            </table>
           </div>
+          <div id="log_pagination" class="table-footer"></div>
         </div>
       </div>
 
@@ -4649,14 +4783,14 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               </button>
               <button class="btn btn-success" onclick="exportBillingCSV()">
                 <i data-lucide="download"></i>
-                导出 CSV
+                导出
               </button>
               <button
                 class="btn btn-delete"
                 onclick="clearFailedBillingRecords()"
               >
                 <i data-lucide="trash-2"></i>
-                清除失败记录
+                清除失败
               </button>
             </div>
           </div>
@@ -4776,7 +4910,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             <div class="runtime-log-toolbar">
               <label class="runtime-log-toggle">
                 <input type="checkbox" id="runtime_log_autoscroll" checked />
-                <span>自动滚动到底部</span>
+                <span>自动滚动</span>
               </label>
               <label class="runtime-log-toggle">
                 <input type="checkbox" id="runtime_log_pause" />
@@ -4788,7 +4922,21 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 id="runtime_log_refresh_btn"
                 onclick="refreshRuntimeLogsManual()"
               >
-                <i data-lucide="refresh-cw"></i> 立即刷新
+                <i data-lucide="refresh-cw"></i> 刷新
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                onclick="exportRuntimeLogs()"
+              >
+                <i data-lucide="download"></i> 导出全部
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                onclick="exportRuntimeLogs('errors')"
+              >
+                <i data-lucide="triangle-alert"></i> 导出错误
               </button>
               <button
                 type="button"
@@ -4796,7 +4944,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 id="runtime_log_clear_btn"
                 onclick="clearRuntimeLogs()"
               >
-                <i data-lucide="trash-2"></i> 清空日志
+                <i data-lucide="trash-2"></i> 清空
               </button>
             </div>
             <p class="runtime-log-hint">
@@ -4814,14 +4962,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         </div>
         <div id="system_log_tab_login" class="page-tab-panel">
           <div class="panel">
-            <div class="panel-header">
-              <h2 class="panel-title">最近登录记录</h2>
-              <button class="btn btn-secondary" onclick="loadAdminLoginLogs()">
-                <i data-lucide="refresh-cw"></i>
-                刷新
-              </button>
-            </div>
-            <div style="overflow: auto; margin-top: 14px">
+            <div class="table-container" style="margin-top: 14px">
               <table class="data-table">
                 <thead>
                   <tr>
@@ -4854,13 +4995,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
     <script>
       const TOKEN_KEY = "plus_admin_token";
       let adminLoginPath = "/admin-login";
-      const BUSINESS_PAGES = new Set([
-        "checkout_debug",
-        "cards",
-        "cdks",
-        "sessions",
-        "billing",
-      ]);
       const ADMIN_LOGIN_EVENT_LABELS = {
         login_success: "登录成功",
         login_failed: "登录失败",
@@ -4905,6 +5039,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       window.__adminRuntime = { active_activation_jobs: 0 };
       let maintenanceModeSaving = false;
       let lastMaintenanceModeValue = false;
+      let adminDefaultTimeZone = "Asia/Shanghai";
 
       const paginationState = {
         phone_pool: { page: 1, pageSize: 10 },
@@ -4930,13 +5065,58 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       function formatRuntimeLogTs(ts) {
         try {
           const d = new Date(Number(ts) || 0);
-          const hh = String(d.getHours()).padStart(2, "0");
-          const mm = String(d.getMinutes()).padStart(2, "0");
-          const ss = String(d.getSeconds()).padStart(2, "0");
-          return `${hh}:${mm}:${ss}`;
+          return d.toLocaleTimeString("zh-CN", {
+            timeZone: adminDefaultTimeZone,
+            hour12: false,
+          });
         } catch (_) {
           return "--:--:--";
         }
+      }
+
+      function formatAdminDateTime(value, includeSeconds = false) {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "-";
+        return date
+          .toLocaleString("zh-CN", {
+            timeZone: adminDefaultTimeZone,
+            hour12: false,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            ...(includeSeconds ? { second: "2-digit" } : {}),
+          })
+          .replace(/\//g, "-");
+      }
+
+      function getAdminTimeZoneOffsetMinutes() {
+        const now = new Date();
+        const parts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: adminDefaultTimeZone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hourCycle: "h23",
+        }).formatToParts(now);
+        const values = Object.fromEntries(
+          parts
+            .filter((part) => part.type !== "literal")
+            .map((part) => [part.type, part.value]),
+        );
+        const localAsUtc = Date.UTC(
+          Number(values.year),
+          Number(values.month) - 1,
+          Number(values.day),
+          Number(values.hour),
+          Number(values.minute),
+          Number(values.second),
+        );
+        return Math.round((localAsUtc - now.getTime()) / 60000);
       }
 
       const RUNTIME_LOG_SOURCE_MAP = {
@@ -5075,6 +5255,34 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         lucide.createIcons();
       }
 
+      async function exportRuntimeLogs(scope = "all") {
+        try {
+          const res = await authFetch(
+            `/api/admin/runtime-logs/export?scope=${encodeURIComponent(scope)}`,
+          );
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.message || "导出失败");
+          }
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download =
+            scope === "errors" ? "runtime-errors.log" : "runtime-logs.log";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(url);
+          showMessage(
+            scope === "errors" ? "错误日志已导出" : "运行日志已导出",
+            "success",
+          );
+        } catch (error) {
+          showMessage(error.message || "导出失败", "error");
+        }
+      }
+
       function updateAdminDataRefreshButton() {
         const btn = document.getElementById("admin_refresh_pause_btn");
         const label = document.getElementById("admin_refresh_pause_label");
@@ -5082,7 +5290,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           return;
         }
         const paused = adminDataRefreshPaused;
-        label.textContent = paused ? "恢复自动刷新" : "停止自动刷新";
+        label.textContent = paused ? "恢复刷新" : "停止刷新";
         const iconName = paused ? "play" : "pause";
         const icon = btn.querySelector("i[data-lucide]");
         if (icon) {
@@ -5513,12 +5721,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             .map(
               (row) => `
                     <tr>
-                        <td>${escapeHtml(String(row.created_at || ""))}</td>
+                        <td>${escapeHtml(formatAdminDateTime(row.created_at))}</td>
                         <td>${escapeHtml(ADMIN_LOGIN_EVENT_LABELS[row.event] || row.event || "")}</td>
                         <td>${escapeHtml(String(row.admin_email || ""))}</td>
                         <td>${escapeHtml(String(row.ip || ""))}</td>
-                        <td title="${escapeHtml(String(row.fingerprint || ""))}">${escapeHtml(String(row.fingerprint || "").slice(0, 16))}</td>
-                        <td title="${escapeHtml(String(row.user_agent || ""))}">${escapeHtml(String(row.user_agent || "").slice(0, 40))}</td>
+                        <td style="word-break:break-all;">${escapeHtml(String(row.fingerprint || ""))}</td>
+                        <td style="word-break:break-word;">${escapeHtml(String(row.user_agent || ""))}</td>
                         <td>${escapeHtml(String(row.detail || ""))}</td>
                     </tr>
                 `,
@@ -5611,6 +5819,14 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         if (videoBtn) {
           event.preventDefault();
           showTaskVideoByJobKey(videoBtn.getAttribute("data-view-video") || "");
+          return;
+        }
+        const detailBtn = event.target.closest("[data-view-task-detail]");
+        if (detailBtn) {
+          event.preventDefault();
+          openTaskDetailModal(
+            detailBtn.getAttribute("data-view-task-detail") || "",
+          );
           return;
         }
         const copyVideoBtn = event.target.closest("[data-copy-video-url]");
@@ -5872,7 +6088,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               session: sessionRaw,
-              timezone_offset_min: -new Date().getTimezoneOffset(),
+              timezone_offset_min: getAdminTimeZoneOffsetMinutes(),
             }),
           },
         );
@@ -5895,7 +6111,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               session: sessionRaw,
-              timezone_offset_min: -new Date().getTimezoneOffset(),
+              timezone_offset_min: getAdminTimeZoneOffsetMinutes(),
             }),
           },
         );
@@ -6140,16 +6356,77 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         const videoCount = Array.isArray(task?.videos) ? task.videos.length : 0;
         const shotBtn =
           screenshotCount > 0
-            ? `<button type="button" class="btn btn-primary" style="padding:6px 10px; font-size:12px;" data-view-screenshots="${escapeHtml(task.id)}">截图 (${screenshotCount})</button>`
+            ? `<button type="button" class="btn btn-primary" data-view-screenshots="${escapeHtml(task.id)}">看截图</button>`
             : "";
         const videoBtn =
           videoCount > 0
-            ? `<button type="button" class="btn btn-secondary" style="padding:6px 10px; font-size:12px; margin-top:4px;" data-view-video="${escapeHtml(task.id)}">▶ 录像</button>`
+            ? `<button type="button" class="btn btn-secondary" data-view-video="${escapeHtml(task.id)}">看录像</button>`
             : "";
         if (shotBtn || videoBtn) {
-          return `${shotBtn}${shotBtn && videoBtn ? "<br>" : ""}${videoBtn}`;
+          return `<div class="task-media-actions">${shotBtn}${videoBtn}</div>`;
         }
         return '<span style="color:var(--text-dim); font-size:12px;">任务结束后可刷新查看</span>';
+      }
+
+      function closeTaskDetailModal() {
+        const overlay = document.getElementById("task_detail_modal_overlay");
+        const meta = document.getElementById("task_detail_modal_meta");
+        const output = document.getElementById("task_detail_modal_output");
+        overlay?.classList.remove("open");
+        if (meta) meta.innerHTML = "";
+        if (output) output.textContent = "";
+      }
+
+      async function openTaskDetailModal(jobKey) {
+        const key = String(jobKey || "").trim();
+        const overlay = document.getElementById("task_detail_modal_overlay");
+        const meta = document.getElementById("task_detail_modal_meta");
+        const output = document.getElementById("task_detail_modal_output");
+        if (!key || !overlay || !meta || !output) return;
+
+        const listTask = (window.__adminLogs || []).find(
+          (item) => item.id === key,
+        );
+        output.textContent = "正在加载执行日志...";
+        meta.innerHTML = "";
+        overlay.classList.add("open");
+
+        try {
+          const res = await authFetch(
+            `/api/admin/task-logs/${encodeURIComponent(key)}`,
+          );
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || "加载任务详情失败");
+          }
+          const task = data.task || {};
+          const currentPhase =
+            listTask?.automation?.phase || task.message || "-";
+          const entries = [
+            ["任务 ID", key],
+            ["任务类型", getTaskType(listTask)],
+            ["执行时间", listTask?.time || "-"],
+            ["激活码", task.cdk || listTask?.cdk || "-"],
+            ["充值账号", listTask?.token || "-"],
+            ["当前状态", task.status || listTask?.status || "-"],
+            [
+              "执行进度",
+              `${Number(task.progress ?? listTask?.progress ?? 0)}%`,
+            ],
+            ["当前阶段", currentPhase],
+            ["支付卡尾号", task.cardLast4 ? `**** ${task.cardLast4}` : "-"],
+          ];
+          meta.innerHTML = entries
+            .map(
+              ([label, value]) =>
+                `<div><strong>${escapeHtml(label)}：</strong>${escapeHtml(value)}</div>`,
+            )
+            .join("");
+          output.textContent = task.output || "暂无可用执行日志";
+        } catch (error) {
+          output.textContent = "";
+          meta.innerHTML = `<span style="color:var(--error);">${escapeHtml(error.message || "加载任务详情失败")}</span>`;
+        }
       }
 
       async function showTaskScreenshotsByJobKey(jobKey) {
@@ -6190,8 +6467,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                         <div style="font-size:12px; color:var(--text-dim); margin-bottom:6px;">${escapeHtml(rel)}</div>
                         <video src="${src}" controls playsinline preload="metadata" style="width:100%; border-radius:8px; background:#000;"></video>
                         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-                            <a class="btn btn-secondary" href="${src}" target="_blank" rel="noopener">用系统浏览器打开</a>
-                            <button type="button" class="btn btn-secondary" data-copy-video-url="${src.replace(/"/g, "&quot;")}">复制播放链接</button>
+                            <a class="btn btn-secondary" href="${src}" target="_blank" rel="noopener">浏览打开</a>
+                            <button type="button" class="btn btn-secondary" data-copy-video-url="${src.replace(/"/g, "&quot;")}">复制链接</button>
                         </div>
                         <p style="font-size:12px; color:var(--text-dim); margin:8px 0 0;">VS Code 内置预览经常播不了 WebM，请点上面用 Edge 打开。</p>
                     </div>
@@ -6257,7 +6534,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         lucide.createIcons();
         setTimeout(() => {
           item.style.opacity = "0";
-          item.style.transform = "translateY(-8px) scale(0.98)";
+          item.style.transform = "none";
           item.style.transition = "0.2s";
           setTimeout(() => item.remove(), 220);
         }, 2400);
@@ -6398,20 +6675,14 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         }
         if (type === "product") {
           if (filter === "today") {
-            const todayStr = new Date()
-              .toLocaleString("zh-CN", { hour12: false })
-              .split(" ")[0]
-              .replace(/\//g, "-");
+            const todayStr = formatAdminDateTime(new Date()).split(" ")[0];
             result = source.filter((item) =>
               String(item.time).startsWith(todayStr),
             );
           } else if (filter === "yesterday") {
             const y = new Date();
             y.setDate(y.getDate() - 1);
-            const yStr = y
-              .toLocaleString("zh-CN", { hour12: false })
-              .split(" ")[0]
-              .replace(/\//g, "-");
+            const yStr = formatAdminDateTime(y).split(" ")[0];
             result = source.filter((item) =>
               String(item.time).startsWith(yStr),
             );
@@ -6506,8 +6777,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         if (stateKey === "card_pool") renderCardTable();
         if (stateKey === "cdk") renderCDKTable();
         if (stateKey === "log") renderLogTable(window.__adminLogs || []);
-        if (stateKey === "automation")
-          renderAutomationTable(window.__adminLogs || []);
       }
 
       function getItemKey(type, item) {
@@ -6643,22 +6912,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             `;
       }
 
-      function toggleNavGroup(groupId, event) {
-        event?.stopPropagation?.();
-        const group = document.getElementById(groupId);
-        if (!group) return;
-        group.classList.toggle("expanded");
-        lucide.createIcons();
-      }
-
-      function expandNavGroupForPage(pId) {
-        if (BUSINESS_PAGES.has(pId)) {
-          document
-            .getElementById("nav_group_business")
-            ?.classList.add("expanded");
-        }
-      }
-
       function resolveNavItem(pId, el) {
         if (el && el.classList.contains("nav-item")) {
           return el;
@@ -6667,22 +6920,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           document.querySelector(`.nav-item[data-page="${pId}"]`) ||
           document.querySelector(`.nav-item[onclick*="'${pId}'"]`)
         );
-      }
-
-      function switchTaskTab(tab) {
-        const next = tab === "stages" ? "stages" : "records";
-        document
-          .querySelectorAll("#task_page_tabs .page-tab")
-          .forEach((btn) => {
-            btn.classList.toggle("active", btn.dataset.tab === next);
-          });
-        document
-          .getElementById("task_tab_records")
-          ?.classList.toggle("active", next === "records");
-        document
-          .getElementById("task_tab_stages")
-          ?.classList.toggle("active", next === "stages");
-        lucide.createIcons();
       }
 
       function switchSystemLogTab(tab) {
@@ -6708,6 +6945,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       }
 
       function normalizePageId(pId) {
+        if (pId === "sessions") {
+          return "checkout_debug";
+        }
         if (pId === "automation_tasks") {
           return "logs";
         }
@@ -6733,7 +6973,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           if (p.id !== pId) p.classList.remove("active");
         });
 
-        expandNavGroupForPage(pId);
         resolveNavItem(pId, el)?.classList.add("active");
 
         if (pId === "system_logs") {
@@ -6749,11 +6988,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         if (pId === "billing") {
           loadBillingRecords(1).catch(() => {});
         }
-
-        if (pId === "sessions") {
-          loadSessions(false).catch(() => {});
-        }
-
         if (pId === "cards") {
           loadCardPoolList();
         }
@@ -6792,11 +7026,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         }
 
         if (pId === "logs") {
-          if (requestedPageId === "automation_tasks") {
-            switchTaskTab("stages");
-          } else {
-            switchTaskTab("records");
-          }
           loadTaskLogs(false).catch((error) => {
             console.error("Failed to load task logs", error);
           });
@@ -7057,6 +7286,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         if (maxConcurrentEl) {
           maxConcurrentEl.value = cfg.max_concurrent_activations || 1;
         }
+        adminDefaultTimeZone = cfg.default_timezone || "Asia/Shanghai";
+        const timeZoneEl = document.getElementById("default_timezone");
+        if (timeZoneEl) {
+          timeZoneEl.value = adminDefaultTimeZone;
+        }
         loadTelegramConfig(data.telegram || {});
         loadHcaptchaConfig(data.hcaptcha || {});
         lastMaintenanceModeValue = Boolean(cfg.maintenance_mode);
@@ -7066,55 +7300,133 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         );
       }
 
+      function setTextById(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.innerText = value;
+      }
+
+      function setStyleById(id, property, value) {
+        const el = document.getElementById(id);
+        if (el) el.style.setProperty(property, value);
+      }
+
+      function decorateDashboardCards() {
+        const icons = [
+          "cpu",
+          "memory-stick",
+          "hard-drive",
+          "clock-3",
+          "list-todo",
+          "circle-check-big",
+          "circle-x",
+          "key-round",
+          "key-round",
+          "key",
+          "credit-card",
+          "wallet-cards",
+          "badge-dollar-sign",
+          "gauge",
+        ];
+        document
+          .querySelectorAll("#dashboard .stat-card")
+          .forEach((card, index) => {
+            if (card.querySelector(".stat-header")) return;
+            const label = card.querySelector(".stat-label");
+            if (!label) return;
+            const header = document.createElement("div");
+            header.className = "stat-header";
+            const icon = document.createElement("span");
+            icon.className = "stat-icon";
+            icon.innerHTML = `<i data-lucide="${icons[index] || "chart-no-axes-column"}"></i>`;
+            label.before(header);
+            header.append(label, icon);
+          });
+        lucide.createIcons();
+      }
+
       async function loadData(isInitial = false) {
         try {
           const res = await authFetch("/api/admin/data");
           const data = await res.json();
-          document.getElementById("stat_cpu_percent").innerText =
-            `${Number(data.runtime?.system?.cpu?.percent || 0)}%`;
-          document.getElementById("stat_cpu_meta").innerText =
-            data.runtime?.system?.cpu?.text || "实时 CPU 使用率";
-          document.getElementById("stat_memory_percent").innerText =
-            `${Number(data.runtime?.system?.memory?.percent || 0)}%`;
-          document.getElementById("stat_memory_meta").innerText =
-            data.runtime?.system?.memory?.text || "0.0G/0.0G";
-          document.getElementById("stat_disk_percent").innerText =
-            `${Number(data.runtime?.system?.disk?.percent || 0)}%`;
-          document.getElementById("stat_disk_meta").innerText =
-            `${data.runtime?.system?.disk?.usedText || "0.0G"}/${data.runtime?.system?.disk?.totalText || "0.0G"}${data.runtime?.system?.disk?.drive ? ` (${data.runtime.system.disk.drive})` : ""}`;
-          document.getElementById("stat_uptime_meta").innerText =
-            "服务持续运行时间";
+          setTextById(
+            "stat_cpu_percent",
+            `${Number(data.runtime?.system?.cpu?.percent || 0)}%`,
+          );
+          setTextById("stat_cpu_meta", data.runtime?.system?.cpu?.text || "");
+          setTextById(
+            "stat_memory_percent",
+            `${Number(data.runtime?.system?.memory?.percent || 0)}%`,
+          );
+          setTextById(
+            "stat_memory_meta",
+            data.runtime?.system?.memory?.text || "0.0G/0.0G",
+          );
+          setTextById(
+            "stat_disk_percent",
+            `${Number(data.runtime?.system?.disk?.percent || 0)}%`,
+          );
+          setTextById(
+            "stat_disk_meta",
+            `${data.runtime?.system?.disk?.usedText || "0.0G"} / ${data.runtime?.system?.disk?.totalText || "0.0G"}`,
+          );
           startUptimeTicker(data.runtime?.system?.uptime?.seconds || 0);
-          document.getElementById("stat_total").innerText = data.stats.total;
-          document.getElementById("stat_success").innerText =
-            data.stats.success;
-          document.getElementById("stat_failed").innerText = data.stats.failed;
-          document.getElementById("stat_cdk_total").innerText =
-            data.stats.cdk_total || 0;
-          document.getElementById("stat_cdk_used").innerText =
-            data.stats.cdk_used || 0;
-          document.getElementById("stat_cdk_unused").innerText =
-            data.stats.cdk_unused || 0;
-          const billingCurrency = data.stats.billing_currency || "USD";
+          setTextById("stat_total", data.stats.total);
+          setTextById("stat_success", data.stats.success);
+          setTextById("stat_failed", data.stats.failed);
+          setTextById("stat_cdk_total", data.stats.cdk_total || 0);
+          setTextById("stat_cdk_used", data.stats.cdk_used || 0);
+          setTextById("stat_cdk_unused", data.stats.cdk_unused || 0);
           const billingRevenue = Number(data.stats.billing_revenue || 0);
-          document.getElementById("stat_billing_revenue").innerText =
-            billingRevenue.toFixed(2);
-          document.getElementById("stat_billing_revenue_meta").innerText =
-            `成功账单累计 (${billingCurrency})`;
-          document.getElementById("stat_billing_paid_count").innerText =
-            data.stats.billing_paid_count || 0;
-          document.getElementById("stat_card_total").innerText = (
-            data.config.card_pool || []
-          ).length;
-          document.getElementById("stat_foreground_slots").innerText =
-            `${Number(data.runtime?.active_foreground_jobs || 0)}/${Number(data.config.max_concurrent_activations || 1)}`;
+          setTextById("stat_billing_revenue", billingRevenue.toFixed(2));
+          setTextById(
+            "stat_billing_paid_count",
+            data.stats.billing_paid_count || 0,
+          );
+          setTextById("stat_card_total", (data.config.card_pool || []).length);
+          setTextById(
+            "stat_foreground_slots",
+            `${Number(data.runtime?.active_foreground_jobs || 0)}/${Number(data.config.max_concurrent_activations || 1)}`,
+          );
           const pool = data.runtime?.browser_pool;
           const poolMeta =
             pool?.enabled && pool?.size
-              ? `浏览器池 ${pool.idle ?? 0}/${pool.size} 空闲${pool.waiting ? ` · 排队 ${pool.waiting}` : ""} · `
+              ? `浏览器池 ${pool.idle ?? 0}/${pool.size} 空闲${pool.waiting ? ` · 排队 ${pool.waiting}` : ""}`
               : "";
-          document.getElementById("stat_foreground_slots_meta").innerText =
-            `${poolMeta}前台占用/最大前台并发`;
+          setTextById("stat_foreground_slots_meta", poolMeta);
+
+          const taskTotal = Math.max(0, Number(data.stats?.total || 0));
+          const taskSuccess = Math.max(0, Number(data.stats?.success || 0));
+          const taskRunning = Math.max(0, Number(data.stats?.running || 0));
+          const taskFailed = Math.max(0, Number(data.stats?.failed || 0));
+          const taskDenominator = Math.max(
+            taskTotal,
+            taskSuccess + taskRunning + taskFailed,
+            1,
+          );
+          const setTaskSegment = (id, value) =>
+            setStyleById(id, "width", `${(value / taskDenominator) * 100}%`);
+          setTextById("dashboard_task_success", taskSuccess);
+          setTextById("dashboard_task_running", taskRunning);
+          setTextById("dashboard_task_failed", taskFailed);
+          setTaskSegment("dashboard_task_success_bar", taskSuccess);
+          setTaskSegment("dashboard_task_running_bar", taskRunning);
+          setTaskSegment("dashboard_task_failed_bar", taskFailed);
+
+          [
+            ["cpu", Number(data.runtime?.system?.cpu?.percent || 0)],
+            ["memory", Number(data.runtime?.system?.memory?.percent || 0)],
+            ["disk", Number(data.runtime?.system?.disk?.percent || 0)],
+          ].forEach(([name, rawValue]) => {
+            const percent = Math.min(100, Math.max(0, rawValue));
+            const bar = document.getElementById(`dashboard_${name}_bar`);
+            if (bar) {
+              bar.style.width = `${percent}%`;
+              bar.classList.toggle("warning", percent >= 70 && percent < 90);
+              bar.classList.toggle("danger", percent >= 90);
+            }
+            setTextById(`dashboard_${name}_value`, `${percent}%`);
+          });
+          decorateDashboardCards();
 
           if (isInitial) {
             applySystemConfigFromData(data);
@@ -7129,7 +7441,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
 
           window.__adminLogs = data.logs || [];
           renderLogTable(window.__adminLogs);
-          renderAutomationTable(window.__adminLogs);
 
           try {
             await loadCdkList();
@@ -7253,7 +7564,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 job_keys: jobKeys,
-                timezone_offset_min: -new Date().getTimezoneOffset(),
+                timezone_offset_min: getAdminTimeZoneOffsetMinutes(),
               }),
             },
           );
@@ -7465,6 +7776,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       }
 
       let proxyPoolList = [];
+      let editingProxyId = null;
 
       function renderProxyCheckBadge(item) {
         if (item.last_check_ok === true) {
@@ -7483,7 +7795,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
 
         if (!proxyPoolList.length) {
           tbody.innerHTML =
-            '<tr><td colspan="7">暂无代理，请在上方粘贴 URL 后点击「保存到代理池」</td></tr>';
+            '<tr><td colspan="9">暂无代理，请在上方粘贴 URL 后点击「保存代理」</td></tr>';
           if (summary) summary.textContent = "共 0 条，启用 0 条";
           return;
         }
@@ -7511,9 +7823,16 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                         <td id="proxy_ip_${item.id}">${ipCell}</td>
                         <td style="text-align:center;" id="proxy_lat_${item.id}">${latency}</td>
                         <td style="text-align:center;"><code>${escapeHtml(item.protocol || "-")}</code></td>
-                        <td><code style="font-size:12px; word-break:break-all;">${escapeHtml(item.proxy_url_masked || item.proxy_url || "")}</code></td>
+                        <td><code style="font-size:12px; word-break:break-all;">${escapeHtml(item.proxy_url || "")}</code></td>
                         <td style="text-align:center;">
-                            <button type="button" class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="testSavedProxy(${item.id})">检测</button>
+                          <button type="button" class="btn btn-secondary" style="min-width:32px; padding:6px 8px; justify-content:center;" onclick="editSavedProxy(${item.id})" title="编辑代理">
+                            <i data-lucide="pencil"></i>
+                          </button>
+                        </td>
+                        <td style="text-align:center;">
+                          <button type="button" class="btn btn-secondary" style="min-width:58px; padding:4px 10px; font-size:12px; justify-content:center;" onclick="testSavedProxy(${item.id})">检测</button>
+                        </td>
+                        <td style="text-align:center;">
                             <button type="button" class="btn-delete" onclick="deleteSavedProxy(${item.id})" title="删除">
                                 <i data-lucide="trash-2"></i>
                             </button>
@@ -7585,10 +7904,10 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 .join("") ||
               '<div style="font-size:11px; opacity:0.6;">无打开页面</div>';
             return `
-                <div style="border:1px solid ${border}; background:${bg}; border-radius:12px; padding:16px;">
+                <div style="border:1px solid ${border}; background:${bg}; border-radius:14px; padding:16px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                         <strong style="font-size:16px;">Slot #${slot.slotId}</strong>
-                        <span style="font-size:12px; padding:4px 10px; border-radius:999px; background:rgba(0,0,0,0.25); color:${border};">${statusText}</span>
+                        <span class="status-badge ${busy ? "status-warning" : "status-success"}">${statusText}</span>
                     </div>
                     <div style="font-size:13px; line-height:1.65; color:var(--text-dim);">
                         <div>CDP: <code>${escapeHtml(slot.cdpUrl || "")}</code></div>
@@ -7596,7 +7915,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                         <div>Profile: ${escapeHtml(slot.profileSizeText || "0 B")}</div>
                         <div>页面数: ${slot.pageCount || 0}${busy ? ` · 任务 <code>${job}</code>` : ""}</div>
                     </div>
-                    <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.06);">${urls}</div>
+                    <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--divider);">${urls}</div>
                 </div>`;
           })
           .join("");
@@ -7642,8 +7961,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               ? "运行中"
               : "未就绪";
         document.getElementById("bp_stat_status").style.color = enabled
-          ? "#86efac"
-          : "#f87171";
+          ? "var(--success)"
+          : "var(--error)";
         document.getElementById("bp_stat_slots").textContent =
           `${pool.size || 0} / ${pool.configuredSize || pool.size || 0}`;
         document.getElementById("bp_stat_usage").textContent =
@@ -7660,7 +7979,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         const hostLines = [];
         if (mem.hostTotalGb != null) {
           hostLines.push(
-            `主机内存：已用 <strong>${mem.hostUsedGb?.toFixed?.(1) ?? mem.hostUsedGb} GB</strong> / 共 ${mem.hostTotalGb} GB（可用约 <strong style="color:#86efac;">${mem.hostFreeGb?.toFixed?.(1) ?? mem.hostFreeGb} GB</strong>）`,
+            `主机内存：已用 <strong>${mem.hostUsedGb?.toFixed?.(1) ?? mem.hostUsedGb} GB</strong> / 共 ${mem.hostTotalGb} GB（可用约 <strong>${mem.hostFreeGb?.toFixed?.(1) ?? mem.hostFreeGb} GB</strong>）`,
           );
         } else if (sys.memory?.text) {
           hostLines.push(
@@ -7677,9 +7996,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           `前台任务：${data.foreground?.activeForegroundJobs ?? 0} 占用 · 槽位上限 ${pool.maxPoolSize || 24}`,
         );
         if (mem.sizingHint) {
-          hostLines.push(
-            `<span style="color:#93c5fd;">💡 ${escapeHtml(mem.sizingHint)}</span>`,
-          );
+          hostLines.push(`<span>${escapeHtml(mem.sizingHint)}</span>`);
         }
         document.getElementById("browser_pool_memory_hint").innerHTML =
           hostLines.join("<br>");
@@ -7899,6 +8216,55 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         }
       }
 
+      async function editSavedProxy(id) {
+        const item = proxyPoolList.find((proxy) => proxy.id === id);
+        if (!item) return;
+        const overlay = document.getElementById("proxy_edit_modal_overlay");
+        const input = document.getElementById("proxy_edit_input");
+        if (!overlay || !input) return;
+        editingProxyId = id;
+        input.value = item.proxy_url || "";
+        overlay.classList.add("open");
+        input.focus();
+      }
+
+      function closeProxyEditModal() {
+        const overlay = document.getElementById("proxy_edit_modal_overlay");
+        if (overlay) overlay.classList.remove("open");
+        editingProxyId = null;
+      }
+
+      async function saveProxyEdit() {
+        const input = document.getElementById("proxy_edit_input");
+        const item = proxyPoolList.find((proxy) => proxy.id === editingProxyId);
+        if (!input || !item) return;
+        const proxyUrl = input.value.trim();
+        if (proxyUrl === item.proxy_url) {
+          closeProxyEditModal();
+          return;
+        }
+        if (!proxyUrl.trim()) {
+          showMessage("代理 URL 不能为空", "warning");
+          return;
+        }
+        try {
+          const res = await authFetch(`/api/admin/proxies/${editingProxyId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ proxy_url: proxyUrl.trim() }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.error || data.message || "更新失败");
+          }
+          closeProxyEditModal();
+          showMessage("代理已更新，请重新检测", "success");
+          await loadProxyPool();
+        } catch (error) {
+          showMessage(error.message || "更新代理失败", "error");
+        }
+      }
+
       async function deleteSavedProxy(id) {
         if (!confirm("确定删除这条代理？")) return;
         try {
@@ -7931,6 +8297,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           )
             ? Boolean(overrides.maintenance_mode)
             : document.getElementById("maintenance_mode").checked,
+          default_timezone:
+            document.getElementById("default_timezone")?.value ||
+            "Asia/Shanghai",
         };
       }
 
@@ -8029,25 +8398,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         return parts.length > 1 ? parts[1] : value.slice(-8);
       }
 
-      function renderAutomationStages(automation) {
-        if (
-          !automation ||
-          !Array.isArray(automation.stages) ||
-          automation.stages.length === 0
-        ) {
-          return '<span style="color:var(--text-dim);">-</span>';
-        }
-        return automation.stages
-          .map((stage) => {
-            let cls = "pending";
-            if (stage.failed) {
-              cls = "failed";
-            } else if (stage.done) {
-              cls = "done";
-            }
-            return `<span class="automation-stage ${cls}">${escapeHtml(stage.label)}</span>`;
-          })
-          .join("");
+      function getTaskType(task) {
+        const cdk = String(task?.cdk || "");
+        if (cdk === "[checkout-debug]") return "链接调试";
+        if (cdk === "[payment-debug]") return "支付调试";
+        return "CDK 开通";
       }
 
       async function loadTaskLogs(showToast = false) {
@@ -8059,7 +8414,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           }
           window.__adminLogs = Array.isArray(data.tasks) ? data.tasks : [];
           renderLogTable(window.__adminLogs);
-          renderAutomationTable(window.__adminLogs);
           if (showToast) {
             showMessage("任务列表已刷新", "success");
           }
@@ -8069,45 +8423,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             showMessage(error.message || "加载任务失败", "error");
           }
         }
-        lucide.createIcons();
-      }
-
-      function renderAutomationTable(logs) {
-        const tbody = document.getElementById("automation_body");
-        if (!tbody) {
-          return;
-        }
-        const pageData = getPageItems(logs, "automation");
-        if (!pageData.items.length) {
-          tbody.innerHTML =
-            '<tr><td colspan="8" style="text-align:center; color: var(--text-dim); padding: 36px 0;">暂无自动化任务记录</td></tr>';
-          renderPagination("automation_pagination", "automation", 0);
-          return;
-        }
-        tbody.innerHTML = pageData.items
-          .map((task) => {
-            const mediaCell = renderTaskMediaCell(task);
-            const checkoutOpened = Boolean(task.automation?.checkoutOpened);
-            const checkoutCell = checkoutOpened
-              ? '<span class="automation-checkout-badge ok"><i data-lucide="check-circle-2"></i> 已打开</span>'
-              : '<span class="automation-checkout-badge no"><i data-lucide="x-circle"></i> 未打开</span>';
-            const phase = escapeHtml(
-              task.automation?.phase || task.message || "-",
-            );
-            return `
-                <tr>
-                    <td>${escapeHtml(task.time || "-")}</td>
-                    <td><code title="${escapeHtml(task.jobKey || task.id || "")}">${escapeHtml(shortenJobKey(task.jobKey || task.id))}</code></td>
-                    <td><code>${escapeHtml(task.cdk || "-")}</code></td>
-                    <td style="text-align:center">${checkoutCell}</td>
-                    <td>${renderAutomationStages(task.automation)}</td>
-                    <td>${phase}</td>
-                    <td>${renderStatus(task.status)}</td>
-                    <td style="text-align:center">${mediaCell}</td>
-                </tr>`;
-          })
-          .join("");
-        renderPagination("automation_pagination", "automation", pageData.total);
         lucide.createIcons();
       }
 
@@ -8399,10 +8714,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
 
       function formatTimeShort(ts) {
         if (!ts) return "-";
-        const d = new Date(ts);
-        if (isNaN(d.getTime())) return "-";
-        const pad = (n) => String(n).padStart(2, "0");
-        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        return formatAdminDateTime(ts);
       }
 
       async function deleteCardPoolItem(cardId) {
@@ -8502,7 +8814,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           resultEl.style.color = "var(--error)";
         } finally {
           btn.disabled = false;
-          btn.innerHTML = '<i data-lucide="check-check"></i> 解析并导入';
+          btn.innerHTML = '<i data-lucide="check-check"></i> 解析导入';
           lucide.createIcons();
         }
       }
@@ -8524,27 +8836,19 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         tbody.innerHTML = pageData.items
           .map((l) => {
             const mediaCell = renderTaskMediaCell(l);
-            const infoParts = [];
-            if (l.message) {
-              infoParts.push(escapeHtml(l.message));
-            }
-            if (l.automation?.phase && l.automation.phase !== l.message) {
-              infoParts.push(
-                `<span style="color:var(--text-dim); font-size:12px;">阶段：${escapeHtml(l.automation.phase)}</span>`,
-              );
-            }
-            if (l.automation?.checkoutOpened) {
-              infoParts.push(
-                '<span style="color:#047857; font-size:12px;">Checkout 已打开</span>',
-              );
-            }
-            const infoCell = infoParts.length ? infoParts.join("<br>") : "-";
+            const taskType = getTaskType(l);
+            const taskTypeClass =
+              taskType === "CDK 开通"
+                ? "status-running"
+                : taskType === "支付调试"
+                  ? "status-success"
+                  : "status-warning";
             return `
                 <tr>
                     <td class="col-time">${escapeHtml(l.time || "-")}</td>
+                    <td><span class="status-badge ${taskTypeClass}">${taskType}</span></td>
                     <td class="col-cdk"><code>${escapeHtml(l.cdk || "-")}</code></td>
                     <td class="col-token"><code>${escapeHtml(l.token || "-")}</code></td>
-                    <td class="col-info"><div class="task-log-info">${infoCell}</div></td>
                     <td class="col-progress">
                         <div style="font-size: 12px; margin-bottom: 2px;">${l.progress}%</div>
                         <div class="progress-mini-track">
@@ -8553,7 +8857,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                     </td>
                     <td class="col-status">${renderStatus(l.status)}</td>
                     <td class="col-media" style="text-align:center">${mediaCell}</td>
-                    <td class="col-action" style="text-align:center"><button type="button" class="btn-delete" title="删除此任务记录" data-delete-task="${escapeHtml(l.id)}"><i data-lucide="trash-2"></i></button></td>
+                    <td class="col-action" style="text-align:center">
+                      <div class="table-action-group task-action-buttons">
+                        <button type="button" class="btn btn-primary" data-view-task-detail="${escapeHtml(l.id)}">详情</button>
+                        <button type="button" class="btn-delete" title="删除此任务记录" data-delete-task="${escapeHtml(l.id)}"><i data-lucide="trash-2"></i></button>
+                      </div>
+                    </td>
                 </tr>`;
           })
           .join("");
@@ -9258,7 +9567,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           }
           panel.style.display = "block";
           const runtimeLines = (data.runtime || []).map(
-            (e) => `[${new Date(e.ts).toLocaleTimeString()}] ${e.text}`,
+            (e) => `[${formatRuntimeLogTs(e.ts)}] ${e.text}`,
           );
           const fileList = (data.files || []).map(
             (f) => `${f.name} (${Math.round(f.size / 1024)}KB)`,
@@ -9334,8 +9643,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           return;
         }
 
-        if (newPassword.length < 6) {
-          showMessage("新密码至少 6 位", "warning");
+        if (newPassword.length < 12) {
+          showMessage("新密码至少 12 位", "warning");
           return;
         }
 
@@ -9591,7 +9900,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         percentText.innerText = "0%";
         statusText.innerText =
           options.initialText || `准备生产 ${count} 个成品号...`;
-        bar.style.background = "linear-gradient(90deg, var(--accent), #a855f7)";
+        bar.style.background = "var(--primary)";
 
         let socket = null;
         let settled = false;
@@ -9762,8 +10071,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           bar.style.width = "0%";
           percentText.innerText = "0%";
           statusText.innerText = "正在准备生产环境...";
-          bar.style.background =
-            "linear-gradient(90deg, var(--accent), #a855f7)";
+          bar.style.background = "var(--primary)";
           btn.disabled = false;
           btn.innerHTML = originalContent;
           lucide.createIcons();
@@ -9866,7 +10174,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         tbody.innerHTML = records
           .map((r) => {
             const time = r.payment_time
-              ? new Date(r.payment_time).toLocaleString("zh-CN")
+              ? formatAdminDateTime(r.payment_time)
               : "-";
             const statusClass =
               r.status === "success" ? "status-success" : "status-failed";
@@ -10087,7 +10395,48 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         if (panel) panel.style.display = "none";
       }
 
+      const SIDEBAR_COLLAPSED_KEY = "oai_admin_sidebar_collapsed";
+
+      function setSidebarCollapsed(collapsed, persist = false) {
+        const sidebar = document.querySelector(".sidebar");
+        const toggle = document.getElementById("sidebar_toggle");
+        if (!sidebar || !toggle) {
+          return;
+        }
+
+        sidebar.classList.toggle("collapsed", collapsed);
+        toggle.setAttribute(
+          "aria-label",
+          collapsed ? "展开菜单栏" : "收起菜单栏",
+        );
+        toggle.title = collapsed ? "展开菜单栏" : "收起菜单栏";
+        toggle.innerHTML = `<i data-lucide="${collapsed ? "chevron-right" : "chevron-left"}"></i>`;
+        document.querySelectorAll(".nav-item").forEach((item) => {
+          const label = item.querySelector("span")?.textContent?.trim();
+          if (label) {
+            item.title = label;
+          }
+        });
+        lucide.createIcons();
+
+        if (persist) {
+          localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
+        }
+      }
+
+      function toggleSidebar() {
+        const sidebar = document.querySelector(".sidebar");
+        setSidebarCollapsed(!sidebar?.classList.contains("collapsed"), true);
+      }
+
+      function initializeSidebar() {
+        setSidebarCollapsed(
+          localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true",
+        );
+      }
+
       async function bootAdmin() {
+        initializeSidebar();
         try {
           const res = await fetch("/api/public/admin-paths");
           const data = await res.json();
@@ -10146,6 +10495,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       // ─── Region & Address Management ───────────────────────────────────────────
       let regionAddressList = [];
       let currentRegion = "PH";
+      let paymentRegionCatalog = {};
       let checkoutPlanMap = {
         plus: "chatgptplusplan",
         pro_5x: "chatgptprolite",
@@ -10156,8 +10506,37 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       let checkoutDebugLogText = "";
       let checkoutDebugLogPollTimer = null;
       let checkoutDebugStatusPollTimer = null;
+      let checkoutDebugMode = "link";
+      const CHECKOUT_DEBUG_TERMINAL_STATUSES = new Set([
+        "success",
+        "failed",
+        "error",
+        "cancelled",
+        "canceled",
+        "timeout",
+        "timed_out",
+        "manual",
+      ]);
+
+      function resetCheckoutDebugButton() {
+        const linkButton = document.getElementById("checkout_link_debug_btn");
+        const paymentButton = document.getElementById(
+          "checkout_payment_debug_btn",
+        );
+        if (linkButton) {
+          linkButton.disabled = false;
+          linkButton.innerHTML = '<i data-lucide="play"></i> 链接调试';
+        }
+        if (paymentButton) {
+          paymentButton.disabled = false;
+          paymentButton.innerHTML =
+            '<i data-lucide="credit-card"></i> 支付调试';
+        }
+        lucide.createIcons();
+      }
 
       function clearCheckoutDebugForm() {
+        stopCheckoutDebugLogStream();
         const input = document.getElementById("checkout_session_input");
         if (input) input.value = "";
         const box = document.getElementById("checkout_result_box");
@@ -10166,6 +10545,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         if (pre) pre.textContent = "";
         checkoutDebugLogText = "";
         checkoutDebugLogAfter = 0;
+        checkoutDebugJobKey = "";
+        resetCheckoutDebugButton();
       }
 
       function appendCheckoutDebugLogEntries(entries) {
@@ -10186,11 +10567,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         const pre = document.getElementById("checkout_debug_log_pre");
         if (!pre) return;
         pre.textContent = checkoutDebugLogText;
-        const autoscroll = document.getElementById("checkout_log_autoscroll");
         const wrap = pre.parentElement;
-        if (autoscroll && autoscroll.checked && wrap) {
-          wrap.scrollTop = wrap.scrollHeight;
-        }
+        if (wrap) wrap.scrollTop = wrap.scrollHeight;
       }
 
       function stopCheckoutDebugLogStream() {
@@ -10225,10 +10603,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         if (pre) {
           pre.textContent = checkoutDebugLogText;
           const wrap = pre.parentElement;
-          const autoscroll = document.getElementById("checkout_log_autoscroll");
-          if (autoscroll && autoscroll.checked && wrap) {
-            wrap.scrollTop = wrap.scrollHeight;
-          }
+          if (wrap) wrap.scrollTop = wrap.scrollHeight;
         }
       }
 
@@ -10264,13 +10639,17 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         }, 2000);
       }
 
-      async function refreshCheckoutDebugLogs() {
+      async function copyCheckoutDebugLogs() {
+        const text = String(checkoutDebugLogText || "").trim();
+        if (!text) {
+          showMessage("当前没有可复制的运行日志", "warning");
+          return;
+        }
         try {
-          await fetchCheckoutDebugLogsTail();
-          await pollCheckoutDebugStatus(true);
-          showMessage("日志已刷新", "success");
-        } catch (e) {
-          showMessage(e.message || "刷新失败", "error");
+          await copyText(text);
+          showMessage("运行日志已复制", "success");
+        } catch (error) {
+          showMessage(error.message || "复制日志失败", "error");
         }
       }
 
@@ -10290,10 +10669,16 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         }
         if (statusEl) {
           if (status === "success") {
-            statusEl.textContent = "✅ 支付链接已生成";
+            statusEl.textContent =
+              checkoutDebugMode === "payment"
+                ? "✅ 支付调试成功"
+                : "✅ 支付链接已生成";
             statusEl.style.color = "var(--success, #22c55e)";
           } else if (status === "running") {
-            statusEl.textContent = "⏳ 浏览器调试进行中...";
+            statusEl.textContent =
+              checkoutDebugMode === "payment"
+                ? "⏳ 正在发起支付调试..."
+                : "⏳ 链接调试进行中...";
             statusEl.style.color = "var(--text-dim)";
           } else {
             statusEl.textContent = `❌ ${data.message || "调试失败"}`;
@@ -10304,11 +10689,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           emailEl.textContent = `账号: ${data.email}`;
         }
         if (urlWrap) {
-          urlWrap.innerHTML = checkoutUrl
-            ? `<a href="${escapeHtml(checkoutUrl)}" target="_blank" rel="noopener" style="color: var(--primary);">${escapeHtml(checkoutUrl)}</a>`
-            : status === "running"
-              ? '<span style="color:var(--text-dim); font-size:13px;">等待 Checkout URL...</span>'
-              : "";
+          urlWrap.innerHTML =
+            checkoutDebugMode !== "payment" && checkoutUrl
+              ? `<a href="${escapeHtml(checkoutUrl)}" target="_blank" rel="noopener" style="color: var(--primary);">${escapeHtml(checkoutUrl)}</a>`
+              : status === "running"
+                ? '<span style="color:var(--text-dim); font-size:13px;">正在等待支付流程结果...</span>'
+                : "";
         }
         if (shotWrap) {
           const shots = Array.isArray(data.screenshots) ? data.screenshots : [];
@@ -10336,23 +10722,19 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           const data = await res.json();
           if (!data.success) return;
           renderCheckoutDebugStatus(data);
-          if (data.status === "success" || data.status === "failed") {
-            if (checkoutDebugStatusPollTimer) {
-              clearInterval(checkoutDebugStatusPollTimer);
-              checkoutDebugStatusPollTimer = null;
-            }
-            const btn = document.getElementById("checkout_generate_btn");
-            if (btn) {
-              btn.disabled = false;
-              btn.innerHTML = '<i data-lucide="play"></i> 启动浏览器调试';
-              lucide.createIcons();
-            }
+          const status = String(data.status || "").toLowerCase();
+          if (CHECKOUT_DEBUG_TERMINAL_STATUSES.has(status)) {
+            stopCheckoutDebugLogStream();
+            fetchCheckoutDebugLogsTail().catch(() => {});
+            resetCheckoutDebugButton();
             if (forceToast) {
               showMessage(
-                data.status === "success"
-                  ? "支付链接生成成功"
+                status === "success"
+                  ? checkoutDebugMode === "payment"
+                    ? "支付调试成功"
+                    : "支付链接生成成功"
                   : data.message || "调试失败",
-                data.status === "success" ? "success" : "error",
+                status === "success" ? "success" : "error",
               );
             }
           }
@@ -10362,6 +10744,20 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       }
 
       async function startCheckoutDebug() {
+        return startCheckoutTask("link");
+      }
+
+      async function startCheckoutPayment() {
+        const confirmed = await showAdminConfirm(
+          "将从银行卡池选择可用卡并发起真实付款请求，继续？",
+          "确认支付调试",
+        );
+        if (confirmed) {
+          await startCheckoutTask("payment");
+        }
+      }
+
+      async function startCheckoutTask(mode) {
         const sessionRaw = document
           .getElementById("checkout_session_input")
           ?.value?.trim();
@@ -10370,8 +10766,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         syncCheckoutPlanName();
         const planName = getCheckoutPlanNameForSubmit();
         const regionSel = document.getElementById("checkout_region_selector");
-        const region = regionSel?.value || currentRegion;
-        const btn = document.getElementById("checkout_generate_btn");
+        const region =
+          normalizePaymentRegion(regionSel?.value) || currentRegion;
+        const isPayment = mode === "payment";
+        const btn = document.getElementById(
+          isPayment ? "checkout_payment_debug_btn" : "checkout_link_debug_btn",
+        );
 
         if (!sessionRaw) {
           showMessage("请粘贴 Session JSON", "warning");
@@ -10380,9 +10780,13 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
 
         if (btn) {
           btn.disabled = true;
-          btn.innerHTML = '<i data-lucide="loader"></i> 启动中...';
+          btn.innerHTML = `<i data-lucide="loader"></i> ${
+            isPayment ? "支付启动中..." : "链接启动中..."
+          }`;
           lucide.createIcons();
         }
+
+        checkoutDebugMode = isPayment ? "payment" : "link";
 
         checkoutDebugLogText = "";
         checkoutDebugLogAfter = 0;
@@ -10391,50 +10795,57 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         if (pre) pre.textContent = "";
 
         try {
-          const res = await authFetch("/api/admin/checkout/generate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              session: sessionRaw,
-              plan_type: planType,
-              plan_name: planName || undefined,
-              country: region,
-            }),
-          });
+          const res = await authFetch(
+            isPayment
+              ? "/api/admin/checkout/pay"
+              : "/api/admin/checkout/generate",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                session: sessionRaw,
+                plan_type: planType,
+                plan_name: planName || undefined,
+                country: region,
+              }),
+            },
+          );
           const data = await res.json();
           if (!res.ok || !data.success) {
             throw new Error(data.error || data.message || "启动失败");
           }
 
           checkoutDebugJobKey = data.jobKey;
+          if (btn) {
+            btn.innerHTML = `<i data-lucide="loader"></i> ${
+              isPayment ? "支付调试中..." : "链接调试中..."
+            }`;
+            lucide.createIcons();
+          }
           renderCheckoutDebugStatus({
             status: "running",
             email: data.email,
             checkout_url: "",
             screenshots: [],
           });
-          showMessage(`浏览器任务已启动：${data.jobKey}`, "success");
+          showMessage(
+            `${isPayment ? "支付" : "链接"}调试任务已启动：${data.jobKey}`,
+            "success",
+          );
           startCheckoutDebugLogStream();
         } catch (e) {
-          if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = '<i data-lucide="play"></i> 启动浏览器调试';
-            lucide.createIcons();
-          }
+          resetCheckoutDebugButton();
           showMessage(e.message || "启动失败", "error");
         }
       }
 
       function onCheckoutRegionChange() {
         const sel = document.getElementById("checkout_region_selector");
-        if (sel) currentRegion = sel.value || currentRegion;
-        const labels = {
-          PH: "菲律宾 / PHP",
-          US: "美国 / USD",
-          SG: "新加坡 / SGD",
-          MY: "马来西亚 / MYR",
-        };
-        updateCheckoutRegionHint(labels[currentRegion] || currentRegion, "");
+        const region = normalizePaymentRegion(sel?.value);
+        if (!region) return;
+        currentRegion = region;
+        const config = paymentRegionCatalog[region] || {};
+        updateCheckoutRegionHint(config.label || region, config.currency || "");
       }
 
       async function loadCheckoutDebugPage() {
@@ -10518,8 +10929,14 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           const data = await res.json();
           if (data.success) {
             currentRegion = data.region || "PH";
+            paymentRegionCatalog = data.supported || {};
+            renderPaymentRegionOptions();
             const sel = document.getElementById("region_selector");
             if (sel) sel.value = currentRegion;
+            const checkoutSel = document.getElementById(
+              "checkout_region_selector",
+            );
+            if (checkoutSel) checkoutSel.value = currentRegion;
             const badge = document.getElementById("region_current_badge");
             if (badge)
               badge.textContent = `当前: ${data.label || currentRegion} (${data.currency || "USD"})`;
@@ -10532,7 +10949,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
 
       async function savePaymentRegion() {
         const sel = document.getElementById("region_selector");
-        const region = sel ? sel.value : "";
+        const region = normalizePaymentRegion(sel?.value);
         if (!region) {
           showMessage("请选择地区", "warning");
           return;
@@ -10557,6 +10974,35 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           showMessage(e.message || "保存地区失败", "error");
         }
         lucide.createIcons();
+      }
+
+      function normalizePaymentRegion(value) {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        const code = raw.toUpperCase();
+        if (paymentRegionCatalog[code]) return code;
+        const matched = Object.entries(paymentRegionCatalog).find(
+          ([, cfg]) =>
+            String(cfg.label || "").toLowerCase() === raw.toLowerCase(),
+        );
+        return matched ? matched[0] : "";
+      }
+
+      function renderPaymentRegionOptions() {
+        const list = document.getElementById("payment_region_options");
+        if (!list) return;
+        list.innerHTML = Object.entries(paymentRegionCatalog)
+          .sort(([, left], [, right]) =>
+            String(left.label || "").localeCompare(
+              String(right.label || ""),
+              "zh-CN",
+            ),
+          )
+          .map(
+            ([code, cfg]) =>
+              `<option value="${escapeHtml(code)}" label="${escapeHtml(`${cfg.label || code} / ${cfg.currency || ""}`)}"></option>`,
+          )
+          .join("");
       }
 
       // ─── 第三方代充 API 配置 ─────────────────────────────────────────────
@@ -10634,23 +11080,23 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           ? gptPlans
               .map((p) => `${p.name || p.key} (${p.key || "—"})`)
               .join("、")
-          : "無可用套餐";
+          : "无可用套餐";
         const creditPlans = data.credit_plans || [];
         document.getElementById("gpt_api_credit_plans").textContent =
           creditPlans.length
             ? creditPlans
-                .map((p) => `${p.name || p.id}: ${p.credits ?? "—"} 積分`)
+                .map((p) => `${p.name || p.id}: ${p.credits ?? "—"} 积分`)
                 .join("、")
-            : "無";
+            : "无";
         const orders = data.recent_orders || [];
         document.getElementById("gpt_api_recent_orders").innerHTML =
           orders.length
-            ? `<table style="width:100%; border-collapse:collapse"><thead><tr><th style="text-align:left">訂單</th><th style="text-align:left">狀態</th><th style="text-align:left">套餐卡密</th><th style="text-align:left">更新時間</th></tr></thead><tbody>${orders.map((o) => `<tr><td>${escapeHtml(String(o.order_id || o.task_id || "—"))}</td><td>${escapeHtml(o.status || "—")}</td><td>${escapeHtml(o.topup_code || "—")}</td><td>${escapeHtml(o.updated_at || "—")}</td></tr>`).join("")}</tbody></table>`
-            : "尚無失敗的第三方代充訂單";
+            ? `<table style="width:100%; border-collapse:collapse"><thead><tr><th style="text-align:left">订单</th><th style="text-align:left">状态</th><th style="text-align:left">套餐卡密</th><th style="text-align:left">更新时间</th></tr></thead><tbody>${orders.map((o) => `<tr><td>${escapeHtml(String(o.order_id || o.task_id || "—"))}</td><td>${escapeHtml(o.status || "—")}</td><td>${escapeHtml(o.topup_code || "—")}</td><td>${escapeHtml(o.updated_at || "—")}</td></tr>`).join("")}</tbody></table>`
+            : "暂无失败的第三方代充订单";
         document.getElementById("gpt_api_status_hint").textContent =
           data.balance_error
-            ? `積分查詢失敗：${data.balance_error}`
-            : "資料來自供應商 /plans 與 /balance；完整卡密不會由接口回傳。";
+            ? `积分查询失败：${data.balance_error}`
+            : "数据来自供应商 /plans 与 /balance；完整卡密不会由接口返回。";
       }
 
       async function readApiJson(response, fallbackMessage) {
@@ -10663,26 +11109,26 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             .trim()
             .slice(0, 160);
           throw new Error(
-            `${fallbackMessage}：伺服器回傳 HTML，請重新啟動應用服務後再試${preview ? `（${preview}）` : ""}`,
+            `${fallbackMessage}：服务器返回 HTML，请重新启动应用服务后再试${preview ? `（${preview}）` : ""}`,
           );
         }
         try {
           return JSON.parse(text);
         } catch (_) {
-          throw new Error(`${fallbackMessage}：伺服器回傳了無法解析的 JSON`);
+          throw new Error(`${fallbackMessage}：服务器返回了无法解析的 JSON`);
         }
       }
 
       async function refreshGptApiStatus() {
         try {
           const res = await authFetch("/api/admin/gpt-api/status");
-          const data = await readApiJson(res, "狀態查詢失敗");
+          const data = await readApiJson(res, "状态查询失败");
           if (!res.ok || !data.success)
-            throw new Error(data.message || "狀態查詢失敗");
+            throw new Error(data.message || "状态查询失败");
           renderGptApiStatus(data);
         } catch (error) {
           document.getElementById("gpt_api_status_hint").textContent =
-            error.message || "狀態查詢失敗";
+            error.message || "状态查询失败";
         }
         lucide.createIcons();
       }
@@ -10695,7 +11141,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             ?.textContent.includes("已保存"),
         );
         if (!payload.api_key && !hasSavedKey) {
-          showMessage("請先填寫並保存 API Key", "warning");
+          showMessage("请先填写并保存 API Key", "warning");
           return;
         }
         try {
@@ -10704,13 +11150,13 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           });
-          const data = await readApiJson(res, "API 連線測試失敗");
+          const data = await readApiJson(res, "API 连接测试失败");
           if (!res.ok || !data.success)
-            throw new Error(data.message || "連線失敗");
+            throw new Error(data.message || "连接失败");
           showMessage(data.message, "success");
           await refreshGptApiStatus();
         } catch (error) {
-          showMessage(error.message || "API 連線測試失敗", "error");
+          showMessage(error.message || "API 连接测试失败", "error");
         }
       }
 

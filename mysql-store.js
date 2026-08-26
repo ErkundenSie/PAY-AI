@@ -8,6 +8,7 @@ const {
   hashProxyUrl,
   parseProxyMeta,
   normalizeProxyLines,
+  normalizeProxyUrl,
   maskProxyUrl,
 } = require("./proxy-pool");
 const {
@@ -1275,7 +1276,7 @@ async function getAdminData() {
     runQuery(
       `SELECT config_key, config_value
              FROM app_config
-             WHERE config_key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             WHERE config_key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         "proxy",
         "max_concurrent_activations",
@@ -1348,6 +1349,8 @@ async function getAdminData() {
         1,
         Number(configMap.max_background_concurrent || 1),
       ),
+      default_timezone:
+        normalizeTimeZone(configMap.default_timezone) || "Asia/Shanghai",
       maintenance_mode: String(configMap.maintenance_mode || "0") === "1",
       maintenance_mode_drain:
         String(configMap.maintenance_mode_drain || "0") === "1",
@@ -1421,6 +1424,19 @@ async function getAdminData() {
   };
 }
 
+function normalizeTimeZone(value) {
+  const timeZone = String(value || "").trim();
+  if (!timeZone) {
+    return "";
+  }
+  try {
+    new Intl.DateTimeFormat("zh-CN", { timeZone }).format();
+    return timeZone;
+  } catch (_) {
+    throw new Error("默认时区无效");
+  }
+}
+
 async function saveConfig(config = {}) {
   const hasOwn = (key) => Object.prototype.hasOwnProperty.call(config, key);
   const configEntries = [];
@@ -1435,6 +1451,12 @@ async function saveConfig(config = {}) {
     configEntries.push([
       "max_background_concurrent",
       String(Math.max(1, Number(config.max_background_concurrent || 1))),
+    ]);
+  }
+  if (hasOwn("default_timezone")) {
+    configEntries.push([
+      "default_timezone",
+      normalizeTimeZone(config.default_timezone) || "Asia/Shanghai",
     ]);
   }
   if (hasOwn("maintenance_mode")) {
@@ -2408,6 +2430,49 @@ async function setProxyAssetActive(id, isActive) {
   return { success: true, is_active: Boolean(isActive) };
 }
 
+async function updateProxyAsset(id, input) {
+  const proxyUrl = normalizeProxyUrl(input);
+  if (!proxyUrl) {
+    return { success: false, error: "未提供代理 URL" };
+  }
+
+  try {
+    new URL(proxyUrl);
+  } catch (_) {
+    return { success: false, error: "代理 URL 格式无效" };
+  }
+
+  const proxyId = Number(id);
+  const urlHash = hashProxyUrl(proxyUrl);
+  const duplicates = await runQuery(
+    `SELECT id FROM proxy_assets WHERE proxy_url_hash = ? AND id <> ? LIMIT 1`,
+    [urlHash, proxyId],
+  );
+  if (duplicates.length) {
+    return { success: false, error: "该代理已存在" };
+  }
+
+  const meta = parseProxyMeta(proxyUrl);
+  const result = await runExecute(
+    `UPDATE proxy_assets
+         SET proxy_url = ?,
+             proxy_url_hash = ?,
+             protocol = ?,
+             host = ?,
+             last_check_at = NULL,
+             last_check_ok = NULL,
+             last_check_ip = '',
+             last_check_latency_ms = NULL,
+             last_check_error = ''
+         WHERE id = ?`,
+    [proxyUrl, urlHash, meta.protocol || "", meta.host || "", proxyId],
+  );
+  if (!result.affectedRows) {
+    return { success: false, error: "代理不存在" };
+  }
+  return { success: true, proxy: await getProxyAssetById(proxyId) };
+}
+
 async function updateProxyAssetCheck(id, checkResult) {
   const ok = Boolean(checkResult?.ok);
   await runExecute(
@@ -2605,6 +2670,7 @@ async function setAppConfigValue(configKey, configValue) {
 }
 
 const BROWSER_POOL_CONFIG_KEY = "browser_pool_enabled";
+const BROWSER_POOL_SIZE_CONFIG_KEY = "browser_pool_size";
 
 function parseBooleanConfig(value, fallback = false) {
   const raw = String(value ?? "")
@@ -2630,6 +2696,21 @@ async function getBrowserPoolEnabled() {
 async function setBrowserPoolEnabled(enabled) {
   await setAppConfigValue(BROWSER_POOL_CONFIG_KEY, enabled ? "1" : "0");
   return Boolean(enabled);
+}
+
+async function getBrowserPoolSize() {
+  const raw = await getAppConfigValue(BROWSER_POOL_SIZE_CONFIG_KEY, "");
+  const size = Number(raw);
+  return Number.isInteger(size) && size > 0 ? size : null;
+}
+
+async function setBrowserPoolSize(size) {
+  const normalized = Number(size);
+  if (!Number.isInteger(normalized) || normalized < 1 || normalized > 48) {
+    throw new Error("浏览器池槽位数量必须为 1–48 的整数");
+  }
+  await setAppConfigValue(BROWSER_POOL_SIZE_CONFIG_KEY, String(normalized));
+  return normalized;
 }
 
 async function getTelegramConfig() {
@@ -4428,6 +4509,7 @@ module.exports = {
   addProxyAssets,
   deleteProxyAsset,
   setProxyAssetActive,
+  updateProxyAsset,
   updateProxyAssetCheck,
   getProxyAssetById,
   incrementAssetSuccessCount,
@@ -4435,6 +4517,8 @@ module.exports = {
   setAppConfigValue,
   getBrowserPoolEnabled,
   setBrowserPoolEnabled,
+  getBrowserPoolSize,
+  setBrowserPoolSize,
   getTelegramConfig,
   saveTelegramConfig,
   getGptApiConfig,

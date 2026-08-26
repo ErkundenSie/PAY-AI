@@ -41,8 +41,8 @@ services:
       - "${APP_BIND_ADDRESS:-127.0.0.1}:${PORT:-3100}:3000"
     environment:
       PORT: 3000
-      DB_HOST: ${DB_HOST:-mysql}
-      DB_PORT: ${DB_PORT:-3306}
+      DB_HOST: mysql
+      DB_PORT: "3306"
       DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}
       DB_NAME: ${DB_NAME:-plus_papay}

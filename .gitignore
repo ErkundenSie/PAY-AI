@@ -44,3 +44,6 @@ Thumbs.db
 
 # Sister project (kept as a separate repo)
 plus_gopay/
+
+# 临时文件夹
+tmp/

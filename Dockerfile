@@ -2,7 +2,10 @@
 # ChatGPT Plus 自动化开通工具 — Docker 镜像
 # Node.js 20 + Playwright Chromium + hCaptcha Python solver
 # ============================================================
-FROM node:20-slim
+# 国内 WSL/Docker Desktop 直连 docker.io 常超时，默认走镜像源。
+# 可覆盖：docker compose build --build-arg NODE_IMAGE=node:20-slim
+ARG NODE_IMAGE=docker.m.daocloud.io/library/node:20-slim
+FROM ${NODE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_BREAK_SYSTEM_PACKAGES=1 \
