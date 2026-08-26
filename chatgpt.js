@@ -210,6 +210,10 @@ function summarizeCheckoutCookies(cookies) {
 }
 
 async function ensureChatGptHome(page) {
+  const {
+    openPersonalWorkspace,
+    isWorkspacePickerVisible,
+  } = require("./auth-page-detect");
   const currentUrl = String(page.url() || "");
   if (!currentUrl.startsWith("https://chatgpt.com")) {
     await page.goto(CHATGPT_HOME_URL, {
@@ -217,71 +221,227 @@ async function ensureChatGptHome(page) {
       timeout: 60000,
     });
   }
-  await page
-    .waitForLoadState("networkidle", { timeout: 20000 })
-    .catch(() => {});
+  if (!(await isWorkspacePickerVisible(page))) {
+    await page
+      .waitForLoadState("networkidle", { timeout: 12000 })
+      .catch(() => {});
+  }
+  await openPersonalWorkspace(page);
+}
+
+function captureSentinelFromHeaders(headers) {
+  const entries = headers && typeof headers === "object" ? headers : {};
+  for (const [key, value] of Object.entries(entries)) {
+    if (/sentinel/i.test(String(key || "")) && String(value || "").trim()) {
+      return String(value).trim();
+    }
+  }
+  return "";
+}
+
+function captureSentinelFromPayload(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  try {
+    const data = JSON.parse(raw);
+    const token = String(
+      data.token ||
+        data.sentinel_token ||
+        data.sentinelToken ||
+        data.value ||
+        "",
+    ).trim();
+    return token;
+  } catch (_) {
+    return raw.length > 200 ? raw : "";
+  }
+}
+
+function rememberSentinelToken(target, token) {
+  const value = String(token || "").trim();
+  if (!target || value.length < 200) return;
+  const current = String(target.__kcSentinelToken || "");
+  if (value.length >= current.length) {
+    target.__kcSentinelToken = value;
+  }
 }
 
 async function installSentinelCapture(page) {
-  if (!page || page.__kcSentinelInstalled) return;
-  page.__kcSentinelInstalled = true;
-  page.__kcSentinelToken = "";
-  page.on("request", (req) => {
-    try {
-      const headers = req.headers() || {};
-      const token = String(
-        headers["openai-sentinel-token"] ||
-          headers["OpenAI-Sentinel-Token"] ||
-          "",
-      ).trim();
-      if (token) page.__kcSentinelToken = token;
-    } catch (_) {
-      /* ignore */
-    }
-  });
-  await page
-    .evaluate(() => {
-      if (window.__kcSentinelHook) return;
-      window.__kcSentinelHook = true;
-      window.__kcSentinelToken = "";
-      const origFetch = window.fetch.bind(window);
-      window.fetch = async function (input, init = {}) {
-        try {
-          const headers = (init && init.headers) || {};
-          const read = (name) => {
+  if (!page) return;
+  const context = typeof page.context === "function" ? page.context() : null;
+
+  if (context && !context.__kcSentinelInitScript) {
+    context.__kcSentinelInitScript = true;
+    await context
+      .addInitScript(() => {
+        if (window.__kcSentinelHook) return;
+        window.__kcSentinelHook = true;
+        window.__kcSentinelToken = "";
+        const pick = (headers) => {
+          try {
             if (!headers) return "";
             if (typeof headers.get === "function") {
-              return headers.get(name) || "";
+              return (
+                headers.get("openai-sentinel-token") ||
+                headers.get("OpenAI-Sentinel-Token") ||
+                ""
+              );
             }
-            return (
-              headers[name] ||
-              headers[name.toLowerCase()] ||
-              headers[name.toUpperCase()] ||
-              ""
-            );
-          };
-          const token =
-            read("openai-sentinel-token") ||
-            read("OpenAI-Sentinel-Token") ||
-            "";
-          if (token) window.__kcSentinelToken = String(token);
+            for (const [key, value] of Object.entries(headers)) {
+              if (/sentinel/i.test(String(key || "")) && value) {
+                return String(value);
+              }
+            }
+          } catch (_) {
+            /* ignore */
+          }
+          return "";
+        };
+        const save = (headers) => {
+          const token = pick(headers);
+          if (token) window.__kcSentinelToken = token;
+        };
+        const origFetch = window.fetch.bind(window);
+        window.fetch = (input, init = {}) => {
+          try {
+            save(init && init.headers);
+            if (input && typeof input === "object") save(input.headers);
+          } catch (_) {
+            /* ignore */
+          }
+          return origFetch(input, init);
+        };
+        const origSet = XMLHttpRequest.prototype.setRequestHeader;
+        XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+          try {
+            if (/sentinel/i.test(String(name || "")) && value) {
+              window.__kcSentinelToken = String(value);
+            }
+          } catch (_) {
+            /* ignore */
+          }
+          return origSet.apply(this, arguments);
+        };
+      })
+      .catch(() => {});
+  }
+
+  if (context && !context.__kcSentinelInstalled) {
+    context.__kcSentinelInstalled = true;
+    context.__kcSentinelToken = String(context.__kcSentinelToken || "");
+    context.on("request", (req) => {
+      try {
+        const token = captureSentinelFromHeaders(req.headers() || {});
+        rememberSentinelToken(context, token);
+        try {
+          const frame = req.frame();
+          const owner =
+            frame && typeof frame.page === "function" ? frame.page() : null;
+          rememberSentinelToken(owner, token);
         } catch (_) {
           /* ignore */
         }
-        return origFetch(input, init);
-      };
-    })
-    .catch(() => {});
+      } catch (_) {
+        /* ignore */
+      }
+    });
+    context.on("response", (res) => {
+      try {
+        const url = String(res.url() || "");
+        if (!/sentinel/i.test(url)) return;
+        res
+          .text()
+          .then((text) => {
+            rememberSentinelToken(context, captureSentinelFromPayload(text));
+          })
+          .catch(() => {});
+      } catch (_) {
+        /* ignore */
+      }
+    });
+  }
+
+  if (!page.__kcSentinelInstalled) {
+    page.__kcSentinelInstalled = true;
+    page.__kcSentinelToken = String(page.__kcSentinelToken || "");
+    page.on("request", (req) => {
+      try {
+        rememberSentinelToken(
+          page,
+          captureSentinelFromHeaders(req.headers() || {}),
+        );
+      } catch (_) {
+        /* ignore */
+      }
+    });
+  }
 }
 
 async function readCapturedSentinel(page) {
   if (!page) return "";
-  const fromNode = String(page.__kcSentinelToken || "").trim();
-  if (fromNode) return fromNode;
-  if (typeof page.evaluate !== "function") return "";
-  return page
+  const fromPage = String(page.__kcSentinelToken || "").trim();
+  if (fromPage.length > 200) return fromPage;
+  try {
+    const context = page.context();
+    const fromCtx = String(context.__kcSentinelToken || "").trim();
+    if (fromCtx.length > 200) return fromCtx;
+  } catch (_) {
+    /* ignore */
+  }
+  if (typeof page.evaluate !== "function") return fromPage;
+  const fromWindow = await page
     .evaluate(() => String(window.__kcSentinelToken || "").trim())
     .catch(() => "");
+  if (fromWindow.length > 200) {
+    rememberSentinelToken(page, fromWindow);
+    return fromWindow;
+  }
+  return fromPage || fromWindow;
+}
+
+async function clearCapturedSentinel(page) {
+  if (!page) return;
+  page.__kcSentinelToken = "";
+  try {
+    page.context().__kcSentinelToken = "";
+  } catch (_) {
+    /* ignore */
+  }
+  if (typeof page.evaluate === "function") {
+    await page
+      .evaluate(() => {
+        window.__kcSentinelToken = "";
+      })
+      .catch(() => {});
+  }
+}
+
+async function waitForSentinelToken(page, options = {}) {
+  const timeoutMs = Number(options.timeoutMs || 22000);
+  const minBytes = Number(options.minBytes || 4000);
+  await installSentinelCapture(page);
+  if (options.fresh) {
+    await clearCapturedSentinel(page);
+    console.log("[ChatGPT] 正在等待页面产出 openai-sentinel-token...");
+    await page
+      .reload({ waitUntil: "domcontentloaded", timeout: 60000 })
+      .catch(() => {});
+    await page
+      .waitForLoadState("networkidle", { timeout: 15000 })
+      .catch(() => {});
+  }
+
+  const started = Date.now();
+  let token = await readCapturedSentinel(page);
+  const deadline = started + timeoutMs;
+  while (Date.now() < deadline && token.length < minBytes) {
+    await page.waitForTimeout(400);
+    token = await readCapturedSentinel(page);
+  }
+  console.log(
+    `[ChatGPT] Sentinel 等待 ${Date.now() - started}ms, bytes=${token.length}`,
+  );
+  return token;
 }
 
 function isCheckoutBlocked(detail = "") {
@@ -362,11 +522,15 @@ async function fetchSameOriginGets(page, { token, accountId, requests }) {
           headers["openai-account-id"] = accountId;
         }
         try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 12000);
           const response = await fetch(item.path, {
             method: "GET",
             credentials: "include",
             headers,
+            signal: controller.signal,
           });
+          clearTimeout(timer);
           const text = await response.text();
           results.push({
             name: item.name,
@@ -436,8 +600,9 @@ async function openPricingModalForWarmup(page) {
 
 async function warmupCheckoutContext(page, accessToken, options = {}) {
   const country = String(options.country || "PH").toUpperCase();
-  await ensureChatGptHome(page);
   await installSentinelCapture(page);
+  await ensureChatGptHome(page);
+  console.log("[ChatGPT] Checkout 预热开始");
   let cookies = await waitForCheckoutCookies(page);
   if (!cookies.hasOaiDid) {
     await page
@@ -704,56 +869,72 @@ class ChatGPTService {
   }
 
   async postCheckoutFromPage(page, payload) {
+    const pricing = require("./pricing-checkout");
     await installSentinelCapture(page);
-    const sentinel = await readCapturedSentinel(page);
-    const headers = { ...this.headers };
-    if (sentinel) headers["openai-sentinel-token"] = sentinel;
-    const result = await page.evaluate(
-      async ({ path, payload, headers }) => {
-        try {
-          const response = await fetch(path, {
-            method: "POST",
-            credentials: "include",
-            headers,
-            body: JSON.stringify(payload),
-          });
-          return {
-            status: response.status,
-            bodyText: await response.text(),
-            sentinelBytes: String(headers["openai-sentinel-token"] || "")
-              .length,
-          };
-        } catch (err) {
-          return {
-            status: 0,
-            bodyText: "",
-            error: String((err && err.message) || err),
-            sentinelBytes: String(headers["openai-sentinel-token"] || "")
-              .length,
-          };
-        }
-      },
-      {
-        path: CHECKOUT_API_PATH,
-        payload,
-        headers,
-      },
-    );
-    if (result.error && !result.bodyText) {
-      throw new Error(result.error);
-    }
-    if (result.sentinelBytes) {
-      console.log(
-        `[ChatGPT] 正常网页 Checkout 已提交: HTTP ${result.status}, Sentinel=${result.sentinelBytes} bytes`,
+    const planType = /pro/i.test(String(payload?.plan_name || ""))
+      ? "pro_5x"
+      : "plus";
+    const country = String(
+      payload?.billing_details?.country || "PH",
+    ).toUpperCase();
+
+    console.log("[ChatGPT] 打开套餐弹窗，由站点自己完成 Sentinel Checkout...");
+    try {
+      const { openPersonalWorkspace } = require("./auth-page-detect");
+      await openPersonalWorkspace(page);
+      await pricing.waitForPricingPage(page);
+      await pricing.switchToPersonalPlans(page);
+      await pricing.selectPricingRegion(page, country).catch((err) => {
+        console.warn(`[ChatGPT] 地区切换跳过: ${err.message}`);
+      });
+    } catch (err) {
+      console.warn(
+        `[ChatGPT] 页面 Upgrade 准备失败: ${String((err && err.message) || err)}`,
       );
     }
-    return parseCheckoutApiBody(result.status, result.bodyText);
+
+    const waiter = page.waitForResponse(
+      (res) =>
+        res.request().method() === "POST" &&
+        /\/backend-api\/payments\/checkout(?:\?|$)/.test(
+          String(res.url() || ""),
+        ),
+      { timeout: 60000 },
+    );
+    try {
+      await pricing.clickPlanUpgrade(page, planType);
+    } catch (err) {
+      console.warn(
+        `[ChatGPT] 页面 Upgrade 触发失败: ${String((err && err.message) || err)}`,
+      );
+    }
+
+    const response = await waiter.catch(() => null);
+    if (!response) {
+      console.warn("[ChatGPT] 站点未发出 Checkout 请求，Sentinel 仍为空。");
+      return {
+        ok: false,
+        status: 0,
+        data: {},
+        error: "sentinel token missing",
+      };
+    }
+
+    const sentinel = captureSentinelFromHeaders(
+      response.request().headers() || {},
+    );
+    const status = response.status();
+    const bodyText = await response.text().catch(() => "");
+    console.log(
+      `[ChatGPT] 正常网页 Checkout 已提交: HTTP ${status}, Sentinel=${sentinel.length} bytes`,
+    );
+    return parseCheckoutApiBody(status, bodyText);
   }
 
   async postCheckoutRequest(payload, page, { forcePage = false } = {}) {
     if (forcePage && page && typeof page.evaluate === "function") {
-      await ensureChatGptHome(page);
       await installSentinelCapture(page);
+      await ensureChatGptHome(page);
       return this.postCheckoutFromPage(page, payload);
     }
 
@@ -806,6 +987,7 @@ class ChatGPTService {
       );
 
       let lastParsed = null;
+      let pageCheckoutTried = false;
       for (const uiMode of modes) {
         const payload = buildCheckoutPayload(planName, country, currency, {
           uiMode,
@@ -817,9 +999,11 @@ class ChatGPTService {
         if (
           !parsed.ok &&
           isCheckoutBlocked(parsed.error) &&
+          !pageCheckoutTried &&
           options.page &&
           typeof options.page.evaluate === "function"
         ) {
+          pageCheckoutTried = true;
           console.log(
             "[ChatGPT] 协议创建订单被拦截；正在按正常网页上下文重新创建一次。",
           );

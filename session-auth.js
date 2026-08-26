@@ -836,13 +836,12 @@ async function bootstrapChatGptSession(page, sessionRaw, options = {}) {
   }
 
   await assertChatGptLoggedIn(page, "首页");
+  const { openPersonalWorkspace } = require("./auth-page-detect");
+  await openPersonalWorkspace(page);
 
   const cookieVerified = options.cookieVerified === true;
-  const uiReady = await waitForLoggedInChatUi(
-    page,
-    cookieVerified ? 12000 : 8000,
-  );
-  const apiReady = cookieVerified ? await hasLoggedInSessionApi(page) : false;
+  const uiReady = await waitForLoggedInChatUi(page, 12000);
+  const apiReady = await hasLoggedInSessionApi(page);
 
   if (await hasVisibleLoginChrome(page)) {
     throw new Error(buildSessionNotLoggedInError("ChatGPT 首页"));

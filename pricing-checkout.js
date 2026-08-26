@@ -76,11 +76,10 @@ const SKIP_REGION_BUTTON_TEXT =
 
 const PLAN_UPGRADE_PATTERNS = {
   plus: [
+    /Get Plus/i,
     /升级至\s*Plus/i,
     /Upgrade to Plus/i,
-    /Get Plus/i,
     /Subscribe to Plus/i,
-    /^Upgrade$/i,
   ],
   pro_5x: [/升级至\s*Pro/i, /Upgrade to Pro/i, /Get Pro/i, /^Upgrade$/i],
   pro_20x: [/升级至\s*Pro/i, /Upgrade to Pro/i, /Get Pro/i, /^Upgrade$/i],
@@ -248,7 +247,12 @@ async function isPersonalPlanView(page) {
     .first()
     .isVisible({ timeout: 800 })
     .catch(() => false);
-  return plusTitle || plusBtn;
+  const plusHeading = await page
+    .getByText(/ChatGPT Plus/i)
+    .first()
+    .isVisible({ timeout: 800 })
+    .catch(() => false);
+  return plusTitle || plusBtn || plusHeading;
 }
 
 async function isBusinessPlanView(page) {
@@ -308,13 +312,11 @@ async function switchToPersonalPlans(page) {
           .getAttribute("aria-selected")
           .catch(() => null);
         const pressed = await el.getAttribute("aria-pressed").catch(() => null);
-        if (selected === "true" || pressed === "true") {
-          console.log("✅ [步骤] Personal 标签已选中");
-          return;
-        }
         await el.scrollIntoViewIfNeeded().catch(() => {});
-        await el.click({ timeout: 8000 });
-        await page.waitForTimeout(1800);
+        if (selected !== "true" && pressed !== "true") {
+          await el.click({ timeout: 8000 });
+          await page.waitForTimeout(1800);
+        }
         if (await isPersonalPlanView(page)) {
           console.log("✅ [步骤] 已切换到个人套餐 (Personal)");
           return;
@@ -999,10 +1001,11 @@ async function clickPlanUpgrade(page, planType) {
   const fallbackSelectors =
     plan === "plus"
       ? [
+          'button:has-text("Get Plus")',
           'button:has-text("升级至 Plus")',
           'button:has-text("Upgrade to Plus")',
+          '[role="dialog"] >> text=ChatGPT Plus >> .. >> .. >> button:has-text("Get Plus")',
           '[role="dialog"] >> text=ChatGPT Plus >> .. >> .. >> button:has-text("Upgrade")',
-          'text=ChatGPT Plus >> xpath=ancestor::div[.//button[contains(., "Upgrade") or contains(., "升级")]][1] >> button',
         ]
       : [
           'button:has-text("升级至 Pro")',
