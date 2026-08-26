@@ -78,6 +78,7 @@ services:
       - ./server.js:/app/server.js
       - ./chatgpt.js:/app/chatgpt.js
       - ./index.js:/app/index.js
+      - ./browser-fingerprint.js:/app/browser-fingerprint.js
       - ./playwright-proxy.js:/app/playwright-proxy.js
       - ./mysql-store.js:/app/mysql-store.js
       - ./hcaptcha-runtime.js:/app/hcaptcha-runtime.js

@@ -928,6 +928,85 @@ async function selectPricingRegion(page, regionCode) {
   );
 }
 
+async function clickVisibleButton(page, pattern) {
+  const btn = page.getByRole("button", { name: pattern }).first();
+  if (!(await btn.isVisible({ timeout: 2500 }).catch(() => false))) {
+    return false;
+  }
+  await btn.scrollIntoViewIfNeeded().catch(() => {});
+  await btn.click({ timeout: 10000 });
+  return true;
+}
+
+async function clickPlusPlanButton(page) {
+  const named = [
+    /^Get Plus$/i,
+    /Get Plus/i,
+    /Upgrade to Plus/i,
+    /升级至\s*Plus/i,
+    /Subscribe to Plus/i,
+  ];
+  for (const pattern of named) {
+    if (await clickVisibleButton(page, pattern)) {
+      console.log(`✅ [步骤] 已点击 Plus 按钮: ${pattern}`);
+      return true;
+    }
+  }
+
+  const dialog = page.locator('[role="dialog"]').first();
+  const surface = (await dialog.isVisible({ timeout: 800 }).catch(() => false))
+    ? dialog
+    : page;
+  const plusCard = surface
+    .locator("div")
+    .filter({ has: page.getByText(/^ChatGPT Plus$/i) })
+    .filter({
+      has: page.getByRole("button", {
+        name: /Get Plus|Upgrade to Plus|升级至\s*Plus/i,
+      }),
+    })
+    .last();
+  const plusBtn = plusCard
+    .getByRole("button", {
+      name: /Get Plus|Upgrade to Plus|升级至\s*Plus/i,
+    })
+    .first();
+  if (await plusBtn.isVisible({ timeout: 2500 }).catch(() => false)) {
+    await plusBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await plusBtn.click({ timeout: 10000 });
+    console.log("✅ [步骤] 已点击 Plus 卡片按钮");
+    return true;
+  }
+
+  const clicked = await page
+    .evaluate(() => {
+      const label = (el) =>
+        String(el.innerText || el.textContent || "")
+          .replace(/\s+/g, " ")
+          .trim();
+      const buttons = Array.from(
+        document.querySelectorAll('button, [role="button"]'),
+      );
+      const plusBtn = buttons.find((el) =>
+        /^(Get Plus|Upgrade to Plus|Subscribe to Plus|升级至 Plus)$/i.test(
+          label(el),
+        ),
+      );
+      if (plusBtn) {
+        plusBtn.scrollIntoView({ block: "center" });
+        plusBtn.click();
+        return label(plusBtn);
+      }
+      return "";
+    })
+    .catch(() => "");
+  if (clicked) {
+    console.log(`✅ [步骤] 已点击 Plus 按钮: ${clicked}`);
+    return true;
+  }
+  return false;
+}
+
 /**
  * 点击对应套餐的升级按钮
  */
@@ -939,6 +1018,15 @@ async function clickPlanUpgrade(page, planType) {
   await assertChatGptLoggedIn(page, "升级前");
   await switchToPersonalPlans(page);
   await page.waitForTimeout(1000);
+
+  if (plan === "plus") {
+    if (await clickPlusPlanButton(page)) {
+      return;
+    }
+    throw new Error(
+      "未找到 Plus 套餐按钮（Get Plus）。避免误点 Go/Business Upgrade",
+    );
+  }
 
   for (const pattern of patterns) {
     try {
@@ -954,7 +1042,7 @@ async function clickPlanUpgrade(page, planType) {
     }
   }
 
-  const cardTitle = plan === "plus" ? /ChatGPT Plus/i : /ChatGPT Pro/i;
+  const cardTitle = /ChatGPT Pro/i;
   try {
     const card = page
       .locator("div")
@@ -963,7 +1051,7 @@ async function clickPlanUpgrade(page, planType) {
       .first();
     const btn = card
       .getByRole("button")
-      .filter({ hasText: /升级|Upgrade|Subscribe|Get/i })
+      .filter({ hasText: /升级至\s*Pro|Upgrade to Pro|Get Pro/i })
       .first();
     if (await btn.isVisible({ timeout: 3000 })) {
       await btn.scrollIntoViewIfNeeded().catch(() => {});
@@ -975,43 +1063,11 @@ async function clickPlanUpgrade(page, planType) {
     /* fall through */
   }
 
-  if (plan === "plus") {
-    try {
-      const plusCard = page
-        .locator("div")
-        .filter({ has: page.getByText(/ChatGPT Plus|^Plus$/i) })
-        .filter({
-          has: page.getByRole("button", { name: /^Upgrade$|^升级$/i }),
-        })
-        .first();
-      const upgradeBtn = plusCard
-        .getByRole("button", { name: /^Upgrade$|^升级$/i })
-        .first();
-      if (await upgradeBtn.isVisible({ timeout: 3000 })) {
-        await upgradeBtn.scrollIntoViewIfNeeded().catch(() => {});
-        await upgradeBtn.click({ timeout: 10000 });
-        console.log("✅ [步骤] 已点击 Plus 卡片 Upgrade 按钮");
-        return;
-      }
-    } catch (_) {
-      /* fall through */
-    }
-  }
-
-  const fallbackSelectors =
-    plan === "plus"
-      ? [
-          'button:has-text("Get Plus")',
-          'button:has-text("升级至 Plus")',
-          'button:has-text("Upgrade to Plus")',
-          '[role="dialog"] >> text=ChatGPT Plus >> .. >> .. >> button:has-text("Get Plus")',
-          '[role="dialog"] >> text=ChatGPT Plus >> .. >> .. >> button:has-text("Upgrade")',
-        ]
-      : [
-          'button:has-text("升级至 Pro")',
-          'button:has-text("Upgrade to Pro")',
-          'text=ChatGPT Pro >> xpath=ancestor::div[.//button[contains(., "Upgrade") or contains(., "升级")]][1] >> button',
-        ];
+  const fallbackSelectors = [
+    'button:has-text("升级至 Pro")',
+    'button:has-text("Upgrade to Pro")',
+    'button:has-text("Get Pro")',
+  ];
 
   for (const sel of fallbackSelectors) {
     try {

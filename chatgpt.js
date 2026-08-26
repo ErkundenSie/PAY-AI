@@ -450,6 +450,14 @@ function isCheckoutBlocked(detail = "") {
   );
 }
 
+function isGoCheckoutPayload(data, requestBody = "") {
+  const blob =
+    `${JSON.stringify(data || {})} ${String(requestBody || "")}`.toLowerCase();
+  return /chatgptgo|plan_type=go|\bplan_type["']?\s*[:=]\s*["']go["']/.test(
+    blob,
+  );
+}
+
 async function waitForCheckoutCookies(page, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   let summary = summarizeCheckoutCookies(
@@ -924,11 +932,29 @@ class ChatGPTService {
       response.request().headers() || {},
     );
     const status = response.status();
+    const requestBody = await response
+      .request()
+      .postData()
+      .catch(() => "");
     const bodyText = await response.text().catch(() => "");
     console.log(
       `[ChatGPT] 正常网页 Checkout 已提交: HTTP ${status}, Sentinel=${sentinel.length} bytes`,
     );
-    return parseCheckoutApiBody(status, bodyText);
+    const parsed = parseCheckoutApiBody(status, bodyText);
+    if (
+      parsed.ok &&
+      planType === "plus" &&
+      isGoCheckoutPayload(parsed.data, requestBody)
+    ) {
+      console.warn("[ChatGPT] 页面开单套餐是 Go，已丢弃，避免误扣 Plus");
+      return {
+        ok: false,
+        status,
+        data: parsed.data,
+        error: "checkout plan mismatch: go",
+      };
+    }
+    return parsed;
   }
 
   async postCheckoutRequest(payload, page, { forcePage = false } = {}) {
@@ -1016,6 +1042,18 @@ class ChatGPTService {
           lastParsed = parsed;
         }
         if (parsed.ok) {
+          if (
+            String(planType || "").toLowerCase() === "plus" &&
+            isGoCheckoutPayload(parsed.data)
+          ) {
+            console.warn("[ChatGPT] Checkout 套餐是 Go，不是 Plus，已丢弃");
+            lastParsed = {
+              ...parsed,
+              ok: false,
+              error: "checkout plan mismatch: go",
+            };
+            continue;
+          }
           const resolved = this.resolveCheckoutUrl(parsed.data, country);
           if (resolved.checkoutUrl) {
             console.log(

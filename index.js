@@ -6,6 +6,7 @@ const { openApiCheckout } = require("./chatgpt");
 const { hydrateCheckoutFromUrl } = require("./checkout-protocol");
 const store = require("./mysql-store");
 const { getRegionConfig, getRegionBrowserProfile } = require("./region-config");
+const { buildBrowserFingerprint } = require("./browser-fingerprint");
 const {
   installChatGptSession,
   bootstrapChatGptSession,
@@ -251,7 +252,6 @@ async function run() {
 
   const realUserAgent = browserSession.realUserAgent;
 
-  const viewport = { width: 1920, height: 1080 };
   const matched = realUserAgent.match(/Chrome\/(\d+)/);
   const chromeMajor = matched ? Number(matched[1]) : 147;
 
@@ -261,13 +261,28 @@ async function run() {
       .toUpperCase() || (await store.getPaymentRegion());
   const regionCfg = getRegionConfig(paymentRegion);
   const browserProfile = getRegionBrowserProfile(paymentRegion);
+  const fingerprintSeed =
+    process.env.JOB_KEY ||
+    process.env.CDK_CODE ||
+    CONFIG.chatgptSessionJson ||
+    CONFIG.chatgptToken ||
+    `${Date.now()}`;
+  const fingerprint = buildBrowserFingerprint({
+    chromeMajor,
+    locale: browserProfile.locale,
+    seed: fingerprintSeed,
+  });
+  const viewport = fingerprint.viewport;
 
   const contextOptions = {
     userAgent: realUserAgent,
     viewport,
     locale: browserProfile.locale,
     timezoneId: browserProfile.timezoneId,
-    screen: { width: 1920, height: 1080 },
+    screen: {
+      width: fingerprint.screen.width,
+      height: fingerprint.screen.height,
+    },
     deviceScaleFactor: 1,
     isMobile: false,
     hasTouch: false,
@@ -295,8 +310,12 @@ async function run() {
   const sessionData = installResult?.sessionData || installResult;
   const cookieVerified = Boolean(installResult?.cookieVerified);
 
+  console.log(
+    `[指纹] ${viewport.width}x${viewport.height} cores=${fingerprint.hardwareConcurrency} mem=${fingerprint.deviceMemory} gpu=${fingerprint.webglRenderer.slice(0, 48)}`,
+  );
+
   // ============= 指纹伪装 =============
-  await context.addInitScript((injectedChromeMajor) => {
+  await context.addInitScript((fp) => {
     const NavProto = Object.getPrototypeOf(navigator);
     const ScrProto = Object.getPrototypeOf(screen);
     const safeDefine = (obj, key, getter) => {
@@ -324,8 +343,8 @@ async function run() {
       const uaData = {
         brands: [
           { brand: "Not)A;Brand", version: "8" },
-          { brand: "Chromium", version: String(injectedChromeMajor) },
-          { brand: "Google Chrome", version: String(injectedChromeMajor) },
+          { brand: "Chromium", version: String(fp.chromeMajor) },
+          { brand: "Google Chrome", version: String(fp.chromeMajor) },
         ],
         mobile: false,
         platform: "Windows",
@@ -336,7 +355,7 @@ async function run() {
             mobile: false,
             model: "",
             platform: "Windows",
-            platformVersion: "15.0.0",
+            platformVersion: fp.platformVersion,
             wow64: false,
           }),
         toJSON: () => ({
@@ -389,20 +408,20 @@ async function run() {
     } catch (_) {}
 
     // 语言、平台、硬件
-    safeDefine(NavProto, "languages", () => ["en-US", "en"]);
-    safeDefine(NavProto, "language", () => "en-US");
+    safeDefine(NavProto, "languages", () => fp.languages);
+    safeDefine(NavProto, "language", () => fp.language);
     safeDefine(NavProto, "platform", () => "Win32");
-    safeDefine(NavProto, "hardwareConcurrency", () => 8);
-    safeDefine(NavProto, "deviceMemory", () => 8);
+    safeDefine(NavProto, "hardwareConcurrency", () => fp.hardwareConcurrency);
+    safeDefine(NavProto, "deviceMemory", () => fp.deviceMemory);
     safeDefine(NavProto, "maxTouchPoints", () => 0);
     safeDefine(NavProto, "vendor", () => "Google Inc.");
 
     // navigator.connection
     try {
       const conn = {
-        effectiveType: "4g",
-        rtt: 100,
-        downlink: 10,
+        effectiveType: fp.connection.effectiveType,
+        rtt: fp.connection.rtt,
+        downlink: fp.connection.downlink,
         saveData: false,
       };
       safeDefine(NavProto, "connection", () => conn);
@@ -519,12 +538,12 @@ async function run() {
     } catch (_) {}
 
     // screen
-    safeDefine(ScrProto, "availHeight", () => 1032);
-    safeDefine(ScrProto, "availWidth", () => 1920);
-    safeDefine(ScrProto, "colorDepth", () => 24);
-    safeDefine(ScrProto, "pixelDepth", () => 24);
-    safeDefine(ScrProto, "width", () => 1920);
-    safeDefine(ScrProto, "height", () => 1080);
+    safeDefine(ScrProto, "availHeight", () => fp.screen.availHeight);
+    safeDefine(ScrProto, "availWidth", () => fp.screen.availWidth);
+    safeDefine(ScrProto, "colorDepth", () => fp.screen.colorDepth);
+    safeDefine(ScrProto, "pixelDepth", () => fp.screen.pixelDepth);
+    safeDefine(ScrProto, "width", () => fp.screen.width);
+    safeDefine(ScrProto, "height", () => fp.screen.height);
 
     // Canvas 微噪声
     try {
@@ -537,7 +556,7 @@ async function run() {
               h = this.height;
             if (w > 0 && h > 0) {
               const data = ctx.getImageData(0, 0, 1, 1);
-              data.data[3] = Math.max(1, data.data[3] - 1);
+              data.data[3] = Math.max(1, data.data[3] - fp.canvasNoise);
               ctx.putImageData(data, 0, 0);
             }
           } catch (_) {}
@@ -551,9 +570,8 @@ async function run() {
       const fakeWebGL = (gl) => {
         const origGetParameter = gl.getParameter.bind(gl);
         gl.getParameter = function (param) {
-          if (param === 0x9245) return "Google Inc. (Intel)";
-          if (param === 0x9246)
-            return "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)";
+          if (param === 0x9245) return fp.webglVendor;
+          if (param === 0x9246) return fp.webglRenderer;
           return origGetParameter(param);
         };
       };
@@ -596,7 +614,7 @@ async function run() {
         });
       }
     } catch (_) {}
-  }, chromeMajor);
+  }, fingerprint);
 
   try {
     // --- Phase 0: Proxy Connectivity Check ---
