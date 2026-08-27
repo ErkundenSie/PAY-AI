@@ -20,6 +20,14 @@
         "2fa_failed": "二次验证失败",
         password_changed: "修改密码",
         logout: "退出登录",
+        cdk_generated: "生成 CDK",
+        cdk_imported: "导入 CDK",
+        cdk_deleted: "删除 CDK",
+        cards_imported: "导入银行卡",
+        card_deleted: "删除银行卡",
+        session_exported: "导出 Session",
+        secondary_failed: "二级密码失败",
+        secondary_success: "二级密码成功",
       };
       const statusMap = {
         success: { class: "status-success", label: "SUCCESS" },

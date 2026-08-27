@@ -87,10 +87,10 @@ docker compose up -d
 
 | 地址                                | 说明                          |
 | ----------------------------------- | ----------------------------- |
-| `http://服务器IP:3000/`             | 卡密兑换                      |
-| `http://服务器IP:3000/checkout`     | 自助开通（会员 / Codex 点数） |
-| `http://服务器IP:3000/subscription` | 发票助手                      |
-| `http://服务器IP:3000/admin-login`  | 后台登录                      |
+| `http://服务器IP:17621/`             | 卡密兑换                      |
+| `http://服务器IP:17621/checkout`     | 自助开通（会员 / Codex 点数） |
+| `http://服务器IP:17621/subscription` | 发票助手                      |
+| `http://服务器IP:17621/admin-login`  | 后台登录                      |
 
 #### 4. Docker 常用命令
 
@@ -251,7 +251,7 @@ npm run start:headful
 ```
 🔓 [资产锁] 启动时已重置所有 in_use 标记
 数据库表检查完成
-http://localhost:3000
+http://localhost:17621
 MySQL => root@127.0.0.1:3306/plus_papay
 ```
 
@@ -272,7 +272,7 @@ pm2 restart kc-gpt-pay
 
 ### 方式四：Nginx 反向代理 + HTTPS
 
-通过域名访问或启用 HTTPS 时，在 Nginx 中反代到 `127.0.0.1:3000`：
+通过域名访问或启用 HTTPS 时，在 Nginx 中反代到 `127.0.0.1:17621`：
 
 ```nginx
 server {
@@ -280,7 +280,7 @@ server {
     server_name your-domain.com;
 
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:17621;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -411,7 +411,7 @@ A: 管理员 PowerShell 执行：`Set-ExecutionPolicy -Scope CurrentUser RemoteS
 
 | 端口   | 用途                                                  |
 | ------ | ----------------------------------------------------- |
-| 3000   | Web 服务 + WebSocket（可通过 `PORT` 环境变量修改）    |
+| 17621   | Web 服务 + WebSocket（可通过 `PORT` 环境变量修改）    |
 | 3306   | MySQL（Docker 模式下映射到宿主机）                    |
 | 19222+ | 瀏覽器池 CDP 連接埠（僅啟用 `BROWSER_POOL=1` 時使用） |
 

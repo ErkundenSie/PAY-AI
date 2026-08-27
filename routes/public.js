@@ -484,8 +484,8 @@ function registerPublicRoutes(app, deps) {
         const cdkData = await store.verifyCdkDetails(cdk);
         if (!cdkData) {
           return res
-            .status(404)
-            .json({ success: false, message: "未找到该激活码记录" });
+            .status(403)
+            .json({ success: false, message: "无效 CDK" });
         }
         const runningTask = await store.getRunningTaskByCdk(cdk);
         const latestRows = await store.listLatestTasksByCdks([cdk]);
@@ -562,7 +562,7 @@ function registerPublicRoutes(app, deps) {
           if (!cdkData && !latest) {
             tasks.push({
               code,
-              error: "未找到该激活码记录",
+              error: "无效 CDK",
               status: "未找到",
               kind: "missing",
               unused: false,

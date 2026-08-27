@@ -38,9 +38,9 @@ services:
       mysql:
         condition: service_healthy
     ports:
-      - "${APP_BIND_ADDRESS:-127.0.0.1}:${PORT:-3100}:3000"
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${PORT:-17621}:17621"
     environment:
-      PORT: 3000
+      PORT: 17621
       DB_HOST: mysql
       DB_PORT: "3306"
       DB_USER: ${DB_USER:-root}

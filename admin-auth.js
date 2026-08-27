@@ -268,17 +268,50 @@ function normalizeEmail(email) {
     .toLowerCase();
 }
 
-function checkLoginRateLimit(ip) {
-  const key = String(ip || "unknown").slice(0, 45);
-  const now = Date.now();
+const LOGIN_ATTEMPT_MAX_KEYS = 10_000;
+
+function loginAttemptKey(kind, value) {
+  return `${kind}:${String(value || "unknown").slice(0, 80)}`;
+}
+
+function pruneLoginAttempts(now = Date.now()) {
+  for (const [key, entry] of loginAttempts) {
+    if (!entry) {
+      loginAttempts.delete(key);
+      continue;
+    }
+    const windowExpired = now - Number(entry.firstAt || 0) > LOGIN_WINDOW_MS;
+    const lockExpired = !entry.lockedUntil || now >= entry.lockedUntil;
+    if (windowExpired && lockExpired) {
+      loginAttempts.delete(key);
+    }
+  }
+  if (loginAttempts.size <= LOGIN_ATTEMPT_MAX_KEYS) {
+    return;
+  }
+  const overflow = loginAttempts.size - LOGIN_ATTEMPT_MAX_KEYS;
+  let removed = 0;
+  for (const key of loginAttempts.keys()) {
+    loginAttempts.delete(key);
+    removed += 1;
+    if (removed >= overflow) break;
+  }
+}
+
+function readLoginAttemptEntry(key, now) {
   const entry = loginAttempts.get(key) || {
     count: 0,
     firstAt: now,
     lockedUntil: 0,
   };
   if (entry.lockedUntil && now < entry.lockedUntil) {
-    const retryAfterSec = Math.ceil((entry.lockedUntil - now) / 1000);
-    return { allowed: false, retryAfterSec, reason: "locked" };
+    return {
+      allowed: false,
+      retryAfterSec: Math.ceil((entry.lockedUntil - now) / 1000),
+      reason: "locked",
+      entry,
+      key,
+    };
   }
   if (now - entry.firstAt > LOGIN_WINDOW_MS) {
     entry.count = 0;
@@ -292,23 +325,85 @@ function checkLoginRateLimit(ip) {
       allowed: false,
       retryAfterSec: Math.ceil(LOGIN_LOCK_MS / 1000),
       reason: "locked",
+      entry,
+      key,
     };
   }
   return { allowed: true, entry, key };
 }
 
-function recordLoginFailure(key, entry) {
+function checkLoginRateLimit(ip, email = "") {
+  pruneLoginAttempts();
   const now = Date.now();
-  const next = entry || { count: 0, firstAt: now, lockedUntil: 0 };
-  next.count += 1;
-  if (next.count >= LOGIN_MAX_ATTEMPTS) {
-    next.lockedUntil = now + LOGIN_LOCK_MS;
+  const keys = [loginAttemptKey("ip", ip)];
+  const normalizedEmail = normalizeEmail(email);
+  if (normalizedEmail) {
+    keys.push(loginAttemptKey("email", normalizedEmail));
   }
-  loginAttempts.set(key, next);
+  const entries = {};
+  let blocked = null;
+  for (const key of keys) {
+    const result = readLoginAttemptEntry(key, now);
+    entries[key] = result.entry;
+    if (!result.allowed && !blocked) {
+      blocked = result;
+    }
+  }
+  if (blocked) {
+    return {
+      allowed: false,
+      retryAfterSec: blocked.retryAfterSec,
+      reason: blocked.reason,
+      key: blocked.key,
+      keys,
+      entries,
+    };
+  }
+  return {
+    allowed: true,
+    key: keys[0],
+    keys,
+    entry: entries[keys[0]],
+    entries,
+  };
 }
 
-function clearLoginAttempts(key) {
-  loginAttempts.delete(String(key || "unknown"));
+function recordLoginFailure(keyOrKeys, entryOrEntries) {
+  const now = Date.now();
+  const keys = Array.isArray(keyOrKeys)
+    ? keyOrKeys
+    : [keyOrKeys || "unknown"];
+  const entryMap =
+    entryOrEntries &&
+    typeof entryOrEntries === "object" &&
+    !Array.isArray(entryOrEntries) &&
+    !Object.prototype.hasOwnProperty.call(entryOrEntries, "count")
+      ? entryOrEntries
+      : null;
+  for (const key of keys) {
+    const next =
+      (entryMap && entryMap[key]) ||
+      (!entryMap && entryOrEntries) ||
+      loginAttempts.get(key) || {
+        count: 0,
+        firstAt: now,
+        lockedUntil: 0,
+      };
+    next.count += 1;
+    if (next.count >= LOGIN_MAX_ATTEMPTS) {
+      next.lockedUntil = now + LOGIN_LOCK_MS;
+    }
+    loginAttempts.set(String(key), next);
+  }
+}
+
+function clearLoginAttempts(keyOrKeys) {
+  const keys = Array.isArray(keyOrKeys)
+    ? keyOrKeys
+    : [keyOrKeys || "unknown"];
+  for (const key of keys) {
+    loginAttempts.delete(String(key));
+  }
 }
 
 function base32Encode(buffer) {
@@ -486,10 +581,38 @@ function pickDefaultLogin2faMethod(methods = [], preferred = "") {
 }
 
 function createRequireSecondaryAuth(store, ensureStoreReady) {
-  // 已取消后台二级密码：直接放行，仅保留管理员登录鉴权（authenticateAdmin）
+  const requireSecondary =
+    String(process.env.ADMIN_REQUIRE_SECONDARY || "0") === "1";
   return async function requireSecondaryAuth(req, res, next) {
-    req.secondaryAuth = { bypassed: true };
-    return next();
+    if (!requireSecondary) {
+      req.secondaryAuth = { bypassed: true };
+      return next();
+    }
+    try {
+      await ensureStoreReady();
+      const authConfig = await store.getAdminAuthConfig();
+      if (!String(authConfig?.secondaryPasswordHash || "").trim()) {
+        req.secondaryAuth = { bypassed: true };
+        return next();
+      }
+      const token = String(req.headers["x-admin-secondary-token"] || "").trim();
+      const payload = verifySecondaryToken(token);
+      if (
+        !payload ||
+        Number(payload.sv || 0) !==
+          Number(authConfig.secondaryPasswordVersion || 1)
+      ) {
+        return res.status(403).json({
+          success: false,
+          code: "secondary_required",
+          message: "请先验证二级密码",
+        });
+      }
+      req.secondaryAuth = payload;
+      return next();
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
   };
 }
 

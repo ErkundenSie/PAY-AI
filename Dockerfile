@@ -48,14 +48,14 @@ COPY . .
 RUN mkdir -p debug_screenshots product_files /tmp/hcaptcha_auto_solver_live
 
 ENV NODE_ENV=production \
-    PORT=3000 \
+    PORT=17621 \
     HEADFUL=0 \
     CDP_PORT=9222 \
     CDP_URL=http://127.0.0.1:9222
 
-EXPOSE 3000
+EXPOSE 17621
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:3000/api/public/runtime || exit 1
+    CMD curl -f http://localhost:17621/api/public/runtime || exit 1
 
 CMD ["node", "server.js"]

@@ -74,7 +74,7 @@ const {
 } = require("./routes/admin-auth");
 
 const app = express();
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 17621);
 const TRUST_PROXY = String(process.env.TRUST_PROXY || "0") === "1";
 const VERIFY_OPENAI_TOKEN_ON_ACTIVATION =
   String(process.env.VERIFY_OPENAI_TOKEN_ON_ACTIVATION || "1") !== "0";
@@ -378,9 +378,32 @@ function resolvePathWithin(root, relativePath) {
 }
 
 const publicRequestWindows = new Map();
+const PUBLIC_RATE_LIMIT_MAX_KEYS = 10_000;
+
+function prunePublicRequestWindows(now = Date.now(), windowMs = 60 * 1000) {
+  for (const [key, entry] of publicRequestWindows) {
+    if (!entry || now - Number(entry.startedAt || 0) >= windowMs) {
+      publicRequestWindows.delete(key);
+    }
+  }
+  if (publicRequestWindows.size <= PUBLIC_RATE_LIMIT_MAX_KEYS) {
+    return;
+  }
+  const overflow = publicRequestWindows.size - PUBLIC_RATE_LIMIT_MAX_KEYS;
+  let removed = 0;
+  for (const key of publicRequestWindows.keys()) {
+    publicRequestWindows.delete(key);
+    removed += 1;
+    if (removed >= overflow) break;
+  }
+}
+
 function limitPublicRequests(scope, limit, windowMs) {
   return (req, res, next) => {
     const now = Date.now();
+    if (publicRequestWindows.size > PUBLIC_RATE_LIMIT_MAX_KEYS * 0.9) {
+      prunePublicRequestWindows(now, windowMs);
+    }
     const key = `${scope}:${getClientIp(req) || "unknown"}`;
     const current = publicRequestWindows.get(key);
     const entry =
@@ -389,7 +412,6 @@ function limitPublicRequests(scope, limit, windowMs) {
         : { startedAt: now, count: 0 };
     entry.count += 1;
     publicRequestWindows.set(key, entry);
-    if (publicRequestWindows.size > 10_000) publicRequestWindows.clear();
     if (entry.count > limit) {
       const retryAfterSec = Math.max(
         1,
@@ -567,7 +589,48 @@ process.on("exit", () => cleanupProcesses());
 
 let storeReadyPromise = null;
 
-const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || "2mb";
+function resolveJsonBodyLimit() {
+  const raw = String(process.env.JSON_BODY_LIMIT || "2mb").trim().toLowerCase();
+  const match = raw.match(/^(\d+(?:\.\d+)?)(kb|mb)?$/);
+  if (!match) return "2mb";
+  const amount = Number(match[1]);
+  const unit = match[2] || "mb";
+  const bytes = unit === "kb" ? amount * 1024 : amount * 1024 * 1024;
+  const maxBytes = 2 * 1024 * 1024;
+  if (!Number.isFinite(bytes) || bytes <= 0 || bytes > maxBytes) {
+    return "2mb";
+  }
+  return raw;
+}
+
+const JSON_BODY_LIMIT = resolveJsonBodyLimit();
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+function requestOriginHost(req) {
+  const origin = String(req.headers.origin || "").trim();
+  if (origin) {
+    try {
+      return new URL(origin).host.toLowerCase();
+    } catch (_) {
+      return "";
+    }
+  }
+  const referer = String(req.headers.referer || "").trim();
+  if (!referer) return "";
+  try {
+    return new URL(referer).host.toLowerCase();
+  } catch (_) {
+    return "";
+  }
+}
+
+function requestHost(req) {
+  const raw = TRUST_PROXY
+    ? String(req.headers["x-forwarded-host"] || req.headers.host || "")
+    : String(req.headers.host || "");
+  return raw.split(",")[0].trim().toLowerCase();
+}
+
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
@@ -576,8 +639,32 @@ app.use((req, res, next) => {
     "Permissions-Policy",
     "camera=(), microphone=(), geolocation=()",
   );
-  if (req.path.startsWith("/api/admin"))
+  if (req.path.startsWith("/api")) {
     res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  }
+  if (
+    req.secure ||
+    (TRUST_PROXY &&
+      String(req.headers["x-forwarded-proto"] || "")
+        .split(",")[0]
+        .trim() === "https")
+  ) {
+    res.setHeader(
+      "Strict-Transport-Security",
+      "max-age=31536000; includeSubDomains",
+    );
+  }
+  if (MUTATING_METHODS.has(req.method) && req.path.startsWith("/api/admin")) {
+    const originHost = requestOriginHost(req);
+    const host = requestHost(req);
+    if (originHost && host && originHost !== host) {
+      return res.status(403).json({
+        success: false,
+        message: "拒绝跨源请求",
+      });
+    }
+  }
   next();
 });
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
@@ -792,10 +879,7 @@ function getBearerToken(req) {
   if (scheme === "Bearer" && token) {
     return token.trim();
   }
-  const queryToken = String(
-    req.query?.token || req.query?.access_token || "",
-  ).trim();
-  return queryToken || null;
+  return null;
 }
 
 async function authenticateAdmin(req, res, next) {
@@ -2253,6 +2337,12 @@ app.get(
           .status(404)
           .json({ success: false, message: "Session 记录不存在" });
       }
+      const clientMeta = adminAuth.getClientMeta(req);
+      await logAdminSecurityEvent("session_exported", {
+        ...clientMeta,
+        email: req.admin?.email || "",
+        detail: `导出 Session ${req.params.jobKey}`,
+      });
       res.json({ success: true, session });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
@@ -3074,6 +3164,8 @@ registerAdminAssetRoutes(app, {
   ensureStoreReady,
   requireSecondaryAuth,
   createCdks,
+  logAdminSecurityEvent,
+  getClientMeta: adminAuth.getClientMeta,
 });
 
 // ─── Proxy Pool CRUD API ────────────────────────────────────────────────────

@@ -181,7 +181,7 @@ main() {
     echo "  1. 编辑配置: nano .env"
     echo "  2. 确保 MySQL 已运行并填写正确的连接信息"
     echo "  3. 启动服务: npm start"
-    echo "  4. 访问后台: http://localhost:3000/admin-login.html"
+    echo "  4. 访问后台: http://localhost:17621/admin-login.html"
     echo "     默认密码: admin123"
     echo ""
 }

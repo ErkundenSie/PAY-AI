@@ -1,7 +1,27 @@
 "use strict";
 
 function registerAdminAssetRoutes(app, deps) {
-  const { store, ensureStoreReady, requireSecondaryAuth, createCdks } = deps;
+  const {
+    store,
+    ensureStoreReady,
+    requireSecondaryAuth,
+    createCdks,
+    logAdminSecurityEvent,
+    getClientMeta,
+  } = deps;
+
+  function auditAdminAction(req, event, detail) {
+    if (typeof logAdminSecurityEvent !== "function") return;
+    const meta =
+      typeof getClientMeta === "function" ? getClientMeta(req) : {};
+    Promise.resolve(
+      logAdminSecurityEvent(event, {
+        ...meta,
+        email: req.admin?.email || "",
+        detail,
+      }),
+    ).catch(() => {});
+  }
 
   app.get("/api/admin/cards", requireSecondaryAuth, async (req, res) => {
     try {
@@ -55,6 +75,7 @@ function registerAdminAssetRoutes(app, deps) {
       }
 
       const result = await store.importCards(cards);
+      auditAdminAction(req, "cards_imported", `导入 ${result.imported || cards.length} 张卡`);
       res.json({ success: true, ...result });
     } catch (error) {
       if (error.message === "单次导入上限 500 条") {
@@ -136,6 +157,7 @@ function registerAdminAssetRoutes(app, deps) {
       if (result.affectedRows === 0) {
         return res.status(404).json({ success: false, error: "卡片不存在" });
       }
+      auditAdminAction(req, "card_deleted", `删除卡片 #${cardId}`);
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
@@ -181,6 +203,11 @@ function registerAdminAssetRoutes(app, deps) {
         plan_type: planType,
         card_group_id: cardGroupId,
       });
+      auditAdminAction(
+        req,
+        "cdk_generated",
+        `生成 ${result.insertedCount} 个 ${planType} CDK`,
+      );
       res.json({
         success: true,
         message: `成功生成 ${result.insertedCount} 个自助 CDK`,
@@ -211,6 +238,11 @@ function registerAdminAssetRoutes(app, deps) {
         plan_type: planType,
         card_group_id: cardGroupId,
       });
+      auditAdminAction(
+        req,
+        "cdk_imported",
+        `导入 CDK 新增 ${summary.insertedCount} 个，重复 ${summary.duplicateCount} 个`,
+      );
       res.json({
         success: true,
         message: `导入完成，新增 ${summary.insertedCount} 个，重复 ${summary.duplicateCount} 个`,
@@ -242,6 +274,7 @@ function registerAdminAssetRoutes(app, deps) {
     try {
       await ensureStoreReady();
       await store.deleteCdk(req.params.cdk);
+      auditAdminAction(req, "cdk_deleted", `删除 CDK ${req.params.cdk}`);
       res.json({ success: true, message: "CDK 已删除" });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });

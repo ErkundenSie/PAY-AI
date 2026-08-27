@@ -46,9 +46,21 @@ function registerAdminLoginRoutes(app, deps) {
       const telegramSettings = await store.getTelegramConfig();
       const emailOk = email === adminAuth.normalizeEmail(authConfig.email);
       const passwordOk = verifyPassword(password, authConfig.passwordHash);
+      const emailRate = emailOk
+        ? adminAuth.checkLoginRateLimit(clientMeta.ip, email)
+        : rate;
+      if (!emailRate.allowed) {
+        return res.status(429).json({
+          success: false,
+          message: `登录尝试过多，请 ${emailRate.retryAfterSec} 秒后再试`,
+        });
+      }
 
       if (!emailOk || !passwordOk) {
-        adminAuth.recordLoginFailure(rate.key, rate.entry);
+        adminAuth.recordLoginFailure(
+          emailRate.keys || emailRate.key,
+          emailRate.entries || emailRate.entry,
+        );
         await logAdminSecurityEvent("login_failed", {
           ...clientMeta,
           email,
@@ -66,7 +78,7 @@ function registerAdminLoginRoutes(app, deps) {
           .json({ success: false, message: "邮箱或密码错误" });
       }
 
-      adminAuth.clearLoginAttempts(rate.key);
+      adminAuth.clearLoginAttempts(emailRate.keys || emailRate.key);
 
       const methods = adminAuth.resolveLogin2faMethods(
         authConfig,
@@ -181,7 +193,10 @@ function registerAdminLoginRoutes(app, deps) {
       return res.status(400).json({ success: false, message: "请输入验证码" });
     }
 
-    const rate = adminAuth.checkLoginRateLimit(`${clientMeta.ip}:2fa`);
+    const rate = adminAuth.checkLoginRateLimit(
+      `${clientMeta.ip}:2fa`,
+      challenge.email ? `2fa:${challenge.email}` : "",
+    );
     if (!rate.allowed) {
       return res.status(429).json({
         success: false,
@@ -210,7 +225,7 @@ function registerAdminLoginRoutes(app, deps) {
         const tgResult = adminAuth.verifyTelegramLoginCode(challenge.cid, code);
         verified = tgResult.ok;
         if (!verified) {
-          adminAuth.recordLoginFailure(rate.key, rate.entry);
+          adminAuth.recordLoginFailure(rate.keys || rate.key, rate.entries || rate.entry);
           await logAdminSecurityEvent("2fa_failed", {
             ...clientMeta,
             email: challenge.email,
@@ -233,7 +248,7 @@ function registerAdminLoginRoutes(app, deps) {
       }
 
       if (!verified) {
-        adminAuth.recordLoginFailure(rate.key, rate.entry);
+        adminAuth.recordLoginFailure(rate.keys || rate.key, rate.entries || rate.entry);
         await logAdminSecurityEvent("2fa_failed", {
           ...clientMeta,
           email: challenge.email,
@@ -250,7 +265,7 @@ function registerAdminLoginRoutes(app, deps) {
         return res.status(401).json({ success: false, message: "验证码错误" });
       }
 
-      adminAuth.clearLoginAttempts(rate.key);
+      adminAuth.clearLoginAttempts(rate.keys || rate.key);
       const { token, payload } = issueAdminToken(
         authConfig.passwordVersion,
         authConfig.email,

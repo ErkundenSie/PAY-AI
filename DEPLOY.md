@@ -50,7 +50,7 @@ ADMIN_PASSWORD=your_admin_pass     # 后台管理密码
 docker compose up -d
 ```
 
-访问：`http://your-server-ip:3000/admin-login.html`
+访问：`http://your-server-ip:17621/admin-login.html`
 
 ### 4. 常用命令
 
@@ -215,7 +215,7 @@ server {
 
     # WebSocket 支持
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:17621;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -284,5 +284,5 @@ PROXY=http://username:password@proxy-host:port
 
 | 端口 | 用途                 |
 | ---- | -------------------- |
-| 3000 | Web 服务 + WebSocket |
+| 17621 | Web 服务 + WebSocket |
 | 3306 | MySQL                |

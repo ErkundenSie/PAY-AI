@@ -172,6 +172,26 @@ describe("public routes", () => {
     expect(res.json.tasks[0].found).toBe(true);
   });
 
+  it("uses a uniform invalid message for missing CDK lookup", async () => {
+    const app = createApp();
+    const res = await request(app, "POST", "/api/cdk/lookup", {
+      codes: ["MISSING-CODE"],
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.tasks[0]).toMatchObject({
+      kind: "missing",
+      found: false,
+      error: "无效 CDK",
+    });
+  });
+
+  it("does not distinguish missing CDK query from invalid CDK", async () => {
+    const app = createApp();
+    const res = await request(app, "GET", "/api/cdk/query?cdk=MISSING-CODE");
+    expect(res.status).toBe(403);
+    expect(res.json.message).toBe("无效 CDK");
+  });
+
   it("returns queue count in public runtime", async () => {
     const app = createApp();
     const res = await request(app, "GET", "/api/public/runtime");
