@@ -36,7 +36,11 @@ const {
   isCardPoolExhaustedIssue,
 } = require("./telegram-notify");
 const adminAuth = require("./admin-auth");
-const { buildAdminLoginUrl, buildAdminPanelUrl } = require("./admin-paths");
+const {
+  buildAdminLoginUrl,
+  buildAdminPanelUrl,
+  buildCheckoutUrl,
+} = require("./admin-paths");
 const { buildHcaptchaEnvFromConfig } = require("./hcaptcha-runtime");
 const {
   checkHcaptchaSolverHealth,
@@ -515,6 +519,7 @@ async function attachAdminPaths(payload) {
     ...payload,
     loginPath: buildAdminLoginUrl(paths),
     panelPath: buildAdminPanelUrl(paths),
+    checkoutPath: buildCheckoutUrl(paths),
   };
 }
 
@@ -537,11 +542,15 @@ app.use(async (req, res, next) => {
     const current = normalizeRequestPathname(req.path);
     const loginUrl = normalizeRequestPathname(buildAdminLoginUrl(paths));
     const panelUrl = normalizeRequestPathname(buildAdminPanelUrl(paths));
+    const checkoutUrl = normalizeRequestPathname(buildCheckoutUrl(paths));
     if (current === loginUrl) {
       return res.sendFile(path.join(__dirname, "public", "admin-login.html"));
     }
     if (current === panelUrl) {
       return res.sendFile(path.join(__dirname, "public", "admin.html"));
+    }
+    if (current === checkoutUrl) {
+      return res.sendFile(path.join(__dirname, "public", "checkout.html"));
     }
   } catch (_) {
     // DB 尚未就绪时交给后续路由处理
@@ -2223,8 +2232,10 @@ app.get("/api/public/admin-paths", async (req, res) => {
       success: true,
       loginPath: paths.loginPath,
       panelPath: paths.panelPath,
+      checkoutPath: paths.checkoutPath,
       loginUrl: buildAdminLoginUrl(paths),
       panelUrl: buildAdminPanelUrl(paths),
+      checkoutUrl: buildCheckoutUrl(paths),
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -2460,10 +2471,6 @@ app.get(
   },
 );
 
-app.get("/checkout", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "checkout.html"));
-});
-
 app.use("/api/admin", authenticateAdmin);
 
 app.get("/subscription", (req, res) => {
@@ -2544,8 +2551,10 @@ app.get("/api/admin/security/status", async (req, res) => {
       notifyAdminLogin: authConfig.notifyAdminLogin,
       loginPath: paths.loginPath,
       panelPath: paths.panelPath,
+      checkoutPath: paths.checkoutPath,
       loginUrl: buildAdminLoginUrl(paths),
       panelUrl: buildAdminPanelUrl(paths),
+      checkoutUrl: buildCheckoutUrl(paths),
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -2647,6 +2656,7 @@ app.post("/api/admin/security/paths", async (req, res) => {
     const saved = await store.saveAdminPaths({
       loginPath: req.body?.loginPath,
       panelPath: req.body?.panelPath,
+      checkoutPath: req.body?.checkoutPath,
     });
     invalidateAdminPathsCache();
     cachedAdminPaths = saved;
@@ -2654,8 +2664,10 @@ app.post("/api/admin/security/paths", async (req, res) => {
       success: true,
       loginPath: saved.loginPath,
       panelPath: saved.panelPath,
+      checkoutPath: saved.checkoutPath,
       loginUrl: buildAdminLoginUrl(saved),
       panelUrl: buildAdminPanelUrl(saved),
+      checkoutUrl: buildCheckoutUrl(saved),
       message: "入口路径已更新，请使用新地址访问并收藏",
     });
   } catch (error) {
@@ -3792,12 +3804,14 @@ app.get("/api/admin/cards", requireSecondaryAuth, async (req, res) => {
   try {
     await ensureStoreReady();
     const rows = await store.runQuery(
-      `SELECT id, card_number, card_expiry, card_cvc, card_holder,
-                    payment_holder_name, payment_address_line1, payment_address_city,
-                    payment_address_state, payment_address_postal, payment_address_id,
-                    is_active, usage_count, last_used_at, status, cooldown_until
-             FROM card_assets
-             ORDER BY sort_order ASC, id ASC`,
+      `SELECT c.id, c.card_number, c.card_expiry, c.card_cvc, c.card_holder,
+                    c.payment_holder_name, c.payment_address_line1, c.payment_address_city,
+                    c.payment_address_state, c.payment_address_postal, c.payment_address_id,
+                    c.is_active, c.usage_count, c.last_used_at, c.status, c.cooldown_until,
+                    c.group_id, g.name AS group_name
+             FROM card_assets c
+             LEFT JOIN card_groups g ON g.id = c.group_id
+             ORDER BY c.sort_order ASC, c.id ASC`,
     );
     const cards = rows.map((row) => ({
       id: row.id,
@@ -3817,6 +3831,8 @@ app.get("/api/admin/cards", requireSecondaryAuth, async (req, res) => {
       last_used_at: row.last_used_at || null,
       status: row.status || "正常",
       cooldown_until: row.cooldown_until || null,
+      group_id: row.group_id ? Number(row.group_id) : null,
+      group_name: row.group_name || "",
     }));
     res.json({ success: true, cards });
   } catch (error) {
@@ -3848,6 +3864,64 @@ app.post("/api/admin/cards/import", requireSecondaryAuth, async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
+app.get("/api/admin/card-groups", requireSecondaryAuth, async (req, res) => {
+  try {
+    await ensureStoreReady();
+    const groups = await store.listCardGroups();
+    res.json({ success: true, groups });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.post("/api/admin/card-groups", requireSecondaryAuth, async (req, res) => {
+  try {
+    await ensureStoreReady();
+    const group = await store.createCardGroup({
+      name: req.body?.name,
+      cardIds: req.body?.cardIds || req.body?.card_ids || [],
+    });
+    res.json({ success: true, group, message: "分组已创建" });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+app.post(
+  "/api/admin/card-groups/assign",
+  requireSecondaryAuth,
+  async (req, res) => {
+    try {
+      await ensureStoreReady();
+      const result = await store.assignCardsToGroup({
+        groupId: req.body?.groupId ?? req.body?.group_id ?? null,
+        cardIds: req.body?.cardIds || req.body?.card_ids || [],
+      });
+      res.json({
+        success: true,
+        ...result,
+        message: result.group_id ? "已加入分组" : "已移出分组",
+      });
+    } catch (error) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  },
+);
+
+app.delete(
+  "/api/admin/card-groups/:id",
+  requireSecondaryAuth,
+  async (req, res) => {
+    try {
+      await ensureStoreReady();
+      await store.deleteCardGroup(req.params.id);
+      res.json({ success: true, message: "分组已删除" });
+    } catch (error) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  },
+);
 
 app.delete("/api/admin/cards/:id", requireSecondaryAuth, async (req, res) => {
   try {
@@ -4089,10 +4163,13 @@ app.post("/api/admin/cdks/generate", requireSecondaryAuth, async (req, res) => {
     await ensureStoreReady();
     const count = req.body?.count;
     const planType = req.body?.plan_type || "plus";
+    const cardGroupId =
+      req.body?.card_group_id ?? req.body?.cardGroupId ?? null;
     const newCdks = createCdks(count);
     const result = await store.insertCdks(newCdks, {
       type: "自助",
       plan_type: planType,
+      card_group_id: cardGroupId,
     });
     res.json({
       success: true,
@@ -4117,7 +4194,12 @@ app.post("/api/admin/cdks/import", requireSecondaryAuth, async (req, res) => {
   try {
     await ensureStoreReady();
     const planType = req.body?.plan_type || "plus";
-    const summary = await store.insertCdks(cdks, { plan_type: planType });
+    const cardGroupId =
+      req.body?.card_group_id ?? req.body?.cardGroupId ?? null;
+    const summary = await store.insertCdks(cdks, {
+      plan_type: planType,
+      card_group_id: cardGroupId,
+    });
     res.json({
       success: true,
       message: `导入完成，新增 ${summary.insertedCount} 个，重复 ${summary.duplicateCount} 个`,
@@ -4285,12 +4367,14 @@ function spawnCheckoutDebugWorker({
     try {
       const proxy = await store.getActiveProxy();
       const hcaptchaCfg = await store.getHcaptchaConfig();
+      const recordVideo = await store.getRecordVideoEnabled();
       const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
       const runtimeEnv = {
         ...process.env,
         ...hcaptchaEnv,
         CHECKOUT_DEBUG_ONLY: "1",
         CHECKOUT_MODE: "api",
+        RECORD_VIDEO: recordVideo ? "1" : "0",
         CHATGPT_TOKEN: token,
         CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
           ? sessionRaw
@@ -4388,11 +4472,13 @@ function spawnCheckoutPaymentWorker({
     try {
       const proxy = await store.getActiveProxy();
       const hcaptchaCfg = await store.getHcaptchaConfig();
+      const recordVideo = await store.getRecordVideoEnabled();
       const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
       const runtimeEnv = {
         ...process.env,
         ...hcaptchaEnv,
         CHECKOUT_MODE: "api",
+        RECORD_VIDEO: recordVideo ? "1" : "0",
         CHATGPT_TOKEN: token,
         CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
           ? sessionRaw
@@ -4900,12 +4986,14 @@ function spawnActivationWorker({
 
         const proxy = await store.getActiveProxy();
         const hcaptchaCfg = await store.getHcaptchaConfig();
+        const recordVideo = await store.getRecordVideoEnabled();
         const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
         const runtimeEnv = {
           ...process.env,
           ...hcaptchaEnv,
           JOB_KEY: task.jobKey,
           CHECKOUT_MODE: process.env.CHECKOUT_MODE || "api",
+          RECORD_VIDEO: recordVideo ? "1" : "0",
           CHATGPT_TOKEN: token,
           CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
             ? sessionRaw
@@ -5293,18 +5381,21 @@ async function handleActivationRequest(req, res) {
       !store.isCreditsPlan(cdkDetails.plan_type);
 
     if (!useGptApi) {
-      const hasCard = await store.hasAvailableCard();
+      const hasCard = await store.hasAvailableCard(cdkDetails.card_group_id);
       if (!hasCard) {
         const poolEmail = extractEmailFromSession(rawSession);
         fireTelegramNotification("card_pool_empty", {
           email: poolEmail,
           cdk,
-          message: "银行卡池暂无可用卡片，任务未启动",
+          message: cdkDetails.card_group_id
+            ? "该 CDK 绑定的银行卡分组暂无可用卡片，任务未启动"
+            : "银行卡池暂无可用卡片，任务未启动",
         });
         return res.status(503).json({
           success: false,
-          message:
-            "银行卡池暂无可用卡片，请先在后台「银行卡池」导入银行卡后再试",
+          message: cdkDetails.card_group_id
+            ? "该 CDK 绑定的银行卡分组暂无可用卡片，请先在后台将该分组补充银行卡后再试"
+            : "银行卡池暂无可用卡片，请先在后台「银行卡池」导入银行卡后再试",
         });
       }
     }

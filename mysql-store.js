@@ -50,6 +50,9 @@ const DEFAULT_ADMIN_LOGIN_PATH = String(
 const DEFAULT_ADMIN_PANEL_PATH = String(process.env.ADMIN_PANEL_PATH || "admin")
   .trim()
   .toLowerCase();
+const DEFAULT_CHECKOUT_PATH = String(process.env.CHECKOUT_PATH || "checkout")
+  .trim()
+  .toLowerCase();
 const { normalizeAdminPaths } = require("./admin-paths");
 
 let pool = null;
@@ -268,6 +271,8 @@ async function ensureAdminSecurityDefaults() {
     ["admin_2fa_login_mode", "either"],
     ["admin_login_path", DEFAULT_ADMIN_LOGIN_PATH],
     ["admin_panel_path", DEFAULT_ADMIN_PANEL_PATH],
+    ["checkout_path", DEFAULT_CHECKOUT_PATH],
+    ["record_video", "0"],
   ];
   for (const [key, value] of defaults) {
     await runExecute(
@@ -288,6 +293,7 @@ async function syncAdminConfigFromEnvironment() {
   await saveAdminPaths({
     loginPath: DEFAULT_ADMIN_LOGIN_PATH,
     panelPath: DEFAULT_ADMIN_PANEL_PATH,
+    checkoutPath: DEFAULT_CHECKOUT_PATH,
   });
   console.warn(
     "[配置] ADMIN_CONFIG_SYNC=1：已用环境变量覆盖已有后台账号、密码和路径；请将其改回 0 后重启。",
@@ -611,6 +617,25 @@ async function ensureLegacyColumns() {
     "cdk_codes",
     "plan_type",
     "VARCHAR(16) NOT NULL DEFAULT 'plus'",
+  );
+  await ensureColumn(
+    "card_assets",
+    "group_id",
+    "BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '所属银行卡分组'",
+  );
+  await ensureColumn(
+    "cdk_codes",
+    "card_group_id",
+    "BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '仅可使用该银行卡分组'",
+  );
+  await runQuery(
+    `CREATE TABLE IF NOT EXISTS card_groups (
+         id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+         name VARCHAR(64) NOT NULL,
+         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+         UNIQUE KEY uniq_card_groups_name (name)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   );
 
   await ensureColumn(
@@ -1275,7 +1300,7 @@ async function getAdminData() {
     runQuery(
       `SELECT config_key, config_value
              FROM app_config
-             WHERE config_key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             WHERE config_key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         "proxy",
         "max_concurrent_activations",
@@ -1290,6 +1315,7 @@ async function getAdminData() {
         "inbox_api_base",
         "inbox_email_domain",
         "inbox_email_domains",
+        "record_video",
       ],
     ),
     runQuery(
@@ -1353,6 +1379,7 @@ async function getAdminData() {
       maintenance_mode: String(configMap.maintenance_mode || "0") === "1",
       maintenance_mode_drain:
         String(configMap.maintenance_mode_drain || "0") === "1",
+      record_video: String(configMap.record_video || "0") === "1",
       email_source: ["random", "pool", "inbox"].includes(
         String(configMap.email_source || ""),
       )
@@ -1469,6 +1496,9 @@ async function saveConfig(config = {}) {
       "maintenance_mode_drain",
       config.maintenance_mode_drain ? "1" : "0",
     ]);
+  }
+  if (hasOwn("record_video")) {
+    configEntries.push(["record_video", config.record_video ? "1" : "0"]);
   }
   if (hasOwn("email_source") || hasOwn("pool_email_enabled")) {
     const emailSource = ["random", "pool", "inbox"].includes(
@@ -1631,9 +1661,170 @@ async function saveConfig(config = {}) {
   });
 }
 
+function normalizeCardGroupName(raw) {
+  const name = String(raw || "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!name) {
+    throw new Error("分组名称不能为空");
+  }
+  if (name.length > 32) {
+    throw new Error("分组名称不能超过 32 个字符");
+  }
+  return name;
+}
+
+function normalizeCardGroupId(raw) {
+  if (raw == null || raw === "") return null;
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error("无效的银行卡分组");
+  }
+  return id;
+}
+
+function formatCardGroup(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    name: String(row.name || "").trim(),
+    card_count: Number(row.card_count || 0),
+    created_at: row.created_at || null,
+  };
+}
+
+async function listCardGroups() {
+  const rows = await runQuery(
+    `SELECT g.id, g.name, g.created_at,
+            COALESCE(COUNT(c.id), 0) AS card_count
+         FROM card_groups g
+         LEFT JOIN card_assets c ON c.group_id = g.id
+         GROUP BY g.id, g.name, g.created_at
+         ORDER BY g.created_at DESC, g.id DESC`,
+  );
+  return rows.map(formatCardGroup);
+}
+
+async function getCardGroupById(groupId) {
+  const id = normalizeCardGroupId(groupId);
+  if (!id) return null;
+  const rows = await runQuery(
+    `SELECT g.id, g.name, g.created_at,
+            COALESCE(COUNT(c.id), 0) AS card_count
+         FROM card_groups g
+         LEFT JOIN card_assets c ON c.group_id = g.id
+         WHERE g.id = ?
+         GROUP BY g.id, g.name, g.created_at
+         LIMIT 1`,
+    [id],
+  );
+  return formatCardGroup(rows[0] || null);
+}
+
+async function createCardGroup({ name, cardIds = [] } = {}) {
+  const groupName = normalizeCardGroupName(name);
+  const ids = [
+    ...new Set(
+      (Array.isArray(cardIds) ? cardIds : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isInteger(id) && id > 0),
+    ),
+  ];
+  return withTransaction(async (connection) => {
+    let result;
+    try {
+      result = await runExecute(
+        `INSERT INTO card_groups (name) VALUES (?)`,
+        [groupName],
+        { connection },
+      );
+    } catch (error) {
+      if (String(error.message || "").includes("Duplicate")) {
+        throw new Error("分组名称已存在");
+      }
+      throw error;
+    }
+    const groupId = Number(result.insertId);
+    if (ids.length) {
+      const placeholders = ids.map(() => "?").join(", ");
+      await runExecute(
+        `UPDATE card_assets SET group_id = ? WHERE id IN (${placeholders})`,
+        [groupId, ...ids],
+        { connection },
+      );
+    }
+    const [rows] = await connection.query(
+      `SELECT g.id, g.name, g.created_at,
+              COALESCE(COUNT(c.id), 0) AS card_count
+           FROM card_groups g
+           LEFT JOIN card_assets c ON c.group_id = g.id
+           WHERE g.id = ?
+           GROUP BY g.id, g.name, g.created_at
+           LIMIT 1`,
+      [groupId],
+    );
+    return formatCardGroup(rows[0]);
+  });
+}
+
+async function assignCardsToGroup({ groupId, cardIds = [] } = {}) {
+  const id =
+    groupId == null || groupId === "" ? null : normalizeCardGroupId(groupId);
+  if (id) {
+    const group = await getCardGroupById(id);
+    if (!group) {
+      throw new Error("银行卡分组不存在");
+    }
+  }
+  const ids = [
+    ...new Set(
+      (Array.isArray(cardIds) ? cardIds : [])
+        .map((item) => Number(item))
+        .filter((item) => Number.isInteger(item) && item > 0),
+    ),
+  ];
+  if (!ids.length) {
+    throw new Error("请选择要分组的银行卡");
+  }
+  const placeholders = ids.map(() => "?").join(", ");
+  await runExecute(
+    `UPDATE card_assets SET group_id = ? WHERE id IN (${placeholders})`,
+    [id, ...ids],
+  );
+  return { updated: ids.length, group_id: id };
+}
+
+async function deleteCardGroup(groupId) {
+  const id = normalizeCardGroupId(groupId);
+  return withTransaction(async (connection) => {
+    await runExecute(
+      `UPDATE card_assets SET group_id = NULL WHERE group_id = ?`,
+      [id],
+      { connection },
+    );
+    await runExecute(
+      `UPDATE cdk_codes SET card_group_id = NULL WHERE card_group_id = ?`,
+      [id],
+      { connection },
+    );
+    const result = await runExecute(
+      `DELETE FROM card_groups WHERE id = ?`,
+      [id],
+      {
+        connection,
+      },
+    );
+    if (!result.affectedRows) {
+      throw new Error("银行卡分组不存在");
+    }
+    return { success: true };
+  });
+}
+
 async function listCdks() {
   const rows = await runQuery(
     `SELECT c.cdk_code, c.shipped_at, c.used_at, c.type, c.plan_type, c.created_at,
+                c.card_group_id, g.name AS card_group_name,
                 (
                     SELECT l.token_preview
                     FROM task_logs l
@@ -1653,6 +1844,7 @@ async function listCdks() {
                     LIMIT 1
                 ) AS session_job_key
          FROM cdk_codes c
+         LEFT JOIN card_groups g ON g.id = c.card_group_id
          WHERE c.is_active = 1
            AND (c.type = '自助' OR c.type IS NULL OR c.type = '')
          ORDER BY c.created_at DESC, c.id DESC`,
@@ -1678,6 +1870,8 @@ async function listCdks() {
         : "unused",
     type: row.type || "自助",
     plan_type: row.plan_type || "plus",
+    card_group_id: row.card_group_id ? Number(row.card_group_id) : null,
+    card_group_name: row.card_group_name || "",
     shipped: Boolean(row.shipped_at),
     shipped_at: row.shipped_at
       ? new Date(row.shipped_at)
@@ -1789,13 +1983,23 @@ async function insertCdks(cdks, options = {}) {
   const planType = VALID_PLAN_TYPES.has(options.plan_type)
     ? options.plan_type
     : "plus";
-  const values = normalized.map((cdk) => [cdk, 1, type, planType]);
+  const cardGroupId =
+    options.card_group_id == null || options.card_group_id === ""
+      ? null
+      : normalizeCardGroupId(options.card_group_id);
+  if (cardGroupId) {
+    const group = await getCardGroupById(cardGroupId);
+    if (!group) {
+      throw new Error("银行卡分组不存在");
+    }
+  }
+  const values = normalized.map((cdk) => [cdk, 1, type, planType, cardGroupId]);
   console.log(
     `正在插入 ${values.length} 个 CDK, 类型: ${type}, 套餐: ${planType}`,
   );
 
   const [result] = await getPool().query(
-    `INSERT INTO cdk_codes (cdk_code, is_active, type, plan_type) VALUES ?`,
+    `INSERT INTO cdk_codes (cdk_code, is_active, type, plan_type, card_group_id) VALUES ?`,
     [values],
   );
 
@@ -2670,6 +2874,7 @@ async function setAppConfigValue(configKey, configValue) {
 
 const BROWSER_POOL_CONFIG_KEY = "browser_pool_enabled";
 const BROWSER_POOL_SIZE_CONFIG_KEY = "browser_pool_size";
+const RECORD_VIDEO_CONFIG_KEY = "record_video";
 
 function parseBooleanConfig(value, fallback = false) {
   const raw = String(value ?? "")
@@ -2695,6 +2900,14 @@ async function getBrowserPoolEnabled() {
 async function setBrowserPoolEnabled(enabled) {
   await setAppConfigValue(BROWSER_POOL_CONFIG_KEY, enabled ? "1" : "0");
   return Boolean(enabled);
+}
+
+async function getRecordVideoEnabled() {
+  const fromDb = await getAppConfigValue(RECORD_VIDEO_CONFIG_KEY, "");
+  if (fromDb !== "") {
+    return parseBooleanConfig(fromDb, false);
+  }
+  return parseBooleanConfig(process.env.RECORD_VIDEO, false);
 }
 
 async function getBrowserPoolSize() {
@@ -3303,8 +3516,8 @@ async function getAdminPaths() {
   const rows = await runQuery(
     `SELECT config_key, config_value
          FROM app_config
-         WHERE config_key IN (?, ?)`,
-    ["admin_login_path", "admin_panel_path"],
+         WHERE config_key IN (?, ?, ?)`,
+    ["admin_login_path", "admin_panel_path", "checkout_path"],
   );
   const map = Object.fromEntries(
     rows.map((item) => [item.config_key, item.config_value]),
@@ -3312,21 +3525,28 @@ async function getAdminPaths() {
   return normalizeAdminPaths({
     loginPath: map.admin_login_path || DEFAULT_ADMIN_LOGIN_PATH,
     panelPath: map.admin_panel_path || DEFAULT_ADMIN_PANEL_PATH,
+    checkoutPath: map.checkout_path || DEFAULT_CHECKOUT_PATH,
   });
 }
 
-async function saveAdminPaths({ loginPath, panelPath }) {
-  const normalized = normalizeAdminPaths({ loginPath, panelPath });
+async function saveAdminPaths({ loginPath, panelPath, checkoutPath }) {
+  const normalized = normalizeAdminPaths({
+    loginPath,
+    panelPath,
+    checkoutPath,
+  });
   await withTransaction(async (connection) => {
     await runExecute(
       `INSERT INTO app_config (config_key, config_value)
-             VALUES (?, ?), (?, ?)
+             VALUES (?, ?), (?, ?), (?, ?)
              ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)`,
       [
         "admin_login_path",
         normalized.loginPath,
         "admin_panel_path",
         normalized.panelPath,
+        "checkout_path",
+        normalized.checkoutPath,
       ],
       { connection },
     );
@@ -3899,15 +4119,27 @@ async function getClaimedProductDownloadInfo(cdk) {
  * @param {string} ownerKey - 锁持有者标识（通常为 jobKey）
  * @returns {object|null} 卡片信息 { id, card_number, card_expiry, card_cvc, card_holder, usage_count } 或 null（无可用卡）
  */
-async function hasAvailableCard() {
+function buildCardGroupFilter(groupId) {
+  if (groupId == null) {
+    return { sql: "", params: [] };
+  }
+  return {
+    sql: " AND group_id = ?",
+    params: [Number(groupId)],
+  };
+}
+
+async function hasAvailableCard(groupId = null) {
+  const groupFilter = buildCardGroupFilter(groupId);
   const rows = await runQuery(
     `SELECT id
          FROM card_assets
          WHERE is_active = 1
            AND in_use = 0
            AND status = '正常'
-           AND (cooldown_until IS NULL OR cooldown_until < NOW())
+           AND (cooldown_until IS NULL OR cooldown_until < NOW())${groupFilter.sql}
          LIMIT 1`,
+    groupFilter.params,
   );
   return rows.length > 0;
 }
@@ -3982,7 +4214,8 @@ async function reserveCardById(cardId, ownerKey) {
   });
 }
 
-async function reserveCard(ownerKey) {
+async function reserveCard(ownerKey, groupId = null) {
+  const groupFilter = buildCardGroupFilter(groupId);
   return withTransaction(async (connection) => {
     const [rows] = await connection.query(
       `SELECT id, card_number, card_expiry, card_cvc, card_holder, usage_count
@@ -3990,10 +4223,11 @@ async function reserveCard(ownerKey) {
              WHERE is_active = 1
                AND in_use = 0
                AND status = '正常'
-               AND (cooldown_until IS NULL OR cooldown_until < NOW())
+               AND (cooldown_until IS NULL OR cooldown_until < NOW())${groupFilter.sql}
              ORDER BY usage_count ASC, COALESCE(last_used_at, '1970-01-01') ASC, id ASC
              LIMIT 1
              FOR UPDATE SKIP LOCKED`,
+      groupFilter.params,
     );
 
     if (!rows.length) {
@@ -4547,6 +4781,11 @@ module.exports = {
   saveAdminPaths,
   insertAdminLoginLog,
   listAdminLoginLogs,
+  listCardGroups,
+  getCardGroupById,
+  createCardGroup,
+  assignCardsToGroup,
+  deleteCardGroup,
   listCdks,
   listSessions,
   markCdkShipped,
@@ -4588,6 +4827,7 @@ module.exports = {
   setAppConfigValue,
   getBrowserPoolEnabled,
   setBrowserPoolEnabled,
+  getRecordVideoEnabled,
   getBrowserPoolSize,
   setBrowserPoolSize,
   getTelegramConfig,

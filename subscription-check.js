@@ -370,9 +370,16 @@ async function fetchAccountCheck(accessToken, timezoneOffsetMin = 0) {
 
 async function requestOpenAiJson(
   accessToken,
-  { method = "GET", url, body = null, timeoutMs = 20000, preferAxios = false },
+  {
+    method = "GET",
+    url,
+    body = null,
+    timeoutMs = 20000,
+    preferAxios = false,
+    extraHeaders = {},
+  },
 ) {
-  const headers = buildCheckHeaders(accessToken);
+  const headers = { ...buildCheckHeaders(accessToken), ...extraHeaders };
   const timeout = Math.max(2000, Number(timeoutMs || 20000));
   const proxyValue = String(process.env.PROXY || "").trim();
   let lastError = null;
@@ -522,6 +529,10 @@ async function cancelAutoRenew(accessToken, options = {}) {
       method: "POST",
       url: CANCEL_SUBSCRIPTION_URL,
       body: { account_id: accountId },
+      extraHeaders: {
+        "chatgpt-account-id": accountId,
+        "openai-account-id": accountId,
+      },
       timeoutMs: options.timeoutMs,
       preferAxios: options.preferAxios,
     });

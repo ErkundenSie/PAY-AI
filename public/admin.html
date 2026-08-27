@@ -1735,6 +1735,18 @@
         font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
       }
 
+      .task-detail-log-wrap {
+        max-height: 60vh;
+        overflow: auto;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius-md);
+        background: var(--surface-soft);
+      }
+
+      .task-detail-log-list {
+        min-width: 760px;
+      }
+
       .session-preview-link {
         cursor: pointer;
         color: var(--primary);
@@ -2091,13 +2103,14 @@
       .runtime-log-toolbar {
         display: flex;
         flex-wrap: wrap;
-        align-items: center;
+        align-items: flex-end;
         gap: 12px 20px;
         margin-bottom: 12px;
       }
 
       .runtime-log-toggle {
         display: inline-flex;
+        align-self: flex-end;
         align-items: center;
         justify-content: center;
         height: 38px;
@@ -2113,6 +2126,7 @@
         border: 1px solid var(--glass-border);
         border-radius: var(--radius-md);
         background: var(--surface);
+        margin: 0;
         flex-shrink: 0;
         -webkit-user-select: none;
         user-select: none;
@@ -2156,6 +2170,79 @@
         word-break: normal;
         overflow-wrap: normal;
         font-variant-numeric: tabular-nums;
+      }
+
+      .runtime-log-list {
+        display: grid;
+        min-width: 760px;
+        font-family:
+          "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .runtime-log-row {
+        display: grid;
+        grid-template-columns: 74px 84px 48px 48px minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+        padding: 7px 12px;
+        border-bottom: 1px solid var(--divider);
+      }
+
+      .runtime-log-row:last-child {
+        border-bottom: 0;
+      }
+
+      .runtime-log-row:hover {
+        background: color-mix(in srgb, var(--primary) 5%, transparent);
+      }
+
+      .runtime-log-meta {
+        color: var(--text-dim);
+        white-space: nowrap;
+      }
+
+      .runtime-log-source {
+        color: var(--text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .runtime-log-level {
+        display: inline-flex;
+        justify-content: center;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: var(--surface-muted, #e2e8f0);
+        color: var(--text-secondary);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.4;
+      }
+
+      .runtime-log-row.is-success .runtime-log-level {
+        background: var(--success-soft);
+        color: #047857;
+      }
+
+      .runtime-log-row.is-warning .runtime-log-level {
+        background: var(--warning-soft, #fef3c7);
+        color: #b45309;
+      }
+
+      .runtime-log-row.is-error .runtime-log-level {
+        background: var(--error-soft);
+        color: #b91c1c;
+      }
+
+      .runtime-log-message {
+        min-width: 0;
+        color: var(--text-main);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
       }
 
       .log-page-toolbar {
@@ -2455,7 +2542,14 @@
             margin-bottom: 14px;
           "
         ></div>
-        <pre id="task_detail_modal_output" class="session-modal-pre"></pre>
+        <div class="task-detail-log-wrap">
+          <div
+            id="task_detail_modal_output"
+            class="runtime-log-list task-detail-log-list"
+            role="log"
+            aria-live="polite"
+          ></div>
+        </div>
       </div>
     </div>
 
@@ -3065,6 +3159,28 @@
                 开启后立即拒绝所有新任务。
               </p>
             </div>
+            <div class="form-group" style="margin-top: 22px">
+              <div class="toggle-field">
+                <div class="toggle-label"><span>保存失败任务录像</span></div>
+                <label class="toggle-control">
+                  <input
+                    type="checkbox"
+                    id="record_video"
+                    class="toggle-input"
+                  />
+                  <span class="toggle-switch"></span>
+                </label>
+              </div>
+              <p
+                style="
+                  font-size: 13px;
+                  color: var(--text-dim);
+                  margin-top: 10px;
+                "
+              >
+                默认关闭；成功任务不会保留截图或录像。
+              </p>
+            </div>
           </div>
         </div>
 
@@ -3522,6 +3638,21 @@
                 style="font-size: 12px; color: var(--text-dim); margin-top: 6px"
               ></div>
             </div>
+            <div class="form-group" style="margin-bottom: 12px">
+              <label>自助开通路径</label>
+              <input
+                type="text"
+                id="checkout_path"
+                class="asset-input"
+                placeholder="例如 checkout"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <div
+                id="checkout_path_url"
+                style="font-size: 12px; color: var(--text-dim); margin-top: 6px"
+              ></div>
+            </div>
             <p
               style="
                 font-size: 12px;
@@ -3529,11 +3660,8 @@
                 margin-bottom: 12px;
               "
             >
-              仅支持小写字母、数字与连字符（2–32
-              字符）。保存后请收藏新地址，默认 <code>/admin-login</code>、<code
-                >/admin</code
-              >
-              将失效。
+              登录、后台和自助开通路径仅支持小写字母、数字与连字符（2–32
+              字符），且不能相同。保存后请收藏新地址，原有入口将失效。
             </p>
             <button class="btn btn-secondary" onclick="saveAdminPaths()">
               <i data-lucide="link"></i>
@@ -4467,10 +4595,32 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         <div class="panel">
           <div class="panel-header">
             <h2 class="panel-title">银行卡列表</h2>
-            <button class="btn btn-success" onclick="toggleCardPoolImportBox()">
-              <i data-lucide="file-input"></i>
-              批量导入
-            </button>
+            <div
+              style="
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                flex-wrap: wrap;
+                justify-content: flex-end;
+              "
+            >
+              <select
+                id="card_group_filter"
+                class="asset-input"
+                style="width: 160px"
+                onchange="handleCardGroupFilter(this.value)"
+              >
+                <option value="all">全部分组</option>
+                <option value="none">未分组</option>
+              </select>
+              <button
+                class="btn btn-success"
+                onclick="toggleCardPoolImportBox()"
+              >
+                <i data-lucide="file-input"></i>
+                批量导入
+              </button>
+            </div>
           </div>
 
           <div id="card_pool_import_box" class="import-box">
@@ -4502,16 +4652,49 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             </div>
           </div>
 
+          <div class="batch-actions">
+            <button
+              class="btn btn-success"
+              onclick="toggleCardPoolPageSelection()"
+            >
+              <i data-lucide="check-square"></i>
+              本页切换
+            </button>
+            <button
+              class="btn btn-primary"
+              onclick="createCardGroupFromSelection()"
+            >
+              <i data-lucide="folder-plus"></i>
+              创建分组
+            </button>
+            <button
+              class="btn btn-secondary"
+              onclick="assignSelectedCardsToGroup()"
+            >
+              <i data-lucide="folder-input"></i>
+              加入分组
+            </button>
+            <button
+              class="btn btn-secondary"
+              onclick="clearSelectedCardGroup()"
+            >
+              <i data-lucide="folder-x"></i>
+              移出分组
+            </button>
+          </div>
+
           <div class="table-container">
             <table>
               <thead>
                 <tr>
-                  <th width="200px">卡号</th>
+                  <th class="select-header">选择</th>
+                  <th width="180px">卡号</th>
                   <th width="90px">有效期</th>
                   <th width="70px">CVC</th>
                   <th width="100px">导入持卡人</th>
                   <th width="110px">支付姓名</th>
                   <th>绑定地址</th>
+                  <th width="120px">分组</th>
                   <th width="90px" style="text-align: center">状态</th>
                   <th width="80px" style="text-align: center">次数</th>
                   <th width="140px" style="text-align: center">最近使用</th>
@@ -4565,6 +4748,13 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 style="width: 220px"
                 oninput="handleCdkSearch(this.value)"
               />
+              <select
+                id="cdk_card_group"
+                class="asset-input"
+                style="width: 160px"
+              >
+                <option value="">不限分组</option>
+              </select>
               <select
                 id="cdk_plan_type"
                 class="asset-input"
@@ -4709,6 +4899,15 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 </button>
               </div>
             </div>
+            <select
+              id="cdk_group_filter"
+              class="asset-input"
+              style="width: 160px"
+              onchange="handleCdkGroupFilter(this.value)"
+            >
+              <option value="all">全部分组</option>
+              <option value="none">未绑定分组</option>
+            </select>
             <button
               class="btn btn-success"
               onclick="togglePageSelection('cdk')"
@@ -4736,6 +4935,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                   <th class="select-header">选择</th>
                   <th>激活码内容</th>
                   <th width="100px" style="text-align: center">套餐</th>
+                  <th width="120px">银行卡分组</th>
                   <th width="200px">Session 记录</th>
                   <th width="120px" style="text-align: center">是否出库</th>
                   <th width="140px">状态</th>
@@ -5125,11 +5325,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               / 子进程输出；筛选 Job 可在文本内搜索。
             </p>
             <div class="runtime-log-pre-wrap">
-              <pre
+              <div
                 id="runtime_log_pre"
-                class="runtime-log-pre"
-                spellcheck="false"
-              ></pre>
+                class="runtime-log-list"
+                role="log"
+                aria-live="polite"
+              ></div>
             </div>
           </div>
         </div>
@@ -5205,6 +5406,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         cdk: "",
         product: "",
       };
+      let cardGroupList = [];
+      let cardGroupFilter = "all";
+      let cdkGroupFilter = "all";
       const taskLogFilters = {
         type: "all",
         cdk: "",
@@ -5234,6 +5438,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       let runtimeLogPollTimer = null;
       let runtimeLogAfter = 0;
       let runtimeLogText = "";
+      let runtimeLogEntries = [];
+      const RUNTIME_LOG_ENTRY_CAP = 2500;
 
       /** 后台定时 loadData（含任务管理列表）；为便于阅读可暂停 */
       let adminDataRefreshPaused = false;
@@ -5244,6 +5450,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       window.__adminProductGenJobKey = "";
 
       function formatRuntimeLogTs(ts) {
+        if (typeof ts === "object" && ts?.displayTime) {
+          return ts.displayTime;
+        }
         try {
           const d = new Date(Number(ts) || 0);
           return d.toLocaleTimeString("en-GB", {
@@ -5332,6 +5541,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         task: "任务",
         server: "服务",
         system: "系统",
+        ChatGPT: "结账",
+        Session: "会话",
+        PaymentRetry: "支付",
+        CheckoutProtocol: "协议",
+        "Browser/pool": "浏览器",
       };
 
       function formatRuntimeLogSource(entry) {
@@ -5359,9 +5573,98 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         const job = padRuntimeLogField(formatRuntimeLogJob(entry.jobKey), 8);
         const source = padRuntimeLogField(formatRuntimeLogSource(entry), 4);
         const text = String(entry.text || "")
+          .replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "")
           .replace(/\s+/g, " ")
           .trim();
         return `${time}  ${job}  ${source}  ${text}`;
+      }
+
+      function getRuntimeLogLevel(entry) {
+        const text = String(entry.text || "").toLowerCase();
+        const rawLevel = String(entry.level || "").toLowerCase();
+        if (
+          /error|fail|failed|declined|拒绝|失败|异常|超时|timeout|exit code=[1-9]/.test(
+            `${rawLevel} ${text}`,
+          )
+        ) {
+          return { key: "error", label: "错误" };
+        }
+        if (/warn|warning|回退|重试|retry|人工/.test(`${rawLevel} ${text}`)) {
+          return { key: "warning", label: "警告" };
+        }
+        if (/success|完成|已保存|已启动|已关闭|payment_success/.test(text)) {
+          return { key: "success", label: "完成" };
+        }
+        return { key: "info", label: "信息" };
+      }
+
+      function getRuntimeLogMessage(entry) {
+        return String(entry.text || "")
+          .replace(/[\p{Extended_Pictographic}\uFE0F]/gu, "")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+
+      function createRuntimeLogRow(entry) {
+        const level = getRuntimeLogLevel(entry);
+        const row = document.createElement("div");
+        row.className = `runtime-log-row is-${level.key}`;
+
+        const addCell = (className, text) => {
+          const cell = document.createElement("span");
+          cell.className = className;
+          cell.textContent = text;
+          row.appendChild(cell);
+        };
+
+        addCell(
+          "runtime-log-meta",
+          formatRuntimeLogTs(entry.displayTime ? entry : entry.ts),
+        );
+        addCell("runtime-log-meta", formatRuntimeLogJob(entry.jobKey));
+        addCell("runtime-log-source", formatRuntimeLogSource(entry));
+        addCell("runtime-log-level", level.label);
+        addCell("runtime-log-message", getRuntimeLogMessage(entry));
+        return row;
+      }
+
+      function renderRuntimeLogEntries(
+        entries,
+        append = false,
+        targetId = "runtime_log_pre",
+      ) {
+        const log = document.getElementById(targetId);
+        if (!log) return;
+        if (!append) {
+          log.replaceChildren();
+        }
+        const fragment = document.createDocumentFragment();
+        for (const entry of entries) {
+          fragment.appendChild(createRuntimeLogRow(entry));
+        }
+        log.appendChild(fragment);
+      }
+
+      function parseTaskLogEntries(rawOutput, jobKey) {
+        return String(rawOutput || "")
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => {
+            const timestampMatch = line.match(/^\[([^\]]+)]\s*(.*)$/);
+            const timestamp = timestampMatch ? timestampMatch[1] : "";
+            const sourceMatch = String(
+              timestampMatch ? timestampMatch[2] : line,
+            ).match(/^\[([^\]]+)]\s*(.*)$/);
+            return {
+              displayTime: timestamp.slice(-8) || "--:--:--",
+              jobKey,
+              source: sourceMatch?.[1] || "任务",
+              level: "log",
+              text:
+                sourceMatch?.[2] || (timestampMatch ? timestampMatch[2] : line),
+            };
+          });
       }
 
       function appendRuntimeLogEntries(entries) {
@@ -5375,13 +5678,16 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             -Math.floor(RUNTIME_LOG_TEXT_CAP * 0.85),
           );
         }
-        const pre = document.getElementById("runtime_log_pre");
-        if (!pre) {
-          return;
+        runtimeLogEntries.push(...entries);
+        if (runtimeLogEntries.length > RUNTIME_LOG_ENTRY_CAP) {
+          runtimeLogEntries = runtimeLogEntries.slice(-RUNTIME_LOG_ENTRY_CAP);
+          renderRuntimeLogEntries(runtimeLogEntries);
+        } else {
+          renderRuntimeLogEntries(entries, true);
         }
-        pre.textContent = runtimeLogText;
         const autoscroll = document.getElementById("runtime_log_autoscroll");
-        const wrap = pre.parentElement;
+        const log = document.getElementById("runtime_log_pre");
+        const wrap = log?.parentElement;
         if (autoscroll && autoscroll.checked && wrap) {
           wrap.scrollTop = wrap.scrollHeight;
         }
@@ -5409,10 +5715,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           runtimeLogText += "\n";
         }
         runtimeLogAfter = Number(data.nextAfter || 0);
-        const pre = document.getElementById("runtime_log_pre");
-        if (pre) {
-          pre.textContent = runtimeLogText;
-          const wrap = pre.parentElement;
+        runtimeLogEntries = (data.entries || []).slice(-RUNTIME_LOG_ENTRY_CAP);
+        renderRuntimeLogEntries(runtimeLogEntries);
+        const log = document.getElementById("runtime_log_pre");
+        if (log) {
+          const wrap = log.parentElement;
           const autoscroll = document.getElementById("runtime_log_autoscroll");
           if (autoscroll && autoscroll.checked && wrap) {
             wrap.scrollTop = wrap.scrollHeight;
@@ -5596,11 +5903,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             throw new Error(data.message || "清空失败");
           }
           runtimeLogText = "";
+          runtimeLogEntries = [];
           runtimeLogAfter = 0;
-          const pre = document.getElementById("runtime_log_pre");
-          if (pre) {
-            pre.textContent = "";
-          }
+          renderRuntimeLogEntries([]);
           await fetchRuntimeLogsTail();
           showMessage(data.message || "已清空", "success");
         } catch (error) {
@@ -5689,8 +5994,14 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         )
           .trim()
           .toLowerCase();
+        const checkoutSeg = String(
+          document.getElementById("checkout_path")?.value || "",
+        )
+          .trim()
+          .toLowerCase();
         const loginPreview = document.getElementById("admin_login_path_url");
         const panelPreview = document.getElementById("admin_panel_path_url");
+        const checkoutPreview = document.getElementById("checkout_path_url");
         if (loginPreview) {
           loginPreview.textContent = loginSeg
             ? `完整登录地址：${origin}/${loginSeg.replace(/^\/+/, "")}`
@@ -5700,6 +6011,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           panelPreview.textContent = panelSeg
             ? `完整后台地址：${origin}/${panelSeg.replace(/^\/+/, "")}`
             : "完整后台地址：—";
+        }
+        if (checkoutPreview) {
+          checkoutPreview.textContent = checkoutSeg
+            ? `完整自助开通地址：${origin}/${checkoutSeg.replace(/^\/+/, "")}`
+            : "完整自助开通地址：—";
         }
       }
 
@@ -5740,11 +6056,15 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           }
           const loginPathEl = document.getElementById("admin_login_path");
           const panelPathEl = document.getElementById("admin_panel_path");
+          const checkoutPathEl = document.getElementById("checkout_path");
           if (loginPathEl && data.loginPath) {
             loginPathEl.value = data.loginPath;
           }
           if (panelPathEl && data.panelPath) {
             panelPathEl.value = data.panelPath;
+          }
+          if (checkoutPathEl && data.checkoutPath) {
+            checkoutPathEl.value = data.checkoutPath;
           }
           updateAdminPathPreview();
           const statusEl = document.getElementById("totp_status_text");
@@ -5771,11 +6091,13 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           document.getElementById("admin_login_path")?.value.trim() || "";
         const panelPath =
           document.getElementById("admin_panel_path")?.value.trim() || "";
+        const checkoutPath =
+          document.getElementById("checkout_path")?.value.trim() || "";
         try {
           const res = await authFetch("/api/admin/security/paths", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ loginPath, panelPath }),
+            body: JSON.stringify({ loginPath, panelPath, checkoutPath }),
           });
           const raw = await res.text();
           let data = {};
@@ -5803,9 +6125,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           if (data.panelPath) {
             document.getElementById("admin_panel_path").value = data.panelPath;
           }
+          if (data.checkoutPath) {
+            document.getElementById("checkout_path").value = data.checkoutPath;
+          }
           updateAdminPathPreview();
           showMessage(
-            `${data.message || "入口路径已更新"}。登录：${data.loginUrl || ""} · 后台：${data.panelUrl || ""}`,
+            `${data.message || "入口路径已更新"}。登录：${data.loginUrl || ""} · 后台：${data.panelUrl || ""} · 开通：${data.checkoutUrl || ""}`,
             "success",
           );
         } catch (error) {
@@ -6653,7 +6978,16 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 `<div><strong>${escapeHtml(label)}：</strong>${escapeHtml(value)}</div>`,
             )
             .join("");
-          output.textContent = task.output || "暂无可用执行日志";
+          const logEntries = parseTaskLogEntries(task.output, key);
+          if (logEntries.length) {
+            renderRuntimeLogEntries(
+              logEntries,
+              false,
+              "task_detail_modal_output",
+            );
+          } else {
+            output.textContent = "暂无可用执行日志";
+          }
         } catch (error) {
           output.textContent = "";
           meta.innerHTML = `<span style="color:var(--error);">${escapeHtml(error.message || "加载任务详情失败")}</span>`;
@@ -6987,6 +7321,15 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               const planType =
                 typeof item === "string" ? "plus" : item.plan_type || "plus";
               return planType === cdkPlanTypeFilter;
+            });
+          }
+          if (cdkGroupFilter && cdkGroupFilter !== "all") {
+            result = result.filter((item) => {
+              const groupId =
+                typeof item === "string" ? null : item.card_group_id || null;
+              return cdkGroupFilter === "none"
+                ? !groupId
+                : String(groupId || "") === String(cdkGroupFilter);
             });
           }
 
@@ -7621,6 +7964,10 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         loadTelegramConfig(data.telegram || {});
         loadHcaptchaConfig(data.hcaptcha || {});
         lastMaintenanceModeValue = Boolean(cfg.maintenance_mode);
+        const recordVideoEl = document.getElementById("record_video");
+        if (recordVideoEl) {
+          recordVideoEl.checked = Boolean(cfg.record_video);
+        }
         updateMaintenanceModeUI(
           cfg,
           window.__adminRuntime || { active_activation_jobs: 0 },
@@ -7800,6 +8147,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             ? cdkData.cdks
             : [];
         pruneSelection("cdk", cdkPool);
+        await loadCardGroupList();
         renderCDKTable();
       }
 
@@ -8627,6 +8975,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           default_timezone:
             document.getElementById("default_timezone")?.value ||
             "Asia/Shanghai",
+          record_video:
+            document.getElementById("record_video")?.checked || false,
         };
       }
 
@@ -8810,6 +9160,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                           <td class="select-cell"><input type="checkbox" ${selectedItems.cdk.has(code) ? "checked" : ""} onchange="toggleSelection('cdk', '${code}', this.checked)"></td>
                           <td><span class="cdk-copy" onclick="copyCDK('${code}')"><code>${code}</code><i data-lucide="copy"></i></span></td>
                           <td style="text-align:center"><span class="status-badge" style="background: ${planTypeBg}; color: ${planTypeColor}">${planTypeLabel}</span></td>
+                          <td>${escapeHtml(typeof cdk === "string" ? "不限分组" : cdk.card_group_name || "不限分组")}</td>
                           <td><code>${sessionPreview ? escapeHtml(sessionPreview) : "-"}</code></td>
                           <td style="text-align:center"><span class="readonly-switch ${shipped ? "active" : ""}" title="${shipped ? "已出库" : "未出库"}"></span></td>
                           <td>${
@@ -8941,10 +9292,213 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       // ============ Stripe Card Pool Management ============
 
       let cardPoolList = [];
+      let selectedCardIds = new Set();
 
       function toggleCardPoolImportBox() {
         const box = document.getElementById("card_pool_import_box");
         box.classList.toggle("active");
+      }
+
+      function cardGroupLabel(card) {
+        return card?.group_name || "未分组";
+      }
+
+      function getFilteredCardPoolList() {
+        if (cardGroupFilter === "all") return cardPoolList;
+        if (cardGroupFilter === "none") {
+          return cardPoolList.filter((card) => !card.group_id);
+        }
+        return cardPoolList.filter(
+          (card) => String(card.group_id || "") === String(cardGroupFilter),
+        );
+      }
+
+      function fillCardGroupSelects() {
+        const cardFilter = document.getElementById("card_group_filter");
+        if (cardFilter) {
+          cardFilter.innerHTML = [
+            '<option value="all">全部分组</option>',
+            '<option value="none">未分组</option>',
+            ...cardGroupList.map(
+              (group) =>
+                `<option value="${escapeHtml(String(group.id))}">${escapeHtml(group.name)} (${Number(group.card_count || 0)})</option>`,
+            ),
+          ].join("");
+          cardFilter.value = cardGroupFilter;
+        }
+        const cdkFilter = document.getElementById("cdk_group_filter");
+        if (cdkFilter) {
+          cdkFilter.innerHTML = [
+            '<option value="all">全部分组</option>',
+            '<option value="none">未绑定分组</option>',
+            ...cardGroupList.map(
+              (group) =>
+                `<option value="${escapeHtml(String(group.id))}">${escapeHtml(group.name)}</option>`,
+            ),
+          ].join("");
+          cdkFilter.value = cdkGroupFilter;
+        }
+        const cdkCreate = document.getElementById("cdk_card_group");
+        if (cdkCreate) {
+          const current = cdkCreate.value;
+          cdkCreate.innerHTML = [
+            '<option value="">不限分组</option>',
+            ...cardGroupList.map(
+              (group) =>
+                `<option value="${escapeHtml(String(group.id))}">${escapeHtml(group.name)}</option>`,
+            ),
+          ].join("");
+          if ([...cdkCreate.options].some((option) => option.value === current)) {
+            cdkCreate.value = current;
+          }
+        }
+      }
+
+      function handleCardGroupFilter(value) {
+        cardGroupFilter = String(value || "all");
+        renderCardPoolTable();
+      }
+
+      function handleCdkGroupFilter(value) {
+        cdkGroupFilter = String(value || "all");
+        paginationState.cdk.page = 1;
+        renderCDKTable();
+      }
+
+      async function loadCardGroupList() {
+        try {
+          const res = await authFetch("/api/admin/card-groups");
+          const data = await res.json();
+          cardGroupList = Array.isArray(data.groups) ? data.groups : [];
+          fillCardGroupSelects();
+        } catch (error) {
+          console.error("loadCardGroupList failed", error);
+        }
+      }
+
+      function toggleCardSelection(cardId, checked) {
+        const id = Number(cardId);
+        if (!id) return;
+        if (checked) selectedCardIds.add(id);
+        else selectedCardIds.delete(id);
+      }
+
+      function toggleCardPoolPageSelection() {
+        const cards = getFilteredCardPoolList();
+        const ids = cards.map((card) => Number(card.id)).filter(Boolean);
+        const shouldSelect = ids.some((id) => !selectedCardIds.has(id));
+        ids.forEach((id) => {
+          if (shouldSelect) selectedCardIds.add(id);
+          else selectedCardIds.delete(id);
+        });
+        renderCardPoolTable();
+      }
+
+      async function createCardGroupFromSelection() {
+        const cardIds = Array.from(selectedCardIds);
+        const extraHtml = `<input data-confirm-value class="asset-input" placeholder="输入分组名称" style="width:100%;margin-top:8px" />`;
+        const confirmed = await showAdminConfirm(
+          cardIds.length
+            ? `将选中的 ${cardIds.length} 张卡加入新分组`
+            : "创建空分组后可再把银行卡加入",
+          "创建银行卡分组",
+          extraHtml,
+        );
+        if (!confirmed) return;
+        const name =
+          typeof confirmed === "object"
+            ? String(confirmed.source || "").trim()
+            : "";
+        if (!name) {
+          showMessage("请输入分组名称", "warning");
+          return;
+        }
+        try {
+          const res = await authFetch("/api/admin/card-groups", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, cardIds }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || "创建失败");
+          }
+          selectedCardIds.clear();
+          showMessage(data.message || "分组已创建", "success");
+          await loadCardPoolList();
+        } catch (error) {
+          showMessage(error.message || "创建失败", "error");
+        }
+      }
+
+      async function assignSelectedCardsToGroup() {
+        const cardIds = Array.from(selectedCardIds);
+        if (!cardIds.length) {
+          showMessage("请先选择银行卡", "warning");
+          return;
+        }
+        if (!cardGroupList.length) {
+          showMessage("请先创建银行卡分组", "warning");
+          return;
+        }
+        const extraHtml = `<select data-confirm-value class="asset-input" style="width:100%;margin-top:8px">${cardGroupList
+          .map(
+            (group) =>
+              `<option value="${escapeHtml(String(group.id))}">${escapeHtml(group.name)}</option>`,
+          )
+          .join("")}</select>`;
+        const confirmed = await showAdminConfirm(
+          `将选中的 ${cardIds.length} 张卡加入分组`,
+          "加入银行卡分组",
+          extraHtml,
+        );
+        if (!confirmed) return;
+        const groupId = typeof confirmed === "object" ? confirmed.source : "";
+        try {
+          const res = await authFetch("/api/admin/card-groups/assign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ groupId, cardIds }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || "加入失败");
+          }
+          selectedCardIds.clear();
+          showMessage(data.message || "已加入分组", "success");
+          await loadCardPoolList();
+        } catch (error) {
+          showMessage(error.message || "加入失败", "error");
+        }
+      }
+
+      async function clearSelectedCardGroup() {
+        const cardIds = Array.from(selectedCardIds);
+        if (!cardIds.length) {
+          showMessage("请先选择银行卡", "warning");
+          return;
+        }
+        const ok = await showAdminConfirm(
+          `确定将选中的 ${cardIds.length} 张卡移出分组？`,
+          "移出分组",
+        );
+        if (!ok) return;
+        try {
+          const res = await authFetch("/api/admin/card-groups/assign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ groupId: null, cardIds }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || "移出失败");
+          }
+          selectedCardIds.clear();
+          showMessage(data.message || "已移出分组", "success");
+          await loadCardPoolList();
+        } catch (error) {
+          showMessage(error.message || "移出失败", "error");
+        }
       }
 
       async function loadCardPoolList() {
@@ -8956,6 +9510,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             : Array.isArray(data)
               ? data
               : [];
+          await loadCardGroupList();
           renderCardPoolStats();
           renderCardPoolTable();
         } catch (e) {
@@ -9000,13 +9555,14 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
 
       function renderCardPoolTable() {
         const tbody = document.getElementById("card_pool_list_body");
-        if (cardPoolList.length === 0) {
+        const visibleCards = getFilteredCardPoolList();
+        if (visibleCards.length === 0) {
           tbody.innerHTML =
-            '<tr><td colspan="10" style="text-align:center; color: var(--text-dim); padding: 40px 0;">暂无卡片，请使用批量导入添加</td></tr>';
+            '<tr><td colspan="12" style="text-align:center; color: var(--text-dim); padding: 40px 0;">暂无卡片，请使用批量导入添加</td></tr>';
           lucide.createIcons();
           return;
         }
-        tbody.innerHTML = cardPoolList
+        tbody.innerHTML = visibleCards
           .map((card) => {
             const cardNumber = escapeHtml(
               card.card_number || card.last4 || "****",
@@ -9021,14 +9577,19 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               ? formatTimeShort(card.last_used_at)
               : "-";
             const statusBadge = getCardStatusBadge(card);
+            const checked = selectedCardIds.has(Number(card.id))
+              ? "checked"
+              : "";
             return `
                       <tr>
+                          <td class="select-cell"><input type="checkbox" ${checked} onchange="toggleCardSelection(${Number(card.id)}, this.checked)"></td>
                           <td><code>${cardNumber}</code></td>
                           <td><code>${cardExpiry}</code></td>
                           <td><code>${cardCvc}</code></td>
                           <td>${importHolder}</td>
                           <td>${paymentHolder}</td>
                           <td style="font-size:12px; color:var(--text-secondary); max-width:280px; word-break:break-word;">${boundAddress}</td>
+                          <td>${escapeHtml(cardGroupLabel(card))}</td>
                           <td style="text-align:center">${statusBadge}</td>
                           <td style="text-align:center">${usageCount}</td>
                           <td style="text-align:center">${lastUsed}</td>
@@ -9096,7 +9657,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           return;
         }
 
-        // Parse pipe-delimited format: number|expiry|CVC|holder
         const lines = text
           .split("\n")
           .map((l) => l.trim())
@@ -9165,6 +9725,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       }
 
       // ============ End Card Pool Management ============
+
 
       function renderLogTable(logs) {
         const tbody = document.getElementById("log_body");
@@ -9270,6 +9831,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           parseInt(document.getElementById("cdk_count").value, 10) || 1;
         const plan_type =
           document.getElementById("cdk_plan_type").value || "plus";
+        const card_group_id =
+          document.getElementById("cdk_card_group")?.value || "";
         const original = btn.innerHTML;
         btn.innerHTML =
           '<i data-lucide="loader" class="animate-spin"></i> 生成中...';
@@ -9279,7 +9842,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           const res = await authFetch("/api/admin/cdks/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ count, plan_type }),
+            body: JSON.stringify({ count, plan_type, card_group_id }),
           });
           const data = await res.json();
           if (!res.ok || !data.success) {
@@ -9288,6 +9851,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           showMessage(data.message || "生成成功", "success");
           tableFilters.cdk = "all";
           paginationState.cdk.page = 1;
+          cdkGroupFilter = card_group_id || "none";
           const dropdown = document.querySelector(
             '.filter-dropdown[data-filter="cdk"] .filter-trigger span',
           );
@@ -9295,6 +9859,10 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             dropdown.textContent = "全部状态";
           }
           await loadCdkList();
+          const cdkFilter = document.getElementById("cdk_group_filter");
+          if (cdkFilter) {
+            cdkFilter.value = cdkGroupFilter;
+          }
         } catch (error) {
           showMessage(error.message || "生成失败", "error");
         } finally {
@@ -9544,7 +10112,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           const res = await authFetch("/api/admin/cdks/import", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ cdks: codes }),
+            body: JSON.stringify({
+              cdks: codes,
+              plan_type: document.getElementById("cdk_plan_type")?.value || "plus",
+              card_group_id:
+                document.getElementById("cdk_card_group")?.value || "",
+            }),
           });
           const data = await res.json();
           if (!res.ok || !data.success) {
@@ -10799,6 +11372,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           ?.addEventListener("input", updateAdminPathPreview);
         document
           .getElementById("admin_panel_path")
+          ?.addEventListener("input", updateAdminPathPreview);
+        document
+          .getElementById("checkout_path")
           ?.addEventListener("input", updateAdminPathPreview);
 
         if (!getAdminToken()) {

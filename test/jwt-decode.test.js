@@ -8,6 +8,7 @@ const {
 const {
   normalizeAdminPathSegment,
   normalizeAdminPaths,
+  buildCheckoutUrl,
 } = require("../admin-paths");
 
 describe("decodeJwtPart", () => {
@@ -43,5 +44,24 @@ describe("admin paths", () => {
     expect(() =>
       normalizeAdminPaths({ loginPath: "panel", panelPath: "panel" }),
     ).toThrow(/不能相同/);
+    expect(() =>
+      normalizeAdminPaths({
+        loginPath: "secure-login",
+        panelPath: "secure-panel",
+        checkoutPath: "secure-panel",
+      }),
+    ).toThrow(/不能相同/);
+    expect(
+      normalizeAdminPaths({
+        loginPath: "secure-login",
+        panelPath: "secure-panel",
+        checkoutPath: "open",
+      }),
+    ).toEqual({
+      loginPath: "secure-login",
+      panelPath: "secure-panel",
+      checkoutPath: "open",
+    });
+    expect(buildCheckoutUrl({ checkoutPath: "open" })).toBe("/open");
   });
 });

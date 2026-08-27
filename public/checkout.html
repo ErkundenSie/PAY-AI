@@ -39,14 +39,25 @@
               <div class="checkout-session-entry">
                 <textarea
                   id="sessionInput"
-                  placeholder="从 chatgpt.com/api/auth/session 粘贴 Session JSON"
+                  placeholder="粘贴 Session JSON"
                   rows="1"
+                  wrap="off"
                 ></textarea>
-                <p class="checkout-secure-hint">
-                  <i data-lucide="info"></i>
-                  填写账单与支付信息以开通服务，开通后即可使用全部功能。
-                </p>
+                <p
+                  id="sessionAccount"
+                  class="checkout-session-account"
+                  aria-live="polite"
+                ></p>
                 <div class="checkout-session-actions">
+                  <button
+                    type="button"
+                    id="clearSessionBtn"
+                    class="checkout-ghost-btn checkout-clear-session-btn"
+                    title="清空 Session"
+                    aria-label="清空 Session"
+                  >
+                    <i data-lucide="trash-2"></i>
+                  </button>
                   <button
                     type="button"
                     id="cancelRenewBtn"
@@ -59,7 +70,7 @@
                   </button>
                   <button type="button" id="payBtn" class="checkout-pay-btn">
                     <i data-lucide="zap"></i>
-                    <span class="btn-text">开通服务</span>
+                    <span class="btn-text">开通</span>
                     <div class="loader"></div>
                   </button>
                 </div>
@@ -115,7 +126,7 @@
                     type="text"
                     inputmode="numeric"
                     autocomplete="cc-number"
-                    placeholder="16 位卡号"
+                    placeholder="16 位卡号（支持粘贴卡号|有效期|CVC）"
                     maxlength="23"
                   />
                 </div>
@@ -152,26 +163,6 @@
                     placeholder="持卡人姓名"
                   />
                 </div>
-              </div>
-            </article>
-
-            <article class="checkout-panel">
-              <div class="checkout-panel-head">
-                <span class="checkout-icon-badge"
-                  ><i data-lucide="map-pin"></i
-                ></span>
-                <div>
-                  <h2>账单地址</h2>
-                  <p>可根据卡片信息一键补全账单地址</p>
-                </div>
-                <button
-                  type="button"
-                  id="fillAddressBtn"
-                  class="checkout-ghost-btn"
-                  onclick="fillSampleAddress()"
-                >
-                  <i data-lucide="sparkles"></i> 一键填卡
-                </button>
               </div>
               <div class="checkout-grid checkout-address-grid">
                 <div class="checkout-span-2">
@@ -249,6 +240,16 @@
           >
             <p class="checkout-task-log-empty">等待开始开通...</p>
           </div>
+          <div id="taskProgress" class="task-progress" style="display: none">
+            <div class="task-progress-header">
+              <span>开通进度</span>
+              <b id="taskProgressPercent">0%</b>
+            </div>
+            <div class="task-progress-track">
+              <div id="taskProgressBar" class="task-progress-bar"></div>
+            </div>
+            <p id="taskProgressText" class="task-progress-text"></p>
+          </div>
         </aside>
       </section>
 
@@ -291,21 +292,17 @@
         </article>
       </section>
 
-      <div id="taskProgress" class="task-progress" style="display: none">
-        <div class="task-progress-header">
-          <span>开通进度</span>
-          <b id="taskProgressPercent">0%</b>
-        </div>
-        <div class="task-progress-track">
-          <div id="taskProgressBar" class="task-progress-bar"></div>
-        </div>
-        <p id="taskProgressText" class="task-progress-text"></p>
-      </div>
-      <div id="statusMessage" class="status-message"></div>
+      <div
+        id="statusMessage"
+        class="status-message"
+        role="status"
+        aria-live="polite"
+      ></div>
     </div>
 
     <script>
       const sessionInput = document.getElementById("sessionInput");
+      const sessionAccount = document.getElementById("sessionAccount");
       const planSelect = document.getElementById("planSelect");
       const creditQuantityWrap = document.getElementById("creditQuantityWrap");
       const creditQuantity = document.getElementById("creditQuantity");
@@ -321,8 +318,8 @@
       const addrPostal = document.getElementById("addrPostal");
       const addrCountry = document.getElementById("addrCountry");
       const payBtn = document.getElementById("payBtn");
+      const clearSessionBtn = document.getElementById("clearSessionBtn");
       const cancelRenewBtn = document.getElementById("cancelRenewBtn");
-      const fillAddressBtn = document.getElementById("fillAddressBtn");
       const statusMsg = document.getElementById("statusMessage");
       const taskProgress = document.getElementById("taskProgress");
       const taskProgressBar = document.getElementById("taskProgressBar");
@@ -333,7 +330,7 @@
       const checkoutTaskLog = document.getElementById("checkoutTaskLog");
       const checkoutTaskState = document.getElementById("checkoutTaskState");
 
-      const START_DEFAULT_TEXT = "开通服务";
+      const START_DEFAULT_TEXT = "开通";
       const START_PENDING_TEXT = "开通中...";
       const START_FAILED_TEXT = "重新尝试";
       const START_SUCCESS_TEXT = "开通成功";
@@ -347,6 +344,7 @@
       let activeViewerToken = "";
       let taskCompleted = false;
       let taskStatusPollTimer = null;
+      let statusTimer = null;
       let checkoutLogAfter = 0;
       let checkoutLogDrainTicks = 0;
       const CHECKOUT_LOG_CAP = 200;
@@ -418,6 +416,17 @@
         };
       }
 
+      function updateSessionAccount() {
+        const result = validateSessionInput(sessionInput.value);
+        const email = String(result.email || "").trim();
+        const hasAccount = Boolean(email);
+        sessionAccount.textContent = hasAccount ? email : "";
+        sessionAccount.classList.toggle("is-visible", hasAccount);
+        sessionInput
+          .closest(".checkout-session-entry")
+          ?.classList.toggle("has-session-account", hasAccount);
+      }
+
       function digitsOnly(value) {
         return String(value || "").replace(/\D/g, "");
       }
@@ -433,6 +442,38 @@
         const digits = digitsOnly(value).slice(0, 4);
         if (digits.length <= 2) return digits;
         return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+      }
+
+      function parsePastedCard(value) {
+        const fields = String(value || "")
+          .trim()
+          .split(/[|,，;\t\r\n]+/)
+          .map((item) => item.trim())
+          .filter(Boolean);
+        const number = digitsOnly(fields[0]);
+        if (number.length < 13 || number.length > 19) return null;
+
+        let expiryFieldIndex = -1;
+        let expiry = "";
+        for (let index = 1; index < fields.length; index += 1) {
+          const match = fields[index].match(
+            /^(\d{1,2})\s*(?:[/-]\s*)?(\d{2}|\d{4})$/,
+          );
+          const month = Number(match?.[1]);
+          if (!match || month < 1 || month > 12) continue;
+          expiryFieldIndex = index;
+          expiry = `${String(month).padStart(2, "0")}/${match[2].slice(-2)}`;
+          break;
+        }
+        if (expiryFieldIndex < 0) return null;
+
+        const cvc = fields
+          .slice(expiryFieldIndex + 1)
+          .map(digitsOnly)
+          .find((field) => /^\d{3,4}$/.test(field));
+        if (!cvc) return null;
+
+        return { number, expiry, cvc };
       }
 
       function validateCardFields() {
@@ -488,9 +529,18 @@
       }
 
       function showStatus(message, type) {
+        clearTimeout(statusTimer);
         statusMsg.textContent = String(message || "");
         statusMsg.className = `status-message ${type === "success" ? "status-success" : "status-error"}`;
         statusMsg.style.display = message ? "block" : "none";
+        if (message) {
+          statusTimer = window.setTimeout(
+            () => {
+              statusMsg.style.display = "none";
+            },
+            type === "success" ? 3000 : 5000,
+          );
+        }
       }
 
       function resetProgressState() {
@@ -1085,6 +1135,16 @@
       cardNumber.addEventListener("input", () => {
         cardNumber.value = formatCardNumber(cardNumber.value);
       });
+      cardNumber.addEventListener("paste", (event) => {
+        const card = parsePastedCard(event.clipboardData?.getData("text"));
+        if (!card) return;
+        event.preventDefault();
+        cardNumber.value = formatCardNumber(card.number);
+        cardExpiry.value = card.expiry;
+        cardCvc.value = card.cvc;
+        showStatus("已识别并填入卡号、有效期和 CVC", "success");
+      });
+      sessionInput.addEventListener("input", updateSessionAccount);
       cardExpiry.addEventListener("input", () => {
         cardExpiry.value = formatExpiry(cardExpiry.value);
       });
@@ -1137,10 +1197,19 @@
         }
       }
 
-      fillAddressBtn?.addEventListener("click", fillSampleAddress);
+      function clearSession() {
+        sessionInput.value = "";
+        updateSessionAccount();
+        sessionInput.focus();
+        showStatus("Session 已清空", "success");
+      }
+
+      clearSessionBtn.addEventListener("click", clearSession);
       cancelRenewBtn.addEventListener("click", cancelAutoRenew);
       payBtn.addEventListener("click", startCheckout);
 
+      fillSampleAddress();
+      updateSessionAccount();
       loadOptions();
       if (window.lucide) lucide.createIcons();
     </script>

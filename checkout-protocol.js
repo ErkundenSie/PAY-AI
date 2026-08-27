@@ -678,14 +678,15 @@ async function completeProtocolCheckout({
   onProgress,
 }) {
   const progress = (msg) => {
-    console.log(`[CheckoutProtocol] ${msg}`);
     if (typeof onProgress === "function") {
       try {
         onProgress(msg);
+        return;
       } catch (_) {
         /* ignore */
       }
     }
+    console.log(`[CheckoutProtocol] ${msg}`);
   };
 
   const token = String(accessToken || "").trim();

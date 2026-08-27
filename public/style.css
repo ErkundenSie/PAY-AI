@@ -1556,9 +1556,9 @@ body.checkout-page {
 
 .checkout-page .page-shell.checkout-shell,
 .checkout-page .checkout-shell {
-  width: min(1288px, calc(100% - 48px));
+  width: min(1160px, calc(100% - 48px));
   margin: 0 auto;
-  padding: 14px 0 18px;
+  padding: 54px 0 18px;
   display: grid;
   gap: 14px;
   animation: none;
@@ -1587,29 +1587,29 @@ body.checkout-page {
 }
 
 .checkout-page .checkout-panel {
-  padding: 16px 20px;
-  border: 1px solid #e7edf8;
-  border-radius: 10px;
+  padding: 18px 20px;
+  border: 1px solid #e3ebf8;
+  border-radius: 14px;
   background: #fff;
-  box-shadow: 0 5px 18px rgba(30, 64, 175, 0.055);
+  box-shadow: 0 8px 24px rgba(30, 64, 175, 0.06);
 }
 
 .checkout-page .checkout-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(460px, 0.92fr);
-  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
   align-items: stretch;
 }
 
 .checkout-page .checkout-form-column {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .checkout-page .checkout-split {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 12px;
+  gap: 10px;
 }
 
 .checkout-page .checkout-session-main,
@@ -1632,13 +1632,13 @@ body.checkout-page {
 .checkout-page .checkout-panel-head h2,
 .checkout-page .checkout-task-log-panel h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
   color: #0f172a;
 }
 
 .checkout-page .checkout-session-main .checkout-panel-head h2 {
-  font-size: 17px;
+  font-size: 18px;
   letter-spacing: -0.2px;
 }
 
@@ -1660,25 +1660,75 @@ body.checkout-page {
   gap: 14px;
 }
 
+.checkout-page .status-message {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  z-index: 1000;
+  width: max-content;
+  max-width: min(420px, calc(100vw - 32px));
+  margin: 0;
+  padding: 10px 16px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+  transform: translateX(-50%);
+  animation: checkout-toast-in 0.2s ease-out;
+}
+
+@keyframes checkout-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
 .checkout-page .checkout-session-entry {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "input actions"
-    "hint actions";
+  grid-template-areas: "input actions";
   gap: 8px 12px;
   align-items: center;
+}
+
+.checkout-page .checkout-session-entry.has-session-account {
+  padding-top: 20px;
+}
+
+.checkout-page .checkout-session-account {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: none;
+  max-width: 260px;
+  margin: 0;
+  overflow: hidden;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkout-page .checkout-session-account.is-visible {
+  display: block;
 }
 
 .checkout-page .checkout-session-entry textarea,
 .checkout-page #sessionInput {
   grid-area: input;
-  height: 40px;
-  min-height: 40px;
-  padding: 10px 14px;
+  height: 34px;
+  min-height: 34px;
+  padding: 7px 12px;
   border: 1px solid #dfe7f5;
   border-radius: 7px;
   box-shadow: none;
+  font-size: 11px;
   line-height: 18px;
   resize: none;
 }
@@ -1705,13 +1755,14 @@ body.checkout-page {
 
 .checkout-page .checkout-ghost-btn,
 .checkout-page .checkout-pay-btn {
-  height: 32px;
+  height: 34px;
   border-radius: 7px;
   font-size: 12px;
   font-weight: 600;
   box-shadow: none;
 }
 
+.checkout-page .checkout-clear-session-btn,
 .checkout-page .checkout-cancel-btn {
   width: 32px;
   min-width: 32px;
@@ -1750,11 +1801,11 @@ body.checkout-page {
   display: flex;
   flex-direction: column;
   gap: 9px;
-  margin-top: 8px;
-  padding: 12px;
-  border: 1px solid #e5edfb;
-  border-radius: 8px;
-  background: #fbfdff;
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid #e2ebfa;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f7faff 100%);
 }
 
 .checkout-page .checkout-card-box-title {
@@ -1765,20 +1816,20 @@ body.checkout-page {
 
 .checkout-page .field-label {
   margin: 0 0 5px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   color: #34425d;
 }
 
 .checkout-page .checkout-panel input,
 .checkout-page .checkout-panel select {
-  height: 30px;
+  height: 32px;
   margin: 0;
   padding: 0 11px;
   border: 1px solid #dfe7f5;
   border-radius: 6px;
   color: #253451;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   box-shadow: none;
 }
@@ -1810,7 +1861,9 @@ body.checkout-page {
 
 .checkout-page .checkout-address-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-top: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #edf2fa;
 }
 
 .checkout-page .checkout-task-log-panel {
@@ -1866,14 +1919,34 @@ body.checkout-page {
 
 .checkout-page .checkout-task-log {
   position: relative;
-  flex: 1;
-  min-height: 0;
+  flex: none;
+  height: 540px;
   margin-top: 14px;
   padding: 12px 14px;
   overflow: auto;
   border: 1px solid #e0e9f8;
   border-radius: 8px;
   background: #fbfdff;
+}
+
+.checkout-page .checkout-task-log-panel .task-progress {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+}
+
+.checkout-page .checkout-task-log-panel .task-progress-header {
+  margin-bottom: 7px;
+  font-size: 12px;
+}
+
+.checkout-page .checkout-task-log-panel .task-progress-track {
+  height: 6px;
+}
+
+.checkout-page .checkout-task-log-panel .task-progress-text {
+  margin: 7px 0 0;
+  font-size: 11px;
 }
 
 .checkout-page .checkout-task-log-empty {
@@ -1927,7 +2000,7 @@ body.checkout-page {
 .checkout-page .checkout-assurance-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .checkout-page .checkout-assurance-card {
@@ -1993,8 +2066,7 @@ body.checkout-page {
     grid-template-columns: 1fr;
     grid-template-areas:
       "input"
-      "actions"
-      "hint";
+      "actions";
   }
 
   .checkout-page .checkout-session-actions {

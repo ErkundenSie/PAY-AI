@@ -62,8 +62,7 @@ const CONFIG = {
   proxy: process.env.PROXY || "",
 };
 
-// 录像开关（默认开启；设 RECORD_VIDEO=0 可关闭）与输出目录
-const RECORD_VIDEO = String(process.env.RECORD_VIDEO || "1") !== "0";
+const RECORD_VIDEO = String(process.env.RECORD_VIDEO || "0") !== "0";
 const VIDEO_DIR = path.join(__dirname, "debug_screenshots", "videos");
 const VIDEO_TAG =
   (process.env.JOB_KEY || process.env.CDK_CODE || `${Date.now()}`)
@@ -76,6 +75,14 @@ function buildDebugScreenshotPath(prefix) {
   const screenshotDir = path.join(__dirname, "debug_screenshots", subdir);
   fs.mkdirSync(screenshotDir, { recursive: true });
   return path.join(screenshotDir, `${prefix}_${Date.now()}.png`);
+}
+
+function removeMediaFiles(paths) {
+  for (const filePath of paths || []) {
+    try {
+      fs.unlinkSync(filePath);
+    } catch (_) {}
+  }
 }
 
 // 关闭 context 后把录像重命名为带任务标识的稳定文件名，并输出路径供 server 解析
@@ -726,6 +733,18 @@ async function run() {
     checkoutResult = hydrateCheckoutFromUrl(checkoutResult, page.url());
     const stripeSessionId = checkoutResult?.sessionId || null;
     const accessToken = loginInfo.session?.accessToken || CONFIG.chatgptToken;
+    let cardGroupId = null;
+    if (cdkCode) {
+      try {
+        const cdkDetails = await store.verifyCdkDetails(cdkCode);
+        if (cdkDetails?.card_group_id) {
+          cardGroupId = Number(cdkDetails.card_group_id);
+          console.log(`[Info] CDK 指定银行卡分组: ${cardGroupId}`);
+        }
+      } catch (_) {
+        /* ignore */
+      }
+    }
     if (stripeSessionId) {
       console.log(`[Info] Checkout session: ${stripeSessionId}`);
     }
@@ -740,6 +759,7 @@ async function run() {
       accessToken,
       checkout: checkoutResult,
       accountId: checkoutResult?.accountId || loginInfo.accountId,
+      cardGroupId,
     });
 
     if (paymentResult.success) {
@@ -763,15 +783,12 @@ async function run() {
         }
       }
       console.log("PAYMENT_SUCCESS");
-      for (const screenshotPath of paymentResult.screenshots || []) {
-        console.log(`SUCCESS_SCREENSHOT: ${screenshotPath}`);
-      }
+      removeMediaFiles(paymentResult.screenshots);
     } else {
       const errorMsg = paymentResult.error || "支付失败（未知原因）";
       for (const screenshotPath of paymentResult.screenshots || []) {
         console.log(`FAILURE_SCREENSHOT: ${screenshotPath}`);
       }
-      console.error(`❌ [支付失败] ${errorMsg} (manual_intervention)`);
       throw new Error(`支付失败 (manual_intervention): ${errorMsg}`);
     }
   } catch (e) {

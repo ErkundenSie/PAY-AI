@@ -1,5 +1,7 @@
 "use strict";
 
+const fs = require("fs");
+
 /**
  * Payment Retry with Card Rotation Module
  *
@@ -167,6 +169,7 @@ async function executePaymentWithRetry(page, options) {
     accessToken,
     checkout,
     accountId,
+    cardGroupId = null,
   } = options || {};
   const preferredCardId = Number(process.env.PAYMENT_CARD_ID || 0);
   const manualCardRaw = String(process.env.PAYMENT_CARD_MANUAL || "").trim();
@@ -317,12 +320,14 @@ async function executePaymentWithRetry(page, options) {
         `已指定卡片 #${cardAttempt}: ...${String(card.card_number || "").slice(-4)}`,
       );
     } else {
-      card = await store.reserveCard(ownerKey);
+      card = await store.reserveCard(ownerKey, cardGroupId);
     }
     if (!card) {
       progress(
         cardAttempt === 1
-          ? "卡池无可用卡，终止支付"
+          ? cardGroupId
+            ? "当前分组卡池无可用卡，终止支付"
+            : "卡池无可用卡，终止支付"
           : `卡池已无更多可用卡（已拒 ${declinedLast4s.length} 张）`,
       );
       if (cardAttempt === 1) {
@@ -430,8 +435,9 @@ async function executePaymentWithRetry(page, options) {
           `支付成功！卡片: ...${cardLast4}，姓名: ${holderName}，地址: ${address.line1}, ${address.city}`,
         );
         if (paymentResult.screenshot) {
-          screenshots.push(paymentResult.screenshot);
-          progress(`SUCCESS_SCREENSHOT: ${paymentResult.screenshot}`);
+          try {
+            fs.unlinkSync(paymentResult.screenshot);
+          } catch (_) {}
         }
         return { success: true, cardLast4, holderName, screenshots };
       }
