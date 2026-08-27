@@ -754,7 +754,13 @@ async function completeProtocolCheckout({
   const dueCurrency = String(billing.currency || "").toUpperCase();
   const stripeCustomer = String(checkoutSession.customer || "").trim();
   progress(`税费完成: ${dueCurrency} ${dueAmount || amountTotal}`);
-  if (!isExpectedProtocolDueAmount(dueAmount, dueCurrency, ctx.planName || billing.planName)) {
+  if (
+    !isExpectedProtocolDueAmount(
+      dueAmount,
+      dueCurrency,
+      ctx.planName || billing.planName,
+    )
+  ) {
     return {
       success: false,
       fallback: true,
