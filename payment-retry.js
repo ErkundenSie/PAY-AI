@@ -221,15 +221,17 @@ async function executePaymentWithRetry(page, options) {
 
   let billedAmount = 0;
   let billedCurrency = currency;
-  try {
-    const due = await readCheckoutDueAmount(page);
-    if (due?.amount) {
-      billedAmount = due.amount;
-      if (due.currency) billedCurrency = due.currency;
-      progress(`Checkout 应付金额: ${billedCurrency} ${billedAmount}`);
+  if (!canUseProtocolCheckout(checkoutContext, accessToken)) {
+    try {
+      const due = await readCheckoutDueAmount(page);
+      if (due?.amount) {
+        billedAmount = due.amount;
+        if (due.currency) billedCurrency = due.currency;
+        progress(`Checkout 应付金额: ${billedCurrency} ${billedAmount}`);
+      }
+    } catch (_) {
+      /* ignore */
     }
-  } catch (_) {
-    /* ignore */
   }
 
   progress(`开始支付（最多尝试 ${MAX_CARD_ATTEMPTS} 张卡）...`);
@@ -303,6 +305,23 @@ async function executePaymentWithRetry(page, options) {
         );
         billedAmount = resolved.amount;
         billedCurrency = resolved.currency;
+        if (
+          Number(billedAmount) <= 0 ||
+          (String(billedCurrency || "").toUpperCase() === "PHP" &&
+            (Number(billedAmount) < 900 || Number(billedAmount) > 1050))
+        ) {
+          lastError = `应付金额异常: ${billedCurrency} ${billedAmount}`;
+          progress(lastError);
+          await store.releaseCard(card.id).catch(() => {});
+          cardHandled = true;
+          return {
+            success: false,
+            error: lastError,
+            cardLast4,
+            manualIntervention: true,
+            screenshots,
+          };
+        }
         progress(`实际扣款金额（免税后）: ${billedCurrency} ${billedAmount}`);
 
         const holderName =

@@ -3,6 +3,7 @@
 const { getRegionConfig } = require("./region-config");
 const { assertChatGptLoggedIn } = require("./session-auth");
 const { clearHumanVerification } = require("./human-verification");
+const { hasVisibleLoginChrome } = require("./auth-page-detect");
 
 const PRICING_URL = "https://chatgpt.com/#pricing";
 const PRICING_FALLBACK_URLS = [
@@ -842,6 +843,9 @@ async function waitForPricingPage(page, timeout = 60000) {
 
   let lastUrl = "";
   for (const url of PRICING_FALLBACK_URLS) {
+    if (await hasVisibleLoginChrome(page).catch(() => false)) {
+      throw new Error("Session 未生效：定价页显示登录界面");
+    }
     await page.goto(url, { waitUntil: "domcontentloaded", timeout });
     lastUrl = page.url();
     await clearHumanVerification(page, {

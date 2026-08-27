@@ -77,6 +77,8 @@ async function isLoginPageContent(page) {
       /to continue to OpenAI/i.test(bodyText) ||
       /登录\s*ChatGPT/i.test(bodyText) ||
       /使用 Google 登录/i.test(bodyText) ||
+      /Welcome back/i.test(bodyText) ||
+      /Continue with Google/i.test(bodyText) ||
       (/\bLog in\b/i.test(bodyText) && /\bSign up\b/i.test(bodyText))
     );
   } catch (_) {
@@ -118,6 +120,16 @@ async function hasVisibleLoginChrome(page) {
     () =>
       page
         .getByText(/Get responses tailored to you/i)
+        .first()
+        .isVisible({ timeout: 800 }),
+    () =>
+      page
+        .getByText(/Welcome back/i)
+        .first()
+        .isVisible({ timeout: 800 }),
+    () =>
+      page
+        .getByRole("button", { name: /Continue with Google/i })
         .first()
         .isVisible({ timeout: 800 }),
   ];

@@ -9,6 +9,12 @@ const {
   buildCheckoutWarmupRequests,
   resolveCheckoutModes,
   readRequestPostData,
+  extractHomepageMetadata,
+  buildPhpCheckoutHeaders,
+  shouldFallbackFromPhpCheckout,
+  buildCheckoutSentinelReqBody,
+  assembleCheckoutSentinelToken,
+  isUsableCheckoutSentinel,
 } = require("../chatgpt");
 
 describe("chatgpt checkout helpers", () => {
@@ -21,7 +27,6 @@ describe("chatgpt checkout helpers", () => {
       plan_name: "chatgptplusplan",
       checkout_ui_mode: "custom",
       billing_details: { country: "PH", currency: "PHP" },
-      cancel_url: "https://chatgpt.com/",
       account_id: "acct-1",
       openai_account_id: "acct-1",
     });
@@ -129,5 +134,95 @@ describe("chatgpt checkout helpers", () => {
     ).toBe('{"plan_name":"chatgptplusplan"}');
     expect(readRequestPostData({ postData: () => null })).toBe("");
     expect(readRequestPostData({})).toBe("");
+  });
+
+  it("extracts PHP checkout metadata from homepage html", () => {
+    const meta = extractHomepageMetadata(
+      '<html data-build="prod-123" data-seq="456">{"webDeploymentAttestation":"att-1"}</html>',
+    );
+    expect(meta).toEqual({
+      clientVersion: "prod-123",
+      clientBuild: "456",
+      attestation: "att-1",
+    });
+  });
+
+  it("builds PHP protocol checkout headers", () => {
+    const headers = buildPhpCheckoutHeaders({
+      token: "tok",
+      accountId: "acct-1",
+      deviceId: "did-1",
+      clientVersion: "prod-123",
+      attestation: "att-1",
+      sentinel: '{"p":1}',
+    });
+    expect(headers.authorization).toBe("Bearer tok");
+    expect(headers["chatgpt-account-id"]).toBe("acct-1");
+    expect(headers["oai-device-id"]).toBe("did-1");
+    expect(headers["oai-client-version"]).toBe("prod-123");
+    expect(headers["openai-sentinel-token"]).toBe('{"p":1}');
+    expect(headers["oai-telemetry"]).toBe("[1,null]");
+    expect(headers.origin).toBe("https://chatgpt.com");
+    expect(headers.referer).toBe("https://chatgpt.com/");
+    expect(headers["x-openai-target-path"]).toBe(
+      "/backend-api/payments/checkout",
+    );
+  });
+
+  it("falls back from PHP protocol on unusual activity but not already subscribed", () => {
+    expect(
+      shouldFallbackFromPhpCheckout({
+        ok: false,
+        error: "unusual activity",
+      }),
+    ).toBe(true);
+    expect(
+      shouldFallbackFromPhpCheckout({
+        ok: false,
+        error: "already_subscribed",
+      }),
+    ).toBe(false);
+    expect(shouldFallbackFromPhpCheckout({ ok: true })).toBe(false);
+  });
+
+  it("builds chatgpt_checkout sentinel/req body with device id and proof token", () => {
+    const body = buildCheckoutSentinelReqBody("did-1");
+    expect(body.id).toBe("did-1");
+    expect(body.flow).toBe("chatgpt_checkout");
+    expect(body.p.startsWith("gAAAAAC")).toBe(true);
+  });
+
+  it("assembles p/t/c/id/flow sentinel token from req + challenge", () => {
+    const token = assembleCheckoutSentinelToken(
+      { p: "gAAAAACproof", id: "did-1", flow: "chatgpt_checkout" },
+      { token: "c-token", t: "turnstile" },
+      "",
+    );
+    expect(JSON.parse(token)).toEqual({
+      p: "gAAAAACproof",
+      t: "turnstile",
+      c: "c-token",
+      id: "did-1",
+      flow: "chatgpt_checkout",
+    });
+  });
+
+  it("solves proofofwork into gAAAAAB p without ~S", () => {
+    const token = assembleCheckoutSentinelToken(
+      { p: "gAAAAACproof", id: "did-1", flow: "chatgpt_checkout" },
+      {
+        token: "c-token",
+        proofofwork: { required: true, seed: "seed", difficulty: "0" },
+      },
+      "",
+    );
+    const obj = JSON.parse(token);
+    expect(obj.p.startsWith("gAAAAAB")).toBe(true);
+    expect(obj.p.includes("~S")).toBe(false);
+    expect(
+      JSON.parse(Buffer.from(obj.p.slice(7), "base64").toString("utf8")),
+    ).toHaveLength(25);
+    expect(obj.c).toBe("c-token");
+    expect(isUsableCheckoutSentinel(token)).toBe(true);
   });
 });

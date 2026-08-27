@@ -9,6 +9,7 @@ const {
   canUseProtocolCheckout,
   extractCheckoutContext,
   hydrateCheckoutFromUrl,
+  isExpectedProtocolDueAmount,
 } = require("../checkout-protocol");
 
 describe("checkout protocol helpers", () => {
@@ -115,6 +116,16 @@ describe("checkout protocol helpers", () => {
         "token",
       ),
     ).toBe(true);
+  });
+
+  it("accepts PHP tax-free plus due amount from taxes API", () => {
+    expect(isExpectedProtocolDueAmount(982.14, "PHP", "chatgptplusplan")).toBe(
+      true,
+    );
+    expect(isExpectedProtocolDueAmount(1100, "PHP", "chatgptplusplan")).toBe(
+      false,
+    );
+    expect(isExpectedProtocolDueAmount(0, "PHP")).toBe(false);
   });
 
   it("includes card, billing, and stripe version in confirmation token form", () => {

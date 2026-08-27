@@ -508,6 +508,23 @@ function amountFromMinorUnits(amountTotal, currency) {
   return Math.round(n) / 100;
 }
 
+function expectedProtocolDueRange(currency, planName = "") {
+  const cur = String(currency || "").toUpperCase();
+  const plan = String(planName || "").toLowerCase();
+  if (cur === "PHP" && (!plan || /plus/.test(plan))) {
+    return { min: 900, max: 1050 };
+  }
+  return null;
+}
+
+function isExpectedProtocolDueAmount(dueAmount, currency, planName = "") {
+  const amount = Number(dueAmount);
+  if (!Number.isFinite(amount) || amount <= 0) return false;
+  const range = expectedProtocolDueRange(currency, planName);
+  if (!range) return true;
+  return amount >= range.min && amount <= range.max;
+}
+
 function stripeDeclineMessage(error = {}) {
   const decline = String(error.decline_code || "").toLowerCase();
   if (decline === "insufficient_funds") return "银行卡余额不足";
@@ -734,10 +751,19 @@ async function completeProtocolCheckout({
   const checkoutSession = taxData.checkout_session || {};
   const amountTotal = Number(checkoutSession.amount_total || 0);
   const dueAmount = amountFromMinorUnits(amountTotal, billing.currency);
+  const dueCurrency = String(billing.currency || "").toUpperCase();
   const stripeCustomer = String(checkoutSession.customer || "").trim();
-  progress(
-    `税费完成: ${String(billing.currency || "").toUpperCase()} ${dueAmount || amountTotal}`,
-  );
+  progress(`税费完成: ${dueCurrency} ${dueAmount || amountTotal}`);
+  if (!isExpectedProtocolDueAmount(dueAmount, dueCurrency, ctx.planName || billing.planName)) {
+    return {
+      success: false,
+      fallback: true,
+      error: `应付金额异常: ${dueCurrency} ${dueAmount || amountTotal}`,
+      holderName,
+      dueAmount,
+      dueCurrency,
+    };
+  }
 
   let publishableKey;
   try {
@@ -887,4 +913,5 @@ module.exports = {
   buildConfirmationTokenForm,
   buildPaymentIntentConfirmForm,
   completeProtocolCheckout,
+  isExpectedProtocolDueAmount,
 };

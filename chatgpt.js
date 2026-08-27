@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("crypto");
 const axios = require("axios");
 const store = require("./mysql-store");
 const { getRegionConfig } = require("./region-config");
@@ -25,7 +26,6 @@ function buildCheckoutPayload(planName, country, currency, options = {}) {
     plan_name: planName,
     checkout_ui_mode: uiMode,
     billing_details: { country, currency },
-    cancel_url: "https://chatgpt.com/",
   };
   const accountId = String(options.accountId || "").trim();
   if (accountId) {
@@ -33,6 +33,287 @@ function buildCheckoutPayload(planName, country, currency, options = {}) {
     payload.openai_account_id = accountId;
   }
   return payload;
+}
+
+function pickCookieValue(cookies, name) {
+  const hit = (Array.isArray(cookies) ? cookies : []).find(
+    (item) => String(item?.name || "").trim() === name,
+  );
+  return String(hit?.value || "").trim();
+}
+
+async function snapshotChatGptCookies(page) {
+  try {
+    const context =
+      page && typeof page.context === "function" ? page.context() : null;
+    if (!context || typeof context.cookies !== "function") return [];
+    return await context.cookies(CHATGPT_HOME_URL);
+  } catch (_) {
+    return [];
+  }
+}
+
+async function restoreChatGptCookies(page, cookies) {
+  if (!page || !Array.isArray(cookies) || !cookies.length) return;
+  try {
+    const context = page.context();
+    if (!context || typeof context.addCookies !== "function") return;
+    await context.addCookies(cookies);
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function extractHomepageMetadata(html) {
+  const text = String(html || "");
+  const pick = (pattern) => {
+    const match = text.match(pattern);
+    return match ? String(match[1] || "").trim() : "";
+  };
+  return {
+    clientVersion: pick(/data-build="([^"]+)"/),
+    clientBuild: pick(/data-seq="([^"]+)"/),
+    attestation: pick(/"webDeploymentAttestation":"([^"]+)"/),
+  };
+}
+
+function parseSentinelObject(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  try {
+    const data = JSON.parse(text);
+    return data && typeof data === "object" ? data : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function fnv1a32Hex(input) {
+  let hash = 2166136261 >>> 0;
+  const text = String(input || "");
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 2246822507) >>> 0;
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, 3266489909) >>> 0;
+  hash ^= hash >>> 16;
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function encodeSentinelConfig(config) {
+  return Buffer.from(JSON.stringify(config), "utf8").toString("base64");
+}
+
+function buildDefaultSentinelFingerprint(overrides = {}) {
+  return [
+    2730,
+    String(new Date()),
+    4395630592,
+    0,
+    overrides.userAgent ||
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+    "https://chatgpt.com/cdn-cgi/challenge-platform/scripts/jsd/api.js?onload=jsdOnload",
+    overrides.clientVersion || null,
+    "zh-CN",
+    "zh-CN",
+    0,
+    "serial\u2212[object Serial]",
+    "location",
+    "closed",
+    1000 + Math.random() * 49000,
+    overrides.sid || crypto.randomUUID(),
+    "",
+    8,
+    Date.now() + Math.random(),
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+  ];
+}
+
+function cloneSentinelFingerprint(fingerprint, overrides = {}) {
+  return Array.isArray(fingerprint) && fingerprint.length >= 18
+    ? fingerprint.slice()
+    : buildDefaultSentinelFingerprint(overrides);
+}
+
+function generateSentinelRequirementsToken(fingerprint = null) {
+  const config = cloneSentinelFingerprint(fingerprint);
+  config[3] = 1;
+  config[9] = Math.round(5 + Math.random() * 45);
+  return `gAAAAAC${encodeSentinelConfig(config)}`;
+}
+
+function generateSentinelPowToken(seed, difficulty = "0", fingerprint = null) {
+  const config = cloneSentinelFingerprint(fingerprint);
+  const start = Date.now();
+  const target = String(difficulty || "0");
+  for (let i = 0; i < 500000; i += 1) {
+    config[3] = i;
+    config[9] = Math.round(Date.now() - start);
+    const data = encodeSentinelConfig(config);
+    const hex = fnv1a32Hex(String(seed) + data);
+    if (hex.slice(0, target.length) <= target) {
+      return `gAAAAAB${data}`;
+    }
+  }
+  return `gAAAAAB${encodeSentinelConfig(config)}`;
+}
+
+function extractChallengeToken(challenge) {
+  if (!challenge || typeof challenge !== "object") return "";
+  return String(
+    challenge.token ||
+      challenge.c ||
+      challenge.challenge ||
+      challenge?.proofofwork?.token ||
+      "",
+  ).trim();
+}
+
+function pickLongerSentinelField(left, right) {
+  const a = String(left || "").trim();
+  const b = String(right || "").trim();
+  return b.length > a.length ? b : a;
+}
+
+function summarizeCheckoutSentinel(raw) {
+  const obj = parseSentinelObject(raw) || {};
+  return {
+    p: String(obj.p || "").length,
+    t: String(obj.t || "").length,
+    c: String(obj.c || "").length,
+    id: String(obj.id || "").length,
+    flow: String(obj.flow || ""),
+    total: String(raw || "").length,
+  };
+}
+
+function isUsableCheckoutSentinel(raw) {
+  const obj = parseSentinelObject(raw);
+  if (!obj) return false;
+  return Boolean(
+    String(obj.p || "").startsWith("gAAAAA") &&
+    String(obj.c || "").trim() &&
+    String(obj.id || "").trim() &&
+    String(obj.flow || "").trim(),
+  );
+}
+
+function mergeCheckoutSentinelToken(base, extra) {
+  const a = parseSentinelObject(base) || {};
+  const b = parseSentinelObject(extra) || {};
+  const token = {
+    p: pickLongerSentinelField(a.p, b.p),
+    t: pickLongerSentinelField(a.t, b.t),
+    c: pickLongerSentinelField(a.c, b.c),
+    id: String(a.id || b.id || "").trim(),
+    flow: String(a.flow || b.flow || "chatgpt_checkout").trim(),
+  };
+  if (!token.p || !token.id || !token.c) {
+    return pickLongerSentinelField(base, extra);
+  }
+  return JSON.stringify(token);
+}
+
+function buildCheckoutSentinelReqBody(deviceId = "", fingerprint = null) {
+  const id = String(deviceId || "").trim() || crypto.randomUUID();
+  return {
+    p: generateSentinelRequirementsToken(fingerprint),
+    id,
+    flow: "chatgpt_checkout",
+  };
+}
+
+function assembleCheckoutSentinelToken(
+  reqBody,
+  challenge,
+  captured = "",
+  fingerprint = null,
+) {
+  const capturedObj = parseSentinelObject(captured) || {};
+  const challengeObj =
+    challenge && typeof challenge === "object" ? challenge : {};
+  const pow = challengeObj.proofofwork || {};
+  const deviceId = String(capturedObj.id || reqBody?.id || "").trim();
+  const proof =
+    pow.required && pow.seed
+      ? generateSentinelPowToken(pow.seed, pow.difficulty || "0", fingerprint)
+      : pickLongerSentinelField(capturedObj.p, reqBody?.p);
+  const token = {
+    p: proof,
+    t: pickLongerSentinelField(
+      capturedObj.t,
+      challengeObj.t || challengeObj.turnstile?.token || "",
+    ),
+    c: pickLongerSentinelField(
+      capturedObj.c,
+      extractChallengeToken(challengeObj),
+    ),
+    id: deviceId,
+    flow: String(
+      capturedObj.flow || reqBody?.flow || "chatgpt_checkout",
+    ).trim(),
+  };
+  if (!token.p || !token.id || !token.c) {
+    return String(captured || "").trim();
+  }
+  return JSON.stringify(token);
+}
+
+function buildPhpCheckoutHeaders({
+  token,
+  accountId = "",
+  deviceId = "",
+  clientVersion = "",
+  clientBuild = "",
+  attestation = "",
+  sentinel = "",
+  extra = {},
+} = {}) {
+  const headers = {
+    accept: "*/*",
+    authorization: `Bearer ${String(token || "").trim()}`,
+    "content-type": "application/json",
+    origin: "https://chatgpt.com",
+    referer: "https://chatgpt.com/",
+    "oai-language": "zh-CN",
+    "oai-session-id": crypto.randomUUID(),
+    "oai-telemetry": "[1,null]",
+    "x-openai-target-path": CHECKOUT_API_PATH,
+    "x-openai-target-route": CHECKOUT_API_PATH,
+    ...extra,
+  };
+  const aid = String(accountId || "").trim();
+  if (aid) {
+    headers["chatgpt-account-id"] = aid;
+  }
+  if (deviceId) headers["oai-device-id"] = deviceId;
+  if (clientVersion) headers["oai-client-version"] = clientVersion;
+  if (clientBuild) headers["oai-client-build-number"] = clientBuild;
+  if (attestation) headers["oai-web-deployment-attestation"] = attestation;
+  if (sentinel) headers["openai-sentinel-token"] = sentinel;
+  return headers;
+}
+
+function shouldFallbackFromPhpCheckout(parsed) {
+  if (!parsed || parsed.ok) return false;
+  const detail = String(parsed.error || "");
+  if (
+    /already paid|already_subscribed|not_eligible|Offer not found|permission/i.test(
+      detail,
+    )
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function buildCheckoutHeaders(accessToken, extra = {}) {
@@ -209,9 +490,18 @@ function summarizeCheckoutCookies(cookies) {
 }
 
 async function ensureChatGptHome(page) {
-  const { openPersonalWorkspace } = require("./auth-page-detect");
+  const {
+    openPersonalWorkspace,
+    hasVisibleLoginChrome,
+  } = require("./auth-page-detect");
   const currentUrl = String(page.url() || "");
-  if (!currentUrl.startsWith("https://chatgpt.com")) {
+  if (await hasVisibleLoginChrome(page).catch(() => false)) {
+    throw new Error("Session 未生效：当前是登录页，无法打开套餐弹窗");
+  }
+  if (
+    !currentUrl.startsWith("https://chatgpt.com") ||
+    /about:blank|^chrome:\/\//i.test(currentUrl)
+  ) {
     await page.goto("https://chatgpt.com/#pricing", {
       waitUntil: "domcontentloaded",
       timeout: 60000,
@@ -243,18 +533,15 @@ function readRequestPostData(request) {
 function captureSentinelFromPayload(text) {
   const raw = String(text || "").trim();
   if (!raw) return "";
+  if (isUsableCheckoutSentinel(raw)) return raw;
   try {
     const data = JSON.parse(raw);
     const token = String(
-      data.token ||
-        data.sentinel_token ||
-        data.sentinelToken ||
-        data.value ||
-        "",
+      data.sentinel_token || data.sentinelToken || data.value || "",
     ).trim();
-    return token;
+    return isUsableCheckoutSentinel(token) ? token : "";
   } catch (_) {
-    return raw.length > 200 ? raw : "";
+    return "";
   }
 }
 
@@ -819,6 +1106,269 @@ class ChatGPTService {
     return { sessionId, checkoutUrl: null };
   }
 
+  async collectPhpCheckoutContext(page, accountId = "") {
+    const cookies = await snapshotChatGptCookies(page);
+    const deviceId = pickCookieValue(cookies, "oai-did");
+    let html = "";
+    if (
+      page &&
+      typeof page.content === "function" &&
+      String(page.url() || "").startsWith("https://chatgpt.com")
+    ) {
+      html = await page.content().catch(() => "");
+    }
+    const meta = extractHomepageMetadata(html);
+    return {
+      accountId: String(accountId || "").trim(),
+      deviceId,
+      clientVersion: meta.clientVersion,
+      clientBuild: meta.clientBuild,
+      attestation: meta.attestation,
+      cookieCount: Array.isArray(cookies) ? cookies.length : 0,
+    };
+  }
+
+  async harvestPhpSentinel(page, options = {}) {
+    await installSentinelCapture(page);
+    let token = String(options.sentinel || "").trim();
+    if (!isUsableCheckoutSentinel(token)) {
+      const captured = await readCapturedSentinel(page);
+      token = mergeCheckoutSentinelToken(token, captured);
+    }
+    if (isUsableCheckoutSentinel(token) && parseSentinelObject(token)?.t) {
+      return token;
+    }
+
+    const onChatGpt =
+      page &&
+      typeof page.url === "function" &&
+      String(page.url() || "").startsWith("https://chatgpt.com");
+    if (!onChatGpt && page && typeof page.goto === "function") {
+      await page
+        .goto("https://chatgpt.com/#pricing", {
+          waitUntil: "domcontentloaded",
+          timeout: 20000,
+        })
+        .catch(() => {});
+    }
+
+    const stillOnChatGpt =
+      page &&
+      typeof page.url === "function" &&
+      String(page.url() || "").startsWith("https://chatgpt.com");
+    if (!stillOnChatGpt) {
+      return token;
+    }
+
+    const cookies = await snapshotChatGptCookies(page);
+    const deviceId = pickCookieValue(cookies, "oai-did");
+    const fingerprint = await page
+      .evaluate(() => {
+        const screenSum =
+          Number(window.screen?.width || 0) +
+          Number(window.screen?.height || 0);
+        return [
+          screenSum || 2730,
+          String(new Date()),
+          Number(performance.memory?.jsHeapSizeLimit || 4395630592),
+          0,
+          navigator.userAgent || "",
+          "https://chatgpt.com/cdn-cgi/challenge-platform/scripts/jsd/api.js?onload=jsdOnload",
+          document.documentElement?.getAttribute("data-build") || null,
+          navigator.language || "zh-CN",
+          Array.isArray(navigator.languages)
+            ? navigator.languages.join(",")
+            : navigator.language || "zh-CN",
+          0,
+          "serial\u2212[object Serial]",
+          "location",
+          "closed",
+          Number(performance.now() || 0),
+          crypto.randomUUID(),
+          "",
+          Number(navigator.hardwareConcurrency || 8),
+          Number(performance.timeOrigin || Date.now()),
+          Number("ai" in window),
+          Number("answers" in window),
+          Number("cache" in window),
+          Number("data" in window),
+          Number("required" in window),
+          Number("match" in window),
+          Number("stringify" in window),
+        ];
+      })
+      .catch(() => buildDefaultSentinelFingerprint({ sid: deviceId }));
+    const reqBody = buildCheckoutSentinelReqBody(deviceId, fingerprint);
+    let challenge = null;
+    const probe = await page
+      .evaluate(async (body) => {
+        try {
+          const response = await fetch("/backend-api/sentinel/req", {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "content-type": "application/json",
+              accept: "application/json",
+            },
+            body: JSON.stringify(body),
+          });
+          const text = await response.text();
+          let data = {};
+          try {
+            data = text ? JSON.parse(text) : {};
+          } catch (_) {
+            data = {};
+          }
+          const headerToken =
+            response.headers.get("openai-sentinel-token") ||
+            response.headers.get("OpenAI-Sentinel-Token") ||
+            "";
+          return {
+            status: response.status,
+            data,
+            headerToken,
+            bytes: text.length,
+          };
+        } catch (err) {
+          return {
+            status: 0,
+            data: {},
+            headerToken: "",
+            error: String((err && err.message) || err),
+          };
+        }
+      }, reqBody)
+      .catch(() => null);
+
+    if (probe?.headerToken) {
+      rememberSentinelToken(page, probe.headerToken);
+    }
+    if (probe?.data && typeof probe.data === "object") {
+      challenge = probe.data;
+    }
+    console.log(
+      `[ChatGPT] sentinel/req flow=chatgpt_checkout HTTP ${probe?.status || 0}, body=${probe?.bytes || 0}B${probe?.error ? `, err=${probe.error}` : ""}`,
+    );
+
+    const assembled = assembleCheckoutSentinelToken(
+      reqBody,
+      challenge,
+      token,
+      fingerprint,
+    );
+    token = mergeCheckoutSentinelToken(token, assembled);
+    rememberSentinelToken(page, token);
+    const sizes = summarizeCheckoutSentinel(token);
+    console.log(
+      `[ChatGPT] Sentinel 拼装 p=${sizes.p} t=${sizes.t} c=${sizes.c} total=${sizes.total}`,
+    );
+    if (!isUsableCheckoutSentinel(token)) {
+      const waited = await waitForSentinelToken(page, {
+        timeoutMs: Number(options.timeoutMs || 1800),
+        minBytes: Math.max(token.length + 200, 4000),
+        fresh: false,
+      });
+      token = mergeCheckoutSentinelToken(token, waited);
+    }
+    return token;
+  }
+
+  async postPhpProtocolCheckout(page, payload, options = {}) {
+    const started = Date.now();
+    const accountId = String(
+      options.accountId || payload?.account_id || "",
+    ).trim();
+    const savedCookies = await snapshotChatGptCookies(page);
+    const php = await this.collectPhpCheckoutContext(page, accountId);
+    const sentinel = await this.harvestPhpSentinel(page, options);
+    await restoreChatGptCookies(page, savedCookies);
+    if (!isUsableCheckoutSentinel(sentinel)) {
+      const sizes = summarizeCheckoutSentinel(sentinel);
+      console.warn(
+        `[ChatGPT] PHP 协议提链缺 Sentinel (p=${sizes.p} t=${sizes.t} c=${sizes.c} total=${sizes.total})，跳过协议 POST`,
+      );
+      return {
+        ok: false,
+        status: 0,
+        data: {},
+        error: "sentinel token missing",
+      };
+    }
+    const headers = buildPhpCheckoutHeaders({
+      token: this.token,
+      accountId: php.accountId,
+      deviceId: php.deviceId,
+      clientVersion: php.clientVersion,
+      clientBuild: php.clientBuild,
+      attestation: php.attestation,
+      sentinel,
+    });
+    console.log(
+      `[ChatGPT] PHP 协议提链: cookies=${php.cookieCount}, did=${php.deviceId ? "yes" : "no"}, Sentinel=${JSON.stringify(summarizeCheckoutSentinel(sentinel))}`,
+    );
+
+    let parsed;
+    if (page && typeof page.evaluate === "function") {
+      const officialPayload = {
+        entry_point: payload.entry_point,
+        plan_name: payload.plan_name,
+        billing_details: payload.billing_details,
+        checkout_ui_mode: payload.checkout_ui_mode || "custom",
+      };
+      const result = await page.evaluate(
+        async ({ path, payload, headers }) => {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 20000);
+          try {
+            const response = await fetch(path, {
+              method: "POST",
+              credentials: "include",
+              headers,
+              body: JSON.stringify(payload),
+              signal: controller.signal,
+            });
+            const bodyText = await response.text();
+            return { status: response.status, bodyText };
+          } catch (err) {
+            return {
+              status: 0,
+              bodyText: "",
+              error: String((err && err.message) || err),
+            };
+          } finally {
+            clearTimeout(timer);
+          }
+        },
+        {
+          path: CHECKOUT_API_PATH,
+          payload: officialPayload,
+          headers,
+        },
+      );
+      parsed = result.error
+        ? { ok: false, status: 0, data: {}, error: result.error }
+        : parseCheckoutApiBody(result.status, result.bodyText);
+    } else if (this.request && typeof this.request.post === "function") {
+      const response = await this.request.post(CHECKOUT_API_URL, {
+        headers,
+        data: payload,
+        timeout: 20000,
+      });
+      const bodyText = await response.text().catch(() => "");
+      parsed = parseCheckoutApiBody(response.status(), bodyText);
+    } else {
+      parsed = { ok: false, status: 0, data: {}, error: "missing request api" };
+    }
+
+    if (!parsed.ok) {
+      await restoreChatGptCookies(page, savedCookies);
+    }
+    console.log(
+      `[ChatGPT] PHP 协议提链完成: HTTP ${parsed.status}, ${Date.now() - started}ms${parsed.ok ? "" : `, err=${String(parsed.error || "").slice(0, 80)}`}`,
+    );
+    return parsed;
+  }
+
   async postCheckoutViaPageFetch(page, payload, options = {}) {
     await installSentinelCapture(page);
     let sentinel = String(options.sentinel || "").trim();
@@ -1047,26 +1597,16 @@ class ChatGPTService {
       const profile = extractProfileFromToken(this.token);
       let accountId = String(profile.accountId || "").trim();
       let warmupPlan = "";
-      if (options.page && typeof options.page.evaluate === "function") {
-        const warmup = await warmupCheckoutContext(options.page, this.token, {
-          country,
-          accountId,
-        });
-        if (!accountId && warmup.accountId) {
-          accountId = warmup.accountId;
-        }
-        warmupPlan = String(warmup.plan || "").trim();
-        if (accountId) {
-          this.headers = buildCheckoutHeaders(this.token, { accountId });
-        }
-      }
       const pageCheckoutFirst =
         options.page && typeof options.page.evaluate === "function";
+      if (accountId) {
+        this.headers = buildCheckoutHeaders(this.token, { accountId });
+      }
       const modes = pageCheckoutFirst
         ? ["custom"]
         : resolveCheckoutModes(warmupPlan);
       console.log(
-        `[ChatGPT] 创建 Checkout Session: plan_name=${planName}, country=${country}, currency=${currency}, account_id=${accountId || "none"}, current_plan=${warmupPlan || "none"}, modes=${modes.join("->")}${pageCheckoutFirst ? ", via=page-fetch" : ""}`,
+        `[ChatGPT] 创建 Checkout Session: plan_name=${planName}, country=${country}, currency=${currency}, account_id=${accountId || "none"}, current_plan=${warmupPlan || "none"}, modes=${modes.join("->")}${pageCheckoutFirst ? ", via=php-protocol" : ""}`,
       );
 
       let lastParsed = null;
@@ -1078,12 +1618,32 @@ class ChatGPTService {
         console.log(`[ChatGPT] 尝试 checkout 模式: ${planType}-${uiMode}`);
         let parsed;
         if (pageCheckoutFirst) {
-          console.log(
-            "[ChatGPT] 启动 Chromium 浏览器执行 Sentinel Checkout...",
-          );
-          parsed = await this.postCheckoutRequest(payload, options.page, {
-            forcePage: true,
+          console.log("[ChatGPT] 先走 PHP 协议提链...");
+          const savedCookies = await snapshotChatGptCookies(options.page);
+          parsed = await this.postPhpProtocolCheckout(options.page, payload, {
+            accountId,
           });
+          if (!parsed.ok && shouldFallbackFromPhpCheckout(parsed)) {
+            console.warn(
+              `[ChatGPT] PHP 协议提链未过: ${String(parsed.error || parsed.status).slice(0, 120)}，改用原网页 Sentinel`,
+            );
+            await restoreChatGptCookies(options.page, savedCookies);
+            const warmup = await warmupCheckoutContext(
+              options.page,
+              this.token,
+              { country, accountId },
+            );
+            await restoreChatGptCookies(options.page, savedCookies);
+            if (!accountId && warmup.accountId) {
+              accountId = warmup.accountId;
+              payload.account_id = accountId;
+              payload.openai_account_id = accountId;
+              this.headers = buildCheckoutHeaders(this.token, { accountId });
+            }
+            parsed = await this.postCheckoutRequest(payload, options.page, {
+              forcePage: true,
+            });
+          }
         } else {
           parsed = await this.postCheckoutRequest(payload, null);
         }
@@ -1494,3 +2054,10 @@ module.exports.readRequestPostData = readRequestPostData;
 module.exports.summarizeCheckoutCookies = summarizeCheckoutCookies;
 module.exports.buildCheckoutWarmupRequests = buildCheckoutWarmupRequests;
 module.exports.formatApiErrorDetail = formatApiErrorDetail;
+module.exports.extractHomepageMetadata = extractHomepageMetadata;
+module.exports.buildPhpCheckoutHeaders = buildPhpCheckoutHeaders;
+module.exports.shouldFallbackFromPhpCheckout = shouldFallbackFromPhpCheckout;
+module.exports.buildCheckoutSentinelReqBody = buildCheckoutSentinelReqBody;
+module.exports.assembleCheckoutSentinelToken = assembleCheckoutSentinelToken;
+module.exports.isUsableCheckoutSentinel = isUsableCheckoutSentinel;
+module.exports.summarizeCheckoutSentinel = summarizeCheckoutSentinel;
