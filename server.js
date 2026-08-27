@@ -65,6 +65,13 @@ const {
 const gptApi = require("./gpt-api-client");
 const cardValidator = require("./card-validator");
 const { decodeJwtPart } = require("./public/jwt-decode");
+const { createCdks } = require("./cdk-codes");
+const { registerAdminAssetRoutes } = require("./routes/admin-assets");
+const { registerPublicRoutes } = require("./routes/public");
+const {
+  registerAdminLoginRoutes,
+  registerAdminSecurityRoutes,
+} = require("./routes/admin-auth");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -126,6 +133,87 @@ function reserveForegroundSlot(slotKey) {
 
 function releaseForegroundSlot(slotKey) {
   activeForegroundJobs.delete(String(slotKey));
+}
+
+let drainingActivationQueue = false;
+async function drainActivationQueue() {
+  if (drainingActivationQueue) return;
+  drainingActivationQueue = true;
+  try {
+    while (true) {
+      const maxConcurrentActivations =
+        await store.getMaxConcurrentActivations();
+      if (activeForegroundJobs.size >= maxConcurrentActivations) {
+        break;
+      }
+      const queued = await store.claimNextQueuedActivation();
+      if (!queued) break;
+      const cdk = queued.cdkCode;
+      const sessionRaw = queued.sessionPayload || "";
+      const token = normalizeSessionToken(sessionRaw);
+      const cdkDetails = cdk ? await store.verifyCdkDetails(cdk) : null;
+      if (!cdk || !token || !cdkDetails) {
+        await store.updateTaskLog(queued.jobKey, {
+          status: "failed",
+          message: "排队任务数据无效，已取消",
+          progress: 100,
+        });
+        if (cdk) await store.markCdkUnused(cdk).catch(() => {});
+        continue;
+      }
+      const gptApiConfig = await store.getGptApiConfig();
+      const useGptApi =
+        gptApiConfig.enabled &&
+        Boolean(gptApiConfig.api_key) &&
+        !store.isCreditsPlan(cdkDetails.plan_type);
+      const task = {
+        jobKey: queued.jobKey,
+        tokenPreview: queued.tokenPreview,
+      };
+      logTask(
+        queued.jobKey,
+        `排队任务开始执行，CDK=${cdk} mode=${useGptApi ? "gpt-api" : "local"}`,
+      );
+      reserveForegroundSlot(queued.jobKey);
+      broadcastToTask(queued.jobKey, {
+        type: "progress",
+        jobKey: queued.jobKey,
+        status: "running",
+        message: "排队完成，正在开通中",
+        progress: 3,
+      });
+      if (useGptApi) {
+        let session = null;
+        try {
+          session = JSON.parse(sessionRaw);
+        } catch (_) {
+          session = { access_token: token };
+        }
+        runGptApiWorker({
+          task,
+          token,
+          session,
+          cdk,
+          planType: cdkDetails.plan_type || "plus",
+        }).catch((error) => {
+          console.error(`[GPT API Worker] ${queued.jobKey}:`, error);
+        });
+      } else {
+        spawnActivationWorker({
+          task,
+          token,
+          sessionRaw,
+          cdk,
+          cdkDetails,
+          clientIp: "",
+        });
+      }
+    }
+  } catch (error) {
+    console.warn(`[Queue] drainActivationQueue: ${error.message}`);
+  } finally {
+    drainingActivationQueue = false;
+  }
 }
 
 function getTotalActiveJobs() {
@@ -509,6 +597,10 @@ function invalidateAdminPathsCache() {
   cachedAdminPaths = null;
 }
 
+function setCachedAdminPaths(paths) {
+  cachedAdminPaths = paths || null;
+}
+
 function normalizeRequestPathname(pathname) {
   return String(pathname || "/").replace(/\/+$/, "") || "/";
 }
@@ -730,30 +822,6 @@ async function authenticateAdmin(req, res, next) {
   req.admin = payload;
   req.adminToken = token;
   return next();
-}
-
-const CDK_PREFIX = "KC-";
-const CDK_RANDOM_LENGTH = 15; // KC- + 15 = 18 位
-const CDK_CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 去掉易混淆 0/O/1/I/L
-
-function randomCdkSuffix(length = CDK_RANDOM_LENGTH) {
-  const bytes = crypto.randomBytes(length);
-  let out = "";
-  for (let i = 0; i < length; i += 1) {
-    out += CDK_CHARSET[bytes[i] % CDK_CHARSET.length];
-  }
-  return out;
-}
-
-function createCdks(count) {
-  const results = new Set();
-  const target = Math.max(1, Math.min(Number(count) || 1, 100));
-
-  while (results.size < target) {
-    results.add(`${CDK_PREFIX}${randomCdkSuffix()}`);
-  }
-
-  return [...results];
 }
 
 function extractScreenshotsFromOutput(output) {
@@ -1784,275 +1852,16 @@ function runCheckoutScript(
   });
 }
 
-app.get("/admin", (req, res) => {
-  res.status(404).type("text/plain").send("Not Found");
-});
-
-app.get(["/admin-login", "/admin-login/", "/admin-login.html"], (req, res) => {
-  res.status(404).type("text/plain").send("Not Found");
-});
-
-app.post("/api/admin/login", async (req, res) => {
-  const email = adminAuth.normalizeEmail(req.body?.email);
-  const password = String(req.body?.password || "");
-  const clientMeta = adminAuth.getClientMeta(req);
-
-  if (!email || !password) {
-    return res
-      .status(400)
-      .json({ success: false, message: "请输入管理员邮箱和密码" });
-  }
-
-  const rate = adminAuth.checkLoginRateLimit(clientMeta.ip);
-  if (!rate.allowed) {
-    return res.status(429).json({
-      success: false,
-      message: `登录尝试过多，请 ${rate.retryAfterSec} 秒后再试`,
-    });
-  }
-
-  try {
-    await ensureStoreReady();
-    const authConfig = await store.getAdminAuthConfig();
-    const telegramSettings = await store.getTelegramConfig();
-    const emailOk = email === adminAuth.normalizeEmail(authConfig.email);
-    const passwordOk = verifyPassword(password, authConfig.passwordHash);
-
-    if (!emailOk || !passwordOk) {
-      adminAuth.recordLoginFailure(rate.key, rate.entry);
-      await logAdminSecurityEvent("login_failed", {
-        ...clientMeta,
-        email,
-        detail: "邮箱或密码错误",
-      });
-      fireAdminSecurityNotification("admin_login_failed", {
-        email,
-        ip: clientMeta.ip,
-        fingerprint: clientMeta.fingerprint,
-        userAgent: clientMeta.userAgent,
-        message: "邮箱或密码错误",
-      });
-      return res
-        .status(401)
-        .json({ success: false, message: "邮箱或密码错误" });
-    }
-
-    adminAuth.clearLoginAttempts(rate.key);
-
-    const methods = adminAuth.resolveLogin2faMethods(
-      authConfig,
-      telegramSettings,
-    );
-    if (!adminAuth.is2faRequired(authConfig, telegramSettings)) {
-      const { token, payload } = issueAdminToken(
-        authConfig.passwordVersion,
-        authConfig.email,
-      );
-      await logAdminSecurityEvent("login_success", {
-        ...clientMeta,
-        email: authConfig.email,
-        detail: "密码登录（未启用二次验证）",
-      });
-      fireAdminSecurityNotification("admin_login_success", {
-        email: authConfig.email,
-        ip: clientMeta.ip,
-        fingerprint: clientMeta.fingerprint,
-        userAgent: clientMeta.userAgent,
-        method: "password_only",
-        message: "后台登录成功（尚未启用 2FA）",
-      });
-      return res.json(
-        await attachAdminPaths({
-          success: true,
-          token,
-          expiresAt: payload.exp,
-          issuedAt: payload.iat,
-          permissions: payload.permissions,
-          email: authConfig.email,
-          requires2fa: false,
-          setupRequired: true,
-        }),
-      );
-    }
-
-    const challenge = adminAuth.issueLoginChallenge({
-      email: authConfig.email,
-      passwordVersion: authConfig.passwordVersion,
-      ip: clientMeta.ip,
-      fingerprint: clientMeta.fingerprint,
-    });
-
-    return res.json({
-      success: true,
-      requires2fa: true,
-      challengeToken: challenge.token,
-      methods,
-      defaultMethod: adminAuth.pickDefaultLogin2faMethod(
-        methods,
-        authConfig.login2faMode === "either" ? "" : authConfig.login2faMode,
-      ),
-      login2faMode: authConfig.login2faMode,
-      email: authConfig.email,
-      expiresAt: challenge.payload.exp,
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.post("/api/admin/login/send-tg-code", async (req, res) => {
-  const challengeToken = String(req.body?.challengeToken || "").trim();
-  const challenge = adminAuth.verifyLoginChallenge(challengeToken);
-  if (!challenge) {
-    return res
-      .status(401)
-      .json({ success: false, message: "登录会话已过期，请重新登录" });
-  }
-
-  try {
-    await ensureStoreReady();
-    const code = adminAuth.generateTelegramLoginCode();
-    adminAuth.storeTelegramLoginCode(challenge.cid, code);
-    const clientMeta = adminAuth.getClientMeta(req);
-    const sendResult = await sendTelegramLoginCode(store, code, {
-      email: challenge.email,
-      ip: clientMeta.ip || challenge.ip,
-    });
-    if (!sendResult.ok) {
-      return res.status(400).json({
-        success: false,
-        message: sendResult.error || "Telegram 验证码发送失败",
-      });
-    }
-    return res.json({
-      success: true,
-      message: "验证码已发送到管理员 Telegram",
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.post("/api/admin/login/verify-2fa", async (req, res) => {
-  const challengeToken = String(req.body?.challengeToken || "").trim();
-  const method = String(req.body?.method || "")
-    .trim()
-    .toLowerCase();
-  const code = String(req.body?.code || "").trim();
-  const clientMeta = adminAuth.getClientMeta(req);
-  const challenge = adminAuth.verifyLoginChallenge(challengeToken);
-
-  if (!challenge) {
-    return res
-      .status(401)
-      .json({ success: false, message: "登录会话已过期，请重新登录" });
-  }
-
-  if (!code) {
-    return res.status(400).json({ success: false, message: "请输入验证码" });
-  }
-
-  const rate = adminAuth.checkLoginRateLimit(`${clientMeta.ip}:2fa`);
-  if (!rate.allowed) {
-    return res.status(429).json({
-      success: false,
-      message: `验证尝试过多，请 ${rate.retryAfterSec} 秒后再试`,
-    });
-  }
-
-  try {
-    await ensureStoreReady();
-    const authConfig = await store.getAdminAuthConfig();
-    const telegramSettings = await store.getTelegramConfig();
-    const methods = adminAuth.resolveLogin2faMethods(
-      authConfig,
-      telegramSettings,
-    );
-    if (!methods.includes(method)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "不支持的验证方式" });
-    }
-
-    let verified = false;
-    if (method === "totp") {
-      verified = adminAuth.verifyTotpCode(authConfig.totpSecret, code);
-    } else if (method === "telegram") {
-      const tgResult = adminAuth.verifyTelegramLoginCode(challenge.cid, code);
-      verified = tgResult.ok;
-      if (!verified) {
-        adminAuth.recordLoginFailure(rate.key, rate.entry);
-        await logAdminSecurityEvent("2fa_failed", {
-          ...clientMeta,
-          email: challenge.email,
-          detail: `Telegram 验证码错误 (${tgResult.reason || "invalid"})`,
-        });
-        fireAdminSecurityNotification("admin_2fa_failed", {
-          email: challenge.email,
-          ip: clientMeta.ip,
-          fingerprint: clientMeta.fingerprint,
-          userAgent: clientMeta.userAgent,
-          method: "telegram",
-          message: "Telegram 验证码错误",
-        });
-        const message =
-          tgResult.reason === "expired"
-            ? "验证码已过期，请重新获取"
-            : "Telegram 验证码错误";
-        return res.status(401).json({ success: false, message });
-      }
-    }
-
-    if (!verified) {
-      adminAuth.recordLoginFailure(rate.key, rate.entry);
-      await logAdminSecurityEvent("2fa_failed", {
-        ...clientMeta,
-        email: challenge.email,
-        detail: `${method} 验证码错误`,
-      });
-      fireAdminSecurityNotification("admin_2fa_failed", {
-        email: challenge.email,
-        ip: clientMeta.ip,
-        fingerprint: clientMeta.fingerprint,
-        userAgent: clientMeta.userAgent,
-        method,
-        message: "二次验证失败",
-      });
-      return res.status(401).json({ success: false, message: "验证码错误" });
-    }
-
-    adminAuth.clearLoginAttempts(rate.key);
-    const { token, payload } = issueAdminToken(
-      authConfig.passwordVersion,
-      authConfig.email,
-    );
-    await logAdminSecurityEvent("login_success", {
-      ...clientMeta,
-      email: authConfig.email,
-      detail: `二次验证成功 (${method})`,
-    });
-    fireAdminSecurityNotification("admin_login_success", {
-      email: authConfig.email,
-      ip: clientMeta.ip,
-      fingerprint: clientMeta.fingerprint,
-      userAgent: clientMeta.userAgent,
-      method,
-      message: "后台登录成功",
-    });
-
-    return res.json(
-      await attachAdminPaths({
-        success: true,
-        token,
-        expiresAt: payload.exp,
-        issuedAt: payload.iat,
-        permissions: payload.permissions,
-        email: authConfig.email,
-      }),
-    );
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
+registerAdminLoginRoutes(app, {
+  adminAuth,
+  store,
+  ensureStoreReady,
+  verifyPassword,
+  issueAdminToken,
+  logAdminSecurityEvent,
+  fireAdminSecurityNotification,
+  sendTelegramLoginCode,
+  attachAdminPaths,
 });
 
 /** 运行日志：必须挂在 app.use('/api/admin', authenticateAdmin) 之前，并为每条路由单独鉴权，否则部分环境下会 404 */
@@ -2177,614 +1986,74 @@ app.post("/api/admin/proxy/test", authenticateAdmin, async (req, res) => {
   }
 });
 
-// ─── External Card Pool Webhook (X-API-Key auth) ────────────────────────────
-app.post(
-  "/api/external/cards/push",
-  limitPublicRequests("external-cards-push", 20, 60 * 1000),
-  async (req, res) => {
-    try {
-      await ensureStoreReady();
-      const apiKey = String(req.headers["x-api-key"] || "").trim();
-      if (!apiKey) {
-        return res
-          .status(401)
-          .json({ success: false, error: "API Key 无效或缺失" });
-      }
-      const expectedKey = await store.getAppConfigValue(
-        "external_card_api_key",
-        "",
-      );
-      if (!expectedKey || !safeEqualString(apiKey, expectedKey)) {
-        return res
-          .status(401)
-          .json({ success: false, error: "API Key 无效或缺失" });
-      }
-
-      const cards = Array.isArray(req.body?.cards) ? req.body.cards : [];
-      if (cards.length === 0) {
-        return res
-          .status(400)
-          .json({ success: false, error: "缺少 cards 数组或为空" });
-      }
-      if (cards.length > 500) {
-        return res
-          .status(400)
-          .json({ success: false, error: "单次导入上限 500 条" });
-      }
-
-      const result = await store.importCards(cards);
-      res.json({ success: true, ...result });
-    } catch (error) {
-      if (error.message === "单次导入上限 500 条") {
-        return res.status(400).json({ success: false, error: error.message });
-      }
-      res.status(500).json({ success: false, message: error.message });
-    }
+registerPublicRoutes(app, {
+  store,
+  ensureStoreReady,
+  limitPublicRequests,
+  safeEqualString,
+  buildAdminLoginUrl,
+  buildAdminPanelUrl,
+  buildCheckoutUrl,
+  normalizeSessionToken,
+  validateSessionTokenForQuery,
+  querySubscriptionBySession,
+  extractEmailFromSession,
+  cancelAutoRenew,
+  REGION_CONFIG,
+  startPublicCheckoutPay,
+  resolvePublicCheckoutCdk,
+  runtimeLog,
+  adminAuth,
+  TERMINAL_TASK_STATUSES,
+  getActiveForegroundJobCount: () => activeForegroundJobs.size,
+  publicDir: path.join(__dirname, "public"),
+  getPlanTypeLabel,
+  getClientIp,
+  getRemainingCooldownMinutes,
+  createCdks,
+  get handleActivationRequest() {
+    return handleActivationRequest;
   },
-);
-
-/** 公开 API：必须挂在 app.use('/api/admin', authenticateAdmin) 之前，否则部分环境下会 404 */
-app.get("/api/public/admin-paths", async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const paths = await store.getAdminPaths();
-    return res.json({
-      success: true,
-      loginPath: paths.loginPath,
-      panelPath: paths.panelPath,
-      checkoutPath: paths.checkoutPath,
-      loginUrl: buildAdminLoginUrl(paths),
-      panelUrl: buildAdminPanelUrl(paths),
-      checkoutUrl: buildCheckoutUrl(paths),
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
 });
-
-app.post(
-  "/api/public/subscription/check",
-  limitPublicRequests("subscription-check", 10, 60 * 1000),
-  async (req, res) => {
-    try {
-      const rawSession = String(req.body?.session || req.body?.token || "")
-        .trim()
-        .replace(/^\uFEFF/, "");
-      if (!rawSession) {
-        return res.status(400).json({
-          success: false,
-          message: "请粘贴 Session JSON 或 AccessToken",
-        });
-      }
-
-      const token = normalizeSessionToken(rawSession);
-      const tokenCheck = validateSessionTokenForQuery(token);
-      if (!tokenCheck.valid) {
-        return res
-          .status(400)
-          .json({ success: false, message: tokenCheck.message });
-      }
-
-      const timezoneOffsetMin = Number(req.body?.timezone_offset_min);
-      const result = await querySubscriptionBySession(token, {
-        timezoneOffsetMin: Number.isFinite(timezoneOffsetMin)
-          ? timezoneOffsetMin
-          : -new Date().getTimezoneOffset(),
-        email: extractEmailFromSession(rawSession) || tokenCheck.email || "",
-      });
-
-      if (!result.ok) {
-        return res.status(result.statusCode || 502).json({
-          success: false,
-          message: result.error || "查询订阅失败",
-        });
-      }
-
-      return res.json({ success: true, data: result.data });
-    } catch (error) {
-      return res.status(500).json({ success: false, message: error.message });
-    }
-  },
-);
-
-app.post(
-  "/api/public/subscription/cancel-auto-renew",
-  limitPublicRequests("subscription-cancel-renew", 6, 60 * 1000),
-  async (req, res) => {
-    try {
-      const rawSession = String(req.body?.session || req.body?.token || "")
-        .trim()
-        .replace(/^\uFEFF/, "");
-      if (!rawSession) {
-        return res.status(400).json({
-          success: false,
-          message: "请粘贴 Session JSON 或 AccessToken",
-        });
-      }
-
-      const token = normalizeSessionToken(rawSession);
-      const tokenCheck = validateSessionTokenForQuery(token);
-      if (!tokenCheck.valid) {
-        return res
-          .status(400)
-          .json({ success: false, message: tokenCheck.message });
-      }
-
-      const timezoneOffsetMin = Number(req.body?.timezone_offset_min);
-      const result = await cancelAutoRenew(token, {
-        timezoneOffsetMin: Number.isFinite(timezoneOffsetMin)
-          ? timezoneOffsetMin
-          : -new Date().getTimezoneOffset(),
-        email: extractEmailFromSession(rawSession) || tokenCheck.email || "",
-      });
-
-      if (!result.ok) {
-        return res.status(result.statusCode || 502).json({
-          success: false,
-          message: result.error || "取消自动续费失败",
-        });
-      }
-
-      return res.json({
-        success: true,
-        data: result.data,
-        message: result.data?.message || "已提交取消自动续费",
-      });
-    } catch (error) {
-      return res.status(500).json({ success: false, message: error.message });
-    }
-  },
-);
-
-app.get("/api/public/checkout/options", async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const regionCode = await store.getPaymentRegion();
-    const current = REGION_CONFIG[regionCode] || REGION_CONFIG.PH;
-    return res.json({
-      success: true,
-      plans: store.listCheckoutPlans(),
-      credit_presets: store.CREDIT_QUANTITY_PRESETS,
-      credit_min: store.CREDIT_QUANTITY_MIN,
-      credit_step: store.CREDIT_QUANTITY_STEP,
-      regions: Object.entries(REGION_CONFIG).map(([code, cfg]) => ({
-        code,
-        label: cfg.label,
-        currency: cfg.currency,
-      })),
-      default_region: regionCode,
-      default_currency: current.currency,
-      default_label: current.label,
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.post(
-  "/api/public/checkout/pay",
-  limitPublicRequests("public-checkout-pay", 8, 60 * 1000),
-  async (req, res) => {
-    try {
-      await ensureStoreReady();
-      const body = { ...(req.body || {}) };
-      delete body.card_id;
-      const result = await startPublicCheckoutPay(
-        {
-          ...body,
-          cdk_code: resolvePublicCheckoutCdk(),
-        },
-        { requireManualPayment: true },
-      );
-      return res.status(result.status).json(result.payload);
-    } catch (error) {
-      return res.status(500).json({ success: false, error: error.message });
-    }
-  },
-);
-
-function redactPublicCheckoutLog(value) {
-  return String(value || "")
-    .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)\S+/gi, "$1[REDACTED]")
-    .replace(
-      /(["']?(?:access_?token|session|cookie|card_(?:number|cvc)|CHATGPT_TOKEN|CHATGPT_SESSION_JSON|PAYMENT_CARD_MANUAL)["']?\s*[:=]\s*["']?)[^\s,"'}]+/gi,
-      "$1[REDACTED]",
-    )
-    .replace(/\b\d{12,19}\b/g, "[REDACTED_CARD]")
-    .slice(0, 500);
-}
-
-function listPublicCheckoutLogs(jobKey, after, limit) {
-  const cap = Math.min(200, Math.max(1, Number(limit) || 80));
-  if (typeof runtimeLog.forJob === "function") {
-    return runtimeLog.forJob(jobKey, after, cap);
-  }
-  return runtimeLog
-    .after(after, 2000)
-    .filter((entry) => String(entry.jobKey || "") === String(jobKey))
-    .slice(0, cap);
-}
-
-function logsFromRawOutput(rawOutput, after) {
-  if (after > 0) return [];
-  return String(rawOutput || "")
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 200)
-    .map((text, index) => ({
-      id: index + 1,
-      ts: Date.now(),
-      text: redactPublicCheckoutLog(text),
-    }));
-}
-
-app.get(
-  "/api/public/checkout/status/:jobKey",
-  limitPublicRequests("public-checkout-status", 60, 60 * 1000),
-  async (req, res) => {
-    try {
-      await ensureStoreReady();
-      const jobKey = decodeURIComponent(String(req.params.jobKey || "").trim());
-      const viewerToken = String(
-        req.query?.token || req.query?.viewerToken || "",
-      ).trim();
-      if (!jobKey || !/^[A-Za-z0-9._-]{1,80}$/.test(jobKey)) {
-        return res.status(400).json({ success: false, error: "缺少任务标识" });
-      }
-      if (!adminAuth.verifyTaskViewerToken(viewerToken, jobKey)) {
-        return res.status(401).json({ success: false, error: "未授权订阅" });
-      }
-      const task = await store.getTaskStatus(jobKey);
-      if (!task) {
-        return res.status(404).json({ success: false, error: "任务不存在" });
-      }
-      const after = Math.max(
-        0,
-        parseInt(String(req.query.after || "0"), 10) || 0,
-      );
-      let logEntries = listPublicCheckoutLogs(jobKey, after, 200).map(
-        (entry) => ({
-          id: entry.id,
-          ts: entry.ts,
-          text: redactPublicCheckoutLog(entry.text),
-        }),
-      );
-      if (!logEntries.length) {
-        logEntries = logsFromRawOutput(task.raw_output, after);
-      }
-      const lastLog = logEntries[logEntries.length - 1];
-      return res.json({
-        success: true,
-        jobKey,
-        status: task.status,
-        message: task.message,
-        progress: Number(task.progress || 0),
-        isTerminal: TERMINAL_TASK_STATUSES.has(task.status),
-        logs: logEntries,
-        logAfter: lastLog ? lastLog.id : after,
-      });
-    } catch (error) {
-      return res.status(500).json({ success: false, error: error.message });
-    }
-  },
-);
 
 app.use("/api/admin", authenticateAdmin);
 
-app.get("/subscription", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "subscription.html"));
+registerAdminSecurityRoutes(app, {
+  adminAuth,
+  store,
+  ensureStoreReady,
+  verifyPassword,
+  issueAdminToken,
+  logAdminSecurityEvent,
+  fireAdminSecurityNotification,
+  attachAdminPaths,
+  invalidateAdminPathsCache,
+  setCachedAdminPaths,
+  buildAdminLoginUrl,
+  buildAdminPanelUrl,
+  buildCheckoutUrl,
+  ADMIN_REFRESH_AFTER_MS,
+  authenticateAdmin,
 });
 
-app.get("/api/public/payment-region", async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const regionCode = await store.getPaymentRegion();
-    const config = REGION_CONFIG[regionCode] || REGION_CONFIG.PH;
-    return res.json({
-      success: true,
-      region: regionCode,
-      currency: config.currency,
-      label: config.label,
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.get("/api/public/runtime", async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const maxConcurrentActivations = await store.getMaxConcurrentActivations();
-    return res.json({
-      success: true,
-      runtime: {
-        active_foreground_jobs: activeForegroundJobs.size,
-        max_foreground_jobs: Math.max(1, Number(maxConcurrentActivations || 1)),
-      },
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.get("/api/admin/session", (req, res) => {
-  const age = Date.now() - Number(req.admin.iat || 0);
-  const shouldRefresh = age >= ADMIN_REFRESH_AFTER_MS;
-  let refreshedToken = null;
-  let payload = req.admin;
-
-  if (shouldRefresh) {
-    const refreshed = issueAdminToken(req.admin.pv, req.admin.email);
-    refreshedToken = refreshed.token;
-    payload = refreshed.payload;
-  }
-
-  return res.json({
-    success: true,
-    refreshed: shouldRefresh,
-    token: refreshedToken,
-    expiresAt: payload.exp,
-    issuedAt: payload.iat,
-    permissions: payload.permissions,
-    email: payload.email || "",
-  });
-});
-
-app.get("/api/admin/security/status", async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const authConfig = await store.getAdminAuthConfig();
-    const telegramSettings = await store.getTelegramConfig();
-    const paths = await store.getAdminPaths();
-    res.json({
-      success: true,
-      email: authConfig.email,
-      totpEnabled: authConfig.totpEnabled,
-      login2faMode: authConfig.login2faMode,
-      availableMethods: adminAuth.getAvailable2faMethods(
-        authConfig,
-        telegramSettings,
-      ),
-      methods: adminAuth.resolveLogin2faMethods(authConfig, telegramSettings),
-      notifyAdminLogin: authConfig.notifyAdminLogin,
-      loginPath: paths.loginPath,
-      panelPath: paths.panelPath,
-      checkoutPath: paths.checkoutPath,
-      loginUrl: buildAdminLoginUrl(paths),
-      panelUrl: buildAdminPanelUrl(paths),
-      checkoutUrl: buildCheckoutUrl(paths),
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.get("/api/admin/login-logs", authenticateAdmin, async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const limit = Number(req.query.limit) || 100;
-    const offset = Number(req.query.offset) || 0;
-    res.json({
-      success: true,
-      ...(await store.listAdminLoginLogs(limit, offset)),
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.get("/api/admin/secondary/session", (req, res) => {
-  const token = String(req.headers["x-admin-secondary-token"] || "").trim();
-  const payload = adminAuth.verifySecondaryToken(token);
-  if (!payload) {
-    return res.json({ success: true, verified: false });
-  }
-  return res.json({
-    success: true,
-    verified: true,
-    expiresAt: payload.exp,
-  });
-});
-
-app.post("/api/admin/verify-secondary", async (req, res) => {
-  const password = String(req.body?.password || "");
-  const clientMeta = adminAuth.getClientMeta(req);
-  if (!password) {
-    return res.status(400).json({ success: false, message: "请输入二级密码" });
-  }
-
-  try {
-    await ensureStoreReady();
-    const authConfig = await store.getAdminAuthConfig();
-    if (!verifyPassword(password, authConfig.secondaryPasswordHash)) {
-      await logAdminSecurityEvent("secondary_failed", {
-        ...clientMeta,
-        email: req.admin?.email || authConfig.email,
-        detail: "二级密码错误",
-      });
-      return res.status(401).json({ success: false, message: "二级密码错误" });
-    }
-
-    const { token, payload } = adminAuth.issueSecondaryToken(
-      authConfig.secondaryPasswordVersion,
-      clientMeta.ip,
-    );
-    await logAdminSecurityEvent("secondary_success", {
-      ...clientMeta,
-      email: req.admin?.email || authConfig.email,
-      detail: "敏感模块解锁",
-    });
-    fireAdminSecurityNotification("admin_secondary_success", {
-      email: req.admin?.email || authConfig.email,
-      ip: clientMeta.ip,
-      fingerprint: clientMeta.fingerprint,
-      userAgent: clientMeta.userAgent,
-      message: "银行卡池/CDK/Session 模块已解锁",
-    });
-    return res.json({
-      success: true,
-      secondaryToken: token,
-      expiresAt: payload.exp,
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.post("/api/admin/security/2fa-mode", async (req, res) => {
-  const mode = String(req.body?.mode || "")
-    .trim()
-    .toLowerCase();
-  try {
-    await ensureStoreReady();
-    const saved = await store.saveAdmin2faLoginMode(mode);
-    res.json({
-      success: true,
-      login2faMode: saved,
-      message: "登录验证方式已保存",
-    });
-  } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
-  }
-});
-
-app.post("/api/admin/security/paths", async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const saved = await store.saveAdminPaths({
-      loginPath: req.body?.loginPath,
-      panelPath: req.body?.panelPath,
-      checkoutPath: req.body?.checkoutPath,
-    });
-    invalidateAdminPathsCache();
-    cachedAdminPaths = saved;
-    return res.json({
-      success: true,
-      loginPath: saved.loginPath,
-      panelPath: saved.panelPath,
-      checkoutPath: saved.checkoutPath,
-      loginUrl: buildAdminLoginUrl(saved),
-      panelUrl: buildAdminPanelUrl(saved),
-      checkoutUrl: buildCheckoutUrl(saved),
-      message: "入口路径已更新，请使用新地址访问并收藏",
-    });
-  } catch (error) {
-    return res.status(400).json({ success: false, message: error.message });
-  }
-});
-
-app.post("/api/admin/2fa/setup", async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const authConfig = await store.getAdminAuthConfig();
-    let secret = String(authConfig.totpSecret || "").trim();
-    if (!secret || authConfig.totpEnabled) {
-      secret = adminAuth.generateTotpSecret();
-      await store.saveAdminTotpConfig({ secret, enabled: false });
-    }
-    const otpauthUrl = adminAuth.getTotpUri(authConfig.email, secret);
-    res.json({
-      success: true,
-      secret,
-      otpauthUrl,
-      qrCodeUrl: `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(otpauthUrl)}`,
-      message: "请使用 Google Authenticator 扫码后输入验证码确认启用",
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.post("/api/admin/2fa/confirm", async (req, res) => {
-  const code = String(req.body?.code || "").trim();
-  if (!code) {
-    return res
-      .status(400)
-      .json({ success: false, message: "请输入 Authenticator 验证码" });
-  }
-  try {
-    await ensureStoreReady();
-    const authConfig = await store.getAdminAuthConfig();
-    if (!authConfig.totpSecret) {
-      return res
-        .status(400)
-        .json({ success: false, message: "请先发起 2FA 绑定" });
-    }
-    if (!adminAuth.verifyTotpCode(authConfig.totpSecret, code)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "验证码错误，请重试" });
-    }
-    await store.saveAdminTotpConfig({
-      secret: authConfig.totpSecret,
-      enabled: true,
-    });
-    res.json({ success: true, message: "Google Authenticator 已启用" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.post("/api/admin/2fa/disable", async (req, res) => {
-  const currentPassword = String(req.body?.currentPassword || "");
-  const code = String(req.body?.code || "").trim();
-  try {
-    await ensureStoreReady();
-    const authConfig = await store.getAdminAuthConfig();
-    if (!verifyPassword(currentPassword, authConfig.passwordHash)) {
-      return res.status(400).json({ success: false, message: "登录密码错误" });
-    }
-    if (
-      authConfig.totpEnabled &&
-      !adminAuth.verifyTotpCode(authConfig.totpSecret, code)
-    ) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Authenticator 验证码错误" });
-    }
-    await store.saveAdminTotpConfig({ secret: "", enabled: false });
-    res.json({ success: true, message: "Google Authenticator 已关闭" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.post("/api/admin/change-secondary-password", async (req, res) => {
-  const currentPassword = String(req.body?.currentPassword || "");
-  const newPassword = String(req.body?.newPassword || "").trim();
-  if (!currentPassword) {
-    return res
-      .status(400)
-      .json({ success: false, message: "请输入当前二级密码" });
-  }
-  if (newPassword.length < 6) {
-    return res
-      .status(400)
-      .json({ success: false, message: "新二级密码至少 6 位" });
-  }
-  try {
-    await ensureStoreReady();
-    const authConfig = await store.getAdminAuthConfig();
-    if (!verifyPassword(currentPassword, authConfig.secondaryPasswordHash)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "当前二级密码错误" });
-    }
-    await store.updateAdminSecondaryPassword(newPassword);
-    res.json({ success: true, message: "二级密码已更新，敏感模块需重新验证" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.get("/api/admin/task-logs", async (req, res) => {
+app.get("/api/admin/task-logs", requireSecondaryAuth, async (req, res) => {
   try {
     await ensureStoreReady();
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
-    const tasks = await store.listAdminTaskLogs(limit);
-    res.json({ success: true, tasks });
+    const sinceMs = Math.max(
+      0,
+      Number(req.query.since || req.query.sinceMs || 0),
+    );
+    const sinceId = Math.max(
+      0,
+      Number(req.query.since_id || req.query.sinceId || 0),
+    );
+    const tasks = await store.listAdminTaskLogs({ limit, sinceMs, sinceId });
+    res.json({
+      success: true,
+      tasks,
+      incremental: sinceMs > 0,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -2801,7 +2070,7 @@ function redactTaskDetailOutput(value) {
     .slice(-200000);
 }
 
-app.get("/api/admin/task-logs/:jobKey", async (req, res) => {
+app.get("/api/admin/task-logs/:jobKey", requireSecondaryAuth, async (req, res) => {
   try {
     await ensureStoreReady();
     const jobKey = decodeURIComponent(String(req.params.jobKey || "").trim());
@@ -2866,7 +2135,9 @@ app.get("/api/admin/task-logs/:jobKey", async (req, res) => {
 app.get("/api/admin/data", async (req, res) => {
   try {
     await ensureStoreReady();
-    const data = await store.getAdminData();
+    const data = await store.getAdminData({
+      light: String(req.query.light || "") === "1",
+    });
     const system = await getSystemMetrics();
     data.runtime = {
       active_activation_jobs: getTotalActiveJobs(),
@@ -3228,7 +2499,7 @@ app.get("/api/admin/screenshots/:subdir/:filename", async (req, res) => {
   }
 });
 
-app.delete("/api/admin/task-logs/:jobKey", async (req, res) => {
+app.delete("/api/admin/task-logs/:jobKey", requireSecondaryAuth, async (req, res) => {
   try {
     await ensureStoreReady();
     const jobKey = decodeURIComponent(String(req.params.jobKey || "").trim());
@@ -3798,149 +3069,11 @@ app.get("/api/admin/checkout/status/:jobKey", async (req, res) => {
   }
 });
 
-// ─── Card Pool Management API ───────────────────────────────────────────────
-
-app.get("/api/admin/cards", requireSecondaryAuth, async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const rows = await store.runQuery(
-      `SELECT c.id, c.card_number, c.card_expiry, c.card_cvc, c.card_holder,
-                    c.payment_holder_name, c.payment_address_line1, c.payment_address_city,
-                    c.payment_address_state, c.payment_address_postal, c.payment_address_id,
-                    c.is_active, c.usage_count, c.last_used_at, c.status, c.cooldown_until,
-                    c.group_id, g.name AS group_name
-             FROM card_assets c
-             LEFT JOIN card_groups g ON g.id = c.group_id
-             ORDER BY c.sort_order ASC, c.id ASC`,
-    );
-    const cards = rows.map((row) => ({
-      id: row.id,
-      card_number: row.card_number || "",
-      card_expiry: row.card_expiry || "",
-      card_cvc: row.card_cvc || "",
-      last4: String(row.card_number || "").slice(-4),
-      card_holder: row.card_holder || "",
-      payment_holder_name: row.payment_holder_name || "",
-      payment_address_line1: row.payment_address_line1 || "",
-      payment_address_city: row.payment_address_city || "",
-      payment_address_state: row.payment_address_state || "",
-      payment_address_postal: row.payment_address_postal || "",
-      payment_address_id: row.payment_address_id || null,
-      is_active: Number(row.is_active || 0),
-      usage_count: Number(row.usage_count || 0),
-      last_used_at: row.last_used_at || null,
-      status: row.status || "正常",
-      cooldown_until: row.cooldown_until || null,
-      group_id: row.group_id ? Number(row.group_id) : null,
-      group_name: row.group_name || "",
-    }));
-    res.json({ success: true, cards });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.post("/api/admin/cards/import", requireSecondaryAuth, async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const cards = Array.isArray(req.body?.cards) ? req.body.cards : [];
-    if (cards.length === 0) {
-      return res
-        .status(400)
-        .json({ success: false, error: "缺少 cards 数组或为空" });
-    }
-    if (cards.length > 500) {
-      return res
-        .status(400)
-        .json({ success: false, error: "单次导入上限 500 条" });
-    }
-
-    const result = await store.importCards(cards);
-    res.json({ success: true, ...result });
-  } catch (error) {
-    if (error.message === "单次导入上限 500 条") {
-      return res.status(400).json({ success: false, error: error.message });
-    }
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.get("/api/admin/card-groups", requireSecondaryAuth, async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const groups = await store.listCardGroups();
-    res.json({ success: true, groups });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.post("/api/admin/card-groups", requireSecondaryAuth, async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const group = await store.createCardGroup({
-      name: req.body?.name,
-      cardIds: req.body?.cardIds || req.body?.card_ids || [],
-    });
-    res.json({ success: true, group, message: "分组已创建" });
-  } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
-  }
-});
-
-app.post(
-  "/api/admin/card-groups/assign",
+registerAdminAssetRoutes(app, {
+  store,
+  ensureStoreReady,
   requireSecondaryAuth,
-  async (req, res) => {
-    try {
-      await ensureStoreReady();
-      const result = await store.assignCardsToGroup({
-        groupId: req.body?.groupId ?? req.body?.group_id ?? null,
-        cardIds: req.body?.cardIds || req.body?.card_ids || [],
-      });
-      res.json({
-        success: true,
-        ...result,
-        message: result.group_id ? "已加入分组" : "已移出分组",
-      });
-    } catch (error) {
-      res.status(400).json({ success: false, message: error.message });
-    }
-  },
-);
-
-app.delete(
-  "/api/admin/card-groups/:id",
-  requireSecondaryAuth,
-  async (req, res) => {
-    try {
-      await ensureStoreReady();
-      await store.deleteCardGroup(req.params.id);
-      res.json({ success: true, message: "分组已删除" });
-    } catch (error) {
-      res.status(400).json({ success: false, message: error.message });
-    }
-  },
-);
-
-app.delete("/api/admin/cards/:id", requireSecondaryAuth, async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const cardId = Number(req.params.id);
-    if (!cardId || !Number.isFinite(cardId)) {
-      return res.status(400).json({ success: false, error: "无效的卡片 ID" });
-    }
-    const result = await store.runExecute(
-      `DELETE FROM card_assets WHERE id = ?`,
-      [cardId],
-    );
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ success: false, error: "卡片不存在" });
-    }
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
+  createCdks,
 });
 
 // ─── Proxy Pool CRUD API ────────────────────────────────────────────────────
@@ -3970,7 +3103,7 @@ app.post("/api/admin/proxies", authenticateAdmin, async (req, res) => {
   }
 });
 
-app.put("/api/admin/proxies/:id", async (req, res) => {
+app.put("/api/admin/proxies/:id", authenticateAdmin, async (req, res) => {
   try {
     await ensureStoreReady();
     const id = req.params.id;
@@ -4149,97 +3282,11 @@ app.post("/api/admin/change-password", async (req, res) => {
   }
 });
 
-app.get("/api/admin/cdks", requireSecondaryAuth, async (req, res) => {
-  try {
-    await ensureStoreReady();
-    res.json(await store.listCdks());
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
 
-app.post("/api/admin/cdks/generate", requireSecondaryAuth, async (req, res) => {
-  try {
-    await ensureStoreReady();
-    const count = req.body?.count;
-    const planType = req.body?.plan_type || "plus";
-    const cardGroupId =
-      req.body?.card_group_id ?? req.body?.cardGroupId ?? null;
-    const newCdks = createCdks(count);
-    const result = await store.insertCdks(newCdks, {
-      type: "自助",
-      plan_type: planType,
-      card_group_id: cardGroupId,
-    });
-    res.json({
-      success: true,
-      message: `成功生成 ${result.insertedCount} 个自助 CDK`,
-      cdks: newCdks,
-      insertedCount: result.insertedCount,
-      plan_type: planType,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.post("/api/admin/cdks/import", requireSecondaryAuth, async (req, res) => {
-  const cdks = Array.isArray(req.body?.cdks) ? req.body.cdks : [];
-  if (cdks.length === 0) {
-    return res
-      .status(400)
-      .json({ success: false, message: "请提供要导入的卡密" });
-  }
-
-  try {
-    await ensureStoreReady();
-    const planType = req.body?.plan_type || "plus";
-    const cardGroupId =
-      req.body?.card_group_id ?? req.body?.cardGroupId ?? null;
-    const summary = await store.insertCdks(cdks, {
-      plan_type: planType,
-      card_group_id: cardGroupId,
-    });
-    res.json({
-      success: true,
-      message: `导入完成，新增 ${summary.insertedCount} 个，重复 ${summary.duplicateCount} 个`,
-      ...summary,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-app.post(
-  "/api/admin/cdks/:cdk/ship",
-  requireSecondaryAuth,
-  async (req, res) => {
-    try {
-      await ensureStoreReady();
-      const updated = await store.markCdkShipped(req.params.cdk);
-      if (!updated) {
-        return res.status(404).json({ success: false, message: "CDK 不存在" });
-      }
-      res.json({ success: true, message: "CDK 已标记出库" });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  },
-);
-
-app.delete("/api/admin/cdks/:cdk", requireSecondaryAuth, async (req, res) => {
-  try {
-    await ensureStoreReady();
-    await store.deleteCdk(req.params.cdk);
-    res.json({ success: true, message: "CDK 已删除" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
 
 // ─── Billing Records API ─────────────────────────────────────────────────────
 
-app.get("/api/admin/billing", async (req, res) => {
+app.get("/api/admin/billing", requireSecondaryAuth, async (req, res) => {
   try {
     await ensureStoreReady();
     const filters = {};
@@ -4256,7 +3303,7 @@ app.get("/api/admin/billing", async (req, res) => {
   }
 });
 
-app.get("/api/admin/billing/export", async (req, res) => {
+app.get("/api/admin/billing/export", requireSecondaryAuth, async (req, res) => {
   try {
     await ensureStoreReady();
     const filters = {};
@@ -4277,7 +3324,7 @@ app.get("/api/admin/billing/export", async (req, res) => {
   }
 });
 
-app.get("/api/admin/billing/summary/:cardLast4", async (req, res) => {
+app.get("/api/admin/billing/summary/:cardLast4", requireSecondaryAuth, async (req, res) => {
   try {
     await ensureStoreReady();
     const cardLast4 = String(req.params.cardLast4 || "");
@@ -4288,7 +3335,7 @@ app.get("/api/admin/billing/summary/:cardLast4", async (req, res) => {
   }
 });
 
-app.delete("/api/admin/billing/failed", async (req, res) => {
+app.delete("/api/admin/billing/failed", requireSecondaryAuth, async (req, res) => {
   try {
     await ensureStoreReady();
     const deleted = await store.deleteFailedBillingRecords();
@@ -4298,7 +3345,7 @@ app.delete("/api/admin/billing/failed", async (req, res) => {
   }
 });
 
-app.delete("/api/admin/billing/:id", async (req, res) => {
+app.delete("/api/admin/billing/:id", requireSecondaryAuth, async (req, res) => {
   try {
     await ensureStoreReady();
     const id = Number(req.params.id);
@@ -4577,6 +3624,9 @@ function spawnCheckoutPaymentWorker({
       });
     } finally {
       releaseForegroundSlot(task.jobKey);
+      drainActivationQueue().catch((error) => {
+        console.warn(`[Queue] 排空失败: ${error.message}`);
+      });
       if (getTotalActiveJobs() === 0) {
         const maintenanceModeState = await store.getMaintenanceModeState();
         if (maintenanceModeState.enabled && maintenanceModeState.drain) {
@@ -4886,6 +3936,9 @@ async function runGptApiWorker({ task, token, session, cdk, planType }) {
       await store.markCdkUnused(cdk).catch(() => {});
       logTask(jobKey, `CDK ${cdk} 已回滚为未使用`);
     }
+    drainActivationQueue().catch((error) => {
+      console.warn(`[Queue] 排空失败: ${error.message}`);
+    });
     if (getTotalActiveJobs() === 0) {
       const maintenanceModeState = await store.getMaintenanceModeState();
       if (maintenanceModeState.enabled && maintenanceModeState.drain) {
@@ -5266,6 +4319,9 @@ function spawnActivationWorker({
       }
     } finally {
       releaseForegroundSlot(task.jobKey);
+      drainActivationQueue().catch((error) => {
+        console.warn(`[Queue] 排空失败: ${error.message}`);
+      });
       if (getTotalActiveJobs() === 0) {
         const maintenanceModeState = await store.getMaintenanceModeState();
         if (maintenanceModeState.enabled && maintenanceModeState.drain) {
@@ -5322,11 +4378,8 @@ async function handleActivationRequest(req, res) {
         .json({ success: false, message: "系统维护中，请稍后再试" });
     }
     const maxConcurrentActivations = await store.getMaxConcurrentActivations();
-    if (activeForegroundJobs.size >= maxConcurrentActivations) {
-      return res
-        .status(429)
-        .json({ success: false, message: "当前任务过多，请稍后再试" });
-    }
+    const atCapacity =
+      activeForegroundJobs.size >= maxConcurrentActivations;
 
     const cdkDetails = await store.verifyCdkDetails(cdk);
     const runningTask = cdkDetails
@@ -5418,10 +4471,29 @@ async function handleActivationRequest(req, res) {
       cdkCode: cdk,
       phone: null,
       cardLast4: null,
-      status: "running",
-      progress: 3,
+      status: atCapacity ? "processing" : "running",
+      progress: atCapacity ? 1 : 3,
     });
     const viewerToken = adminAuth.issueTaskViewerToken(task.jobKey).token;
+
+    if (atCapacity) {
+      await store.updateTaskLog(task.jobKey, {
+        status: "processing",
+        message: "当前任务较多，已加入排队",
+        progress: 1,
+      });
+      logTask(task.jobKey, `任务已排队，CDK=${cdk}`);
+      drainActivationQueue().catch((error) => {
+        console.warn(`[Queue] 排空失败: ${error.message}`);
+      });
+      return res.json({
+        success: true,
+        jobKey: task.jobKey,
+        viewerToken,
+        queued: true,
+        message: "当前任务较多，已加入排队，请稍候",
+      });
+    }
 
     logTask(
       task.jobKey,
@@ -5454,6 +4526,7 @@ async function handleActivationRequest(req, res) {
       success: true,
       jobKey: task.jobKey,
       viewerToken,
+      queued: false,
       message: "任务已启动，正在为您开通中...",
     });
   } catch (error) {
@@ -5479,140 +4552,7 @@ async function authorizeTaskSubscription(data, jobKey) {
   return Number(adminPayload.pv || 0) === authConfig.passwordVersion;
 }
 
-app.post(
-  "/api/run-process",
-  limitPublicRequests("activation", 5, 60 * 1000),
-  handleActivationRequest,
-);
-
 app.post("/api/admin/trigger-activation", handleActivationRequest);
-
-app.post(
-  "/api/verify-cdk",
-  limitPublicRequests("verify-cdk", 30, 60 * 1000),
-  async (req, res) => {
-    const cdk = String(req.body?.cdk || "").trim();
-    const clientIp = getClientIp(req);
-    if (!cdk) {
-      return res.status(400).json({ success: false, message: "请输入 CDK" });
-    }
-
-    try {
-      await ensureStoreReady();
-      const cdkData = await store.verifyCdkDetails(cdk);
-      const runningTask = cdkData ? await store.getRunningTaskByCdk(cdk) : null;
-      if (cdkData && runningTask) {
-        return res.json({
-          success: true,
-          data: {
-            type: cdkData.type || "自助",
-            plan_type: cdkData.plan_type || "plus",
-            plan_label: getPlanTypeLabel(cdkData.plan_type || "plus"),
-            status: "processing",
-            jobKey: runningTask.job_key,
-            viewerToken: adminAuth.issueTaskViewerToken(runningTask.job_key)
-              .token,
-            message: runningTask.message || "当前 CDK 正在开通中",
-          },
-        });
-      }
-      if (cdkData && !cdkData.used_at) {
-        if (cdkData.type === "自助") {
-          const cdkCooldownMinutes = getRemainingCooldownMinutes(
-            cdkData.cooldown_until,
-          );
-          if (cdkCooldownMinutes > 0) {
-            return res.status(403).json({
-              success: false,
-              message: `该卡密连续无资格尝试过多，请冷静 ${cdkCooldownMinutes} 分钟后再试`,
-            });
-          }
-          if (clientIp) {
-            const ipAttemptLimit = await store.getActivationAttemptLimit(
-              "ip",
-              clientIp,
-            );
-            const ipCooldownMinutes = getRemainingCooldownMinutes(
-              ipAttemptLimit?.cooldown_until,
-            );
-            if (ipCooldownMinutes > 0) {
-              return res.status(403).json({
-                success: false,
-                message: `当前 IP 连续无资格尝试过多，请冷静 ${ipCooldownMinutes} 分钟后再试`,
-              });
-            }
-          }
-        }
-        return res.json({
-          success: true,
-          data: {
-            type: cdkData.type || "自助",
-            plan_type: cdkData.plan_type || "plus",
-            plan_label: getPlanTypeLabel(cdkData.plan_type || "plus"),
-          },
-        });
-      }
-
-      return res.status(403).json({
-        success: false,
-        message: cdkData?.used_at ? "该 CDK 已使用" : "无效 CDK",
-      });
-    } catch (error) {
-      return res.status(500).json({ success: false, message: error.message });
-    }
-  },
-);
-
-app.get(
-  "/api/cdk/query",
-  limitPublicRequests("cdk-query", 30, 60 * 1000),
-  async (req, res) => {
-    const cdk = String(req.query.cdk || "").trim();
-    if (!cdk) {
-      return res
-        .status(400)
-        .json({ success: false, message: "请输入查询激活码" });
-    }
-
-    try {
-      await ensureStoreReady();
-      const cdkData = await store.verifyCdkDetails(cdk);
-      if (!cdkData) {
-        return res
-          .status(404)
-          .json({ success: false, message: "未找到该激活码记录" });
-      }
-
-      const runningTask = await store.getRunningTaskByCdk(cdk);
-      const cdkStatus = runningTask
-        ? "开通中"
-        : cdkData.used_at
-          ? "已使用"
-          : "未使用";
-
-      res.json({
-        success: true,
-        data: {
-          status: cdkStatus,
-          type: cdkData.type || "自助",
-          createdAt: cdkData.created_at,
-          jobKey: runningTask?.job_key || null,
-          usedAt: cdkData.used_at
-            ? new Date(cdkData.used_at)
-                .toLocaleString("zh-CN", { hour12: false })
-                .replace(/\//g, "-")
-            : null,
-        },
-      });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  },
-);
-
-app.get("/api/cdk/download", async (req, res) => {
-  return res.status(410).send("成品号下载功能已移除，仅支持自助开通");
-});
 
 async function start() {
   await ensureStoreReady();

@@ -1,0 +1,197 @@
+"use strict";
+
+const express = require("express");
+const {
+  registerAdminLoginRoutes,
+  registerAdminSecurityRoutes,
+} = require("../routes/admin-auth");
+
+function passthrough(_req, _res, next) {
+  next();
+}
+
+function createLoginApp(overrides = {}) {
+  const app = express();
+  app.use(express.json());
+  const store = {
+    getAdminAuthConfig: async () => ({
+      email: "admin@example.com",
+      passwordHash: "hashed",
+      passwordVersion: 1,
+      totpEnabled: false,
+      totpSecret: "",
+      login2faMode: "either",
+      secondaryPasswordHash: "secondary",
+      secondaryPasswordVersion: 1,
+      notifyAdminLogin: false,
+    }),
+    getTelegramConfig: async () => ({}),
+    getAdminPaths: async () => ({
+      loginPath: "admin-login",
+      panelPath: "admin",
+      checkoutPath: "checkout",
+    }),
+    saveAdminPaths: async (paths) => paths,
+    saveAdmin2faLoginMode: async (mode) => mode,
+    saveAdminTotpConfig: async () => {},
+    updateAdminSecondaryPassword: async () => {},
+    listAdminLoginLogs: async () => ({ logs: [] }),
+    ...overrides.store,
+  };
+  const adminAuth = {
+    normalizeEmail: (email) => String(email || "").trim().toLowerCase(),
+    getClientMeta: () => ({
+      ip: "127.0.0.1",
+      fingerprint: "fp",
+      userAgent: "test",
+    }),
+    checkLoginRateLimit: () => ({ allowed: true, key: "ip", entry: {} }),
+    recordLoginFailure: () => {},
+    clearLoginAttempts: () => {},
+    resolveLogin2faMethods: () => [],
+    is2faRequired: () => false,
+    issueLoginChallenge: () => ({
+      token: "challenge",
+      payload: { exp: Date.now() + 1000 },
+    }),
+    verifyLoginChallenge: (token) =>
+      token === "challenge"
+        ? { cid: "c1", email: "admin@example.com", ip: "127.0.0.1" }
+        : null,
+    generateTelegramLoginCode: () => "123456",
+    storeTelegramLoginCode: () => {},
+    verifyTelegramLoginCode: () => ({ ok: true }),
+    verifyTotpCode: () => true,
+    pickDefaultLogin2faMethod: () => "totp",
+    generateTotpSecret: () => "SECRET",
+    getTotpUri: () => "otpauth://totp/test",
+    getAvailable2faMethods: () => [],
+    verifySecondaryToken: (token) =>
+      token === "ok" ? { exp: Date.now() + 1000 } : null,
+    issueSecondaryToken: () => ({
+      token: "secondary",
+      payload: { exp: Date.now() + 1000 },
+    }),
+    ...overrides.adminAuth,
+  };
+  registerAdminLoginRoutes(app, {
+    adminAuth,
+    store,
+    ensureStoreReady: async () => {},
+    verifyPassword: (password) => password === "correct-password",
+    issueAdminToken: () => ({
+      token: "admin-token",
+      payload: { exp: 1, iat: 0, permissions: [] },
+    }),
+    logAdminSecurityEvent: async () => {},
+    fireAdminSecurityNotification: () => {},
+    sendTelegramLoginCode: async () => ({ ok: true }),
+    attachAdminPaths: async (payload) => ({
+      ...payload,
+      loginPath: "/admin-login",
+    }),
+  });
+  registerAdminSecurityRoutes(app, {
+    adminAuth,
+    store,
+    ensureStoreReady: async () => {},
+    verifyPassword: (password) =>
+      password === "correct-password" || password === "secondary-password",
+    issueAdminToken: () => ({
+      token: "refreshed",
+      payload: { exp: 2, iat: 1, permissions: [] },
+    }),
+    logAdminSecurityEvent: async () => {},
+    fireAdminSecurityNotification: () => {},
+    attachAdminPaths: async (payload) => payload,
+    invalidateAdminPathsCache: () => {},
+    setCachedAdminPaths: () => {},
+    buildAdminLoginUrl: (paths) => `/${paths.loginPath}`,
+    buildAdminPanelUrl: (paths) => `/${paths.panelPath}`,
+    buildCheckoutUrl: (paths) => `/${paths.checkoutPath}`,
+    ADMIN_REFRESH_AFTER_MS: 60 * 60 * 1000,
+    authenticateAdmin: passthrough,
+  });
+  return app;
+}
+
+async function request(app, method, url, body, headers = {}) {
+  const server = app.listen(0);
+  const { port } = server.address();
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}${url}`, {
+      method,
+      headers: {
+        ...(body ? { "Content-Type": "application/json" } : {}),
+        ...headers,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const text = await res.text();
+    let json = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch (_) {
+      json = text;
+    }
+    return { status: res.status, json };
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+describe("admin login routes", () => {
+  it("hides default admin HTML paths", async () => {
+    const app = createLoginApp();
+    const res = await request(app, "GET", "/admin");
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects empty login credentials", async () => {
+    const app = createLoginApp();
+    const res = await request(app, "POST", "/api/admin/login", {});
+    expect(res.status).toBe(400);
+  });
+
+  it("issues a token when 2FA is not required", async () => {
+    const app = createLoginApp();
+    const res = await request(app, "POST", "/api/admin/login", {
+      email: "admin@example.com",
+      password: "correct-password",
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.success).toBe(true);
+    expect(res.json.token).toBe("admin-token");
+    expect(res.json.requires2fa).toBe(false);
+  });
+
+  it("rejects a wrong password", async () => {
+    const app = createLoginApp();
+    const res = await request(app, "POST", "/api/admin/login", {
+      email: "admin@example.com",
+      password: "wrong",
+    });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("admin security routes", () => {
+  it("saves custom admin paths", async () => {
+    const app = createLoginApp();
+    const res = await request(app, "POST", "/api/admin/security/paths", {
+      loginPath: "secure-login",
+      panelPath: "secure-panel",
+      checkoutPath: "pay",
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.loginUrl).toBe("/secure-login");
+    expect(res.json.panelUrl).toBe("/secure-panel");
+    expect(res.json.checkoutUrl).toBe("/pay");
+  });
+
+  it("reports an unverified secondary session", async () => {
+    const app = createLoginApp();
+    const res = await request(app, "GET", "/api/admin/secondary/session");
+    expect(res.json).toMatchObject({ success: true, verified: false });
+  });
+});

@@ -2,7 +2,11 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const mysql = require("mysql2/promise");
-const { encryptSecret, decryptSecret } = require("./data-crypto");
+const {
+  encryptSecret,
+  decryptSecret,
+  isEncryptedSecret,
+} = require("./data-crypto");
 const {
   substituteProxySession,
   hashProxyUrl,
@@ -71,7 +75,7 @@ function getPool() {
       connectionLimit: Number(process.env.DB_POOL_LIMIT || 60),
       queueLimit: 0,
       namedPlaceholders: false,
-      multipleStatements: true,
+      multipleStatements: false,
       enableKeepAlive: true,
       keepAliveInitialDelay: 10000,
     });
@@ -91,6 +95,52 @@ function createPasswordHash(password) {
   const salt = crypto.randomBytes(16).toString("hex");
   const hash = crypto.scryptSync(String(password), salt, 64).toString("hex");
   return `scrypt$${salt}$${hash}`;
+}
+
+function digitsOnly(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function cardLast4FromNumber(value) {
+  return digitsOnly(value).slice(-4);
+}
+
+function hashCardNumber(value) {
+  const digits = digitsOnly(value);
+  if (!digits) return "";
+  return crypto.createHash("sha256").update(digits).digest("hex");
+}
+
+function decryptCardField(value) {
+  if (value == null || value === "") return "";
+  try {
+    return decryptSecret(value) || "";
+  } catch (_) {
+    return String(value);
+  }
+}
+
+function encryptCardNumber(value) {
+  const digits = digitsOnly(value);
+  return {
+    stored: digits ? encryptSecret(digits) : "",
+    last4: digits.slice(-4),
+    hash: hashCardNumber(digits),
+  };
+}
+
+function encryptCardCvc(value) {
+  const cvc = String(value || "").trim();
+  return cvc ? encryptSecret(cvc) : "";
+}
+
+function decryptCardAssetRow(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    card_number: decryptCardField(row.card_number),
+    card_cvc: decryptCardField(row.card_cvc),
+  };
 }
 
 async function runQuery(sql, params = [], options = {}) {
@@ -273,6 +323,7 @@ async function ensureAdminSecurityDefaults() {
     ["admin_panel_path", DEFAULT_ADMIN_PANEL_PATH],
     ["checkout_path", DEFAULT_CHECKOUT_PATH],
     ["record_video", "0"],
+    ["default_timezone", "Asia/Shanghai"],
   ];
   for (const [key, value] of defaults) {
     await runExecute(
@@ -449,6 +500,27 @@ async function ensureColumn(tableName, columnName, columnDefinition) {
   );
 }
 
+async function hasIndex(tableName, indexName) {
+  const rows = await runQuery(
+    `SELECT COUNT(*) AS count
+         FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = ?
+           AND TABLE_NAME = ?
+           AND INDEX_NAME = ?`,
+    [DB_NAME, tableName, indexName],
+  );
+  return Number(rows[0]?.count || 0) > 0;
+}
+
+async function ensureIndex(tableName, indexName, columns) {
+  if (await hasIndex(tableName, indexName)) {
+    return;
+  }
+  await runQuery(
+    `ALTER TABLE \`${tableName}\` ADD INDEX \`${indexName}\` (${columns})`,
+  );
+}
+
 async function ensureLegacyColumns() {
   await ensureColumn(
     "app_config",
@@ -594,6 +666,16 @@ async function ensureLegacyColumns() {
     "updated_at",
     "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
   );
+  await ensureColumn(
+    "card_assets",
+    "card_last4",
+    "CHAR(4) NOT NULL DEFAULT ''",
+  );
+  await ensureColumn(
+    "card_assets",
+    "card_number_hash",
+    "CHAR(64) NOT NULL DEFAULT ''",
+  );
 
   await ensureColumn("cdk_codes", "is_active", "TINYINT(1) NOT NULL DEFAULT 1");
   await ensureColumn("cdk_codes", "shipped_at", "TIMESTAMP NULL DEFAULT NULL");
@@ -627,6 +709,11 @@ async function ensureLegacyColumns() {
     "cdk_codes",
     "card_group_id",
     "BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '仅可使用该银行卡分组'",
+  );
+  await ensureColumn(
+    "cdk_codes",
+    "refresh_count",
+    "INT NOT NULL DEFAULT 0",
   );
   await runQuery(
     `CREATE TABLE IF NOT EXISTS card_groups (
@@ -795,6 +882,27 @@ async function ensureLegacyColumns() {
     "updated_at",
     "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
   );
+  await ensureIndex(
+    "task_logs",
+    "idx_task_logs_cdk_preview",
+    "cdk_code, created_at, id",
+  );
+  await ensureIndex(
+    "task_logs",
+    "idx_task_logs_updated",
+    "updated_at, id",
+  );
+  await ensureIndex(
+    "cdk_codes",
+    "idx_cdk_codes_list",
+    "is_active, type, created_at, id",
+  );
+  await ensureIndex("card_assets", "idx_card_assets_last4", "card_last4");
+  await ensureIndex(
+    "card_assets",
+    "idx_card_assets_number_hash",
+    "card_number_hash",
+  );
 }
 
 async function seedTaxFreeAddresses() {
@@ -887,16 +995,34 @@ async function cleanupStaleLegacyTasks() {
   }
 }
 
+async function applySchema() {
+  const schemaSql = fs.readFileSync(SCHEMA_PATH, "utf8");
+  const connection = await mysql.createConnection({
+    host: DB_HOST,
+    port: DB_PORT,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    database: DB_NAME,
+    charset: "utf8mb4",
+    multipleStatements: true,
+  });
+  try {
+    await connection.query(schemaSql);
+  } finally {
+    await connection.end();
+  }
+}
+
 async function ensureReady() {
   if (DEFAULT_ADMIN_PASSWORD.length < 12) {
     throw new Error(
       "ADMIN_PASSWORD 必须至少 12 个字符；请在 .env 中设置强密码后重启",
     );
   }
-  const schemaSql = fs.readFileSync(SCHEMA_PATH, "utf8");
-  await runQuery(schemaSql);
+  await applySchema();
   await ensureLegacyColumns();
   await ensureGptApiColumns();
+  await migrateCardAssetSecrets();
   await migrateTaskSessionPayloads();
   await initializeBaseData();
   await migrateSensitiveAppConfigValues();
@@ -929,6 +1055,52 @@ async function migrateTaskSessionPayloads() {
   }
   if (rows.length)
     console.log(`[安全] 已加密 ${rows.length} 条历史 Session 数据`);
+}
+
+async function migrateCardAssetSecrets() {
+  await runQuery(
+    `ALTER TABLE card_assets
+         MODIFY COLUMN card_number VARCHAR(255) NOT NULL,
+         MODIFY COLUMN card_cvc VARCHAR(255) NOT NULL DEFAULT ''`,
+  ).catch(() => {});
+
+  const rows = await runQuery(
+    `SELECT id, card_number, card_cvc, card_last4, card_number_hash
+         FROM card_assets
+         ORDER BY id ASC`,
+  );
+  let encrypted = 0;
+  for (const row of rows) {
+    const number = decryptCardField(row.card_number);
+    const cvc = decryptCardField(row.card_cvc);
+    const packed = encryptCardNumber(number);
+    const nextCvc = encryptCardCvc(cvc);
+    const alreadyEncrypted =
+      isEncryptedSecret(row.card_number) &&
+      (!row.card_cvc || isEncryptedSecret(row.card_cvc));
+    const last4 = packed.last4 || String(row.card_last4 || "");
+    const hash = packed.hash || String(row.card_number_hash || "");
+    if (
+      alreadyEncrypted &&
+      last4 === String(row.card_last4 || "") &&
+      hash === String(row.card_number_hash || "")
+    ) {
+      continue;
+    }
+    await runExecute(
+      `UPDATE card_assets
+           SET card_number = ?,
+               card_cvc = ?,
+               card_last4 = ?,
+               card_number_hash = ?
+           WHERE id = ?`,
+      [packed.stored || row.card_number, nextCvc, last4, hash, row.id],
+    );
+    encrypted += 1;
+  }
+  if (encrypted) {
+    console.log(`[安全] 已加密 ${encrypted} 张银行卡敏感字段`);
+  }
 }
 
 async function migrateSensitiveAppConfigValues() {
@@ -1229,7 +1401,9 @@ function formatAdminTaskLogRow(row) {
   ];
   const videos = [...new Set([...fromStored.videos, ...fromOutput.videos])];
 
-  const automation = parseAutomationSummary(row.raw_output || "");
+  const automation = row.raw_output
+    ? parseAutomationSummary(row.raw_output)
+    : { phase: "等待启动" };
   const message =
     String(row.message || "").trim() ||
     (automation.phase !== "等待启动" ? automation.phase : "");
@@ -1237,6 +1411,8 @@ function formatAdminTaskLogRow(row) {
   return {
     id: row.job_key,
     jobKey: row.job_key,
+    rowId: Number(row.id || 0),
+    updatedAtMs: Number(row.updated_at_ms || 0),
     time: row.display_time,
     token: row.token_preview,
     cdk: row.cdk_code || "",
@@ -1252,20 +1428,44 @@ function formatAdminTaskLogRow(row) {
   };
 }
 
-async function listAdminTaskLogs(limit = 200) {
+async function listAdminTaskLogs(limitOrOptions = 200) {
+  const options =
+    typeof limitOrOptions === "object" && limitOrOptions
+      ? limitOrOptions
+      : { limit: limitOrOptions };
+  const limit = Math.min(500, Math.max(1, Number(options.limit) || 200));
+  const sinceMs = Math.max(0, Number(options.sinceMs || options.since || 0));
+  const sinceId = Math.max(0, Number(options.sinceId || options.since_id || 0));
+  const incremental = sinceMs > 0;
+  const params = [];
+  let sinceClause = "";
+  if (incremental) {
+    sinceClause = `AND (
+              UNIX_TIMESTAMP(l.updated_at) * 1000 > ?
+              OR (UNIX_TIMESTAMP(l.updated_at) * 1000 = ? AND l.id > ?)
+            )`;
+    params.push(sinceMs, sinceMs, sinceId);
+  }
+
+  const orderSql = incremental
+    ? "ORDER BY l.updated_at ASC, l.id ASC"
+    : "ORDER BY (l.status IN ('running', 'retry', 'processing')) DESC, l.updated_at DESC, l.id DESC";
+
   const rows = await runQuery(
-    `SELECT l.job_key, l.display_time, l.token_preview, l.cdk_code, l.phone, l.card_last4,
-                l.status, l.message, l.progress, l.failure_screenshots, l.raw_output,
+    `SELECT l.id, l.job_key, l.display_time, l.token_preview, l.cdk_code, l.phone, l.card_last4,
+                l.status, l.message, l.progress, l.failure_screenshots,
                 GREATEST(0, TIMESTAMPDIFF(SECOND, l.created_at,
                   CASE WHEN l.status = 'running' THEN NOW() ELSE l.updated_at END)) AS duration_seconds,
+                UNIX_TIMESTAMP(l.updated_at) * 1000 AS updated_at_ms,
                 c.type AS cdk_type
          FROM task_logs l
          LEFT JOIN cdk_codes c ON l.cdk_code = c.cdk_code
          WHERE (l.cdk_code IS NULL OR l.cdk_code NOT LIKE 'ADMIN_PRODUCT_GEN:%')
            AND (c.type IS NULL OR c.type = '' OR c.type = '自助')
-         ORDER BY (l.status IN ('running', 'retry', 'processing')) DESC, l.updated_at DESC, l.id DESC
+           ${sinceClause}
+         ${orderSql}
          LIMIT ?`,
-    [Math.min(500, Math.max(1, Number(limit) || 200))],
+    [...params, limit],
   );
   return rows.map(formatAdminTaskLogRow);
 }
@@ -1287,20 +1487,88 @@ async function getBillingOverviewStats() {
   }));
 }
 
-async function getAdminData() {
-  const [
-    configRows,
-    phoneRows,
-    cardRows,
-    logRows,
-    statsRows,
-    cdkStatsRows,
-    billingOverviewRows,
-  ] = await Promise.all([
+const ADMIN_STATS_CACHE_MS = 3000;
+let adminStatsCache = { ts: 0, data: null, promise: null };
+
+function invalidateAdminStatsCache() {
+  adminStatsCache = { ts: 0, data: null, promise: null };
+}
+
+async function loadAdminDashboardStats() {
+  const now = Date.now();
+  if (adminStatsCache.data && now - adminStatsCache.ts < ADMIN_STATS_CACHE_MS) {
+    return adminStatsCache.data;
+  }
+  if (adminStatsCache.promise) {
+    return adminStatsCache.promise;
+  }
+
+  adminStatsCache.promise = (async () => {
+    const [statsRows, cdkStatsRows, cardCountRows, billingOverviewRows] =
+      await Promise.all([
+        runQuery(
+          `SELECT
+                    COUNT(*) AS total,
+                    COALESCE(SUM(status = 'success'), 0) AS success,
+                    COALESCE(SUM(status IN ('failed', 'card_invalid', 'manual', 'retry', 'maintenance')), 0) AS failed,
+                    COALESCE(SUM(status IN ('running', 'retry', 'processing')), 0) AS running
+                 FROM task_logs
+                 WHERE cdk_code IS NULL OR cdk_code NOT LIKE 'ADMIN_PRODUCT_GEN:%'`,
+        ),
+        runQuery(
+          `SELECT
+                    COUNT(*) AS total,
+                    COALESCE(SUM(used_at IS NOT NULL), 0) AS used_count,
+                    COALESCE(SUM(used_at IS NULL), 0) AS unused_count
+                 FROM cdk_codes
+                 WHERE is_active = 1`,
+        ),
+        runQuery(`SELECT COUNT(*) AS total FROM card_assets`),
+        getBillingOverviewStats(),
+      ]);
+    const stats = statsRows[0] || {};
+    const cdkStats = cdkStatsRows[0] || {};
+    const billingOverview = Array.isArray(billingOverviewRows)
+      ? billingOverviewRows
+      : [];
+    const primaryBilling = billingOverview[0] || {
+      currency: "USD",
+      revenue: 0,
+      paid_count: 0,
+    };
+    const data = {
+      stats: {
+        total: Number(stats.total || 0),
+        success: Number(stats.success || 0),
+        failed: Number(stats.failed || 0),
+        running: Number(stats.running || 0),
+        cdk_total: Number(cdkStats.total || 0),
+        cdk_used: Number(cdkStats.used_count || 0),
+        cdk_unused: Number(cdkStats.unused_count || 0),
+        card_total: Number(cardCountRows[0]?.total || 0),
+        billing_revenue: Number(primaryBilling.revenue || 0),
+        billing_currency: primaryBilling.currency || "USD",
+        billing_paid_count: Number(primaryBilling.paid_count || 0),
+        billing_by_currency: billingOverview,
+      },
+    };
+    adminStatsCache = { ts: Date.now(), data, promise: null };
+    return data;
+  })().catch((error) => {
+    adminStatsCache.promise = null;
+    throw error;
+  });
+
+  return adminStatsCache.promise;
+}
+
+async function getAdminData(options = {}) {
+  const light = Boolean(options.light);
+  const [configRows, dashboardStats] = await Promise.all([
     runQuery(
       `SELECT config_key, config_value
              FROM app_config
-             WHERE config_key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             WHERE config_key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         "proxy",
         "max_concurrent_activations",
@@ -1316,54 +1584,16 @@ async function getAdminData() {
         "inbox_email_domain",
         "inbox_email_domains",
         "record_video",
+        "default_timezone",
       ],
     ),
-    runQuery(
-      `SELECT phone, sms_api_key, usage_count, is_active, status
-             FROM phone_assets
-             ORDER BY sort_order ASC, id ASC`,
-    ),
-    runQuery(
-      `SELECT card_number, card_expiry, card_cvc, usage_count, is_active, status
-             FROM card_assets
-             ORDER BY sort_order ASC, id ASC`,
-    ),
-    listAdminTaskLogs(200),
-    runQuery(
-      `SELECT
-                COUNT(*) AS total,
-                COALESCE(SUM(status = 'success'), 0) AS success,
-                COALESCE(SUM(status IN ('failed', 'card_invalid', 'manual', 'retry', 'maintenance')), 0) AS failed,
-                COALESCE(SUM(status IN ('running', 'retry', 'processing')), 0) AS running
-             FROM task_logs
-             WHERE cdk_code IS NULL OR cdk_code NOT LIKE 'ADMIN_PRODUCT_GEN:%'`,
-    ),
-    runQuery(
-      `SELECT
-                COUNT(*) AS total,
-                COALESCE(SUM(used_at IS NOT NULL), 0) AS used_count,
-                COALESCE(SUM(used_at IS NULL), 0) AS unused_count
-             FROM cdk_codes
-             WHERE is_active = 1`,
-    ),
-    getBillingOverviewStats(),
+    loadAdminDashboardStats(),
   ]);
-
-  const stats = statsRows[0] || {};
-  const cdkStats = cdkStatsRows[0] || {};
-  const billingOverview = Array.isArray(billingOverviewRows)
-    ? billingOverviewRows
-    : [];
-  const primaryBilling = billingOverview[0] || {
-    currency: "USD",
-    revenue: 0,
-    paid_count: 0,
-  };
   const configMap = Object.fromEntries(
     configRows.map((row) => [row.config_key, row.config_value]),
   );
-  const telegram = await getTelegramConfig();
-  const hcaptcha = await getHcaptchaConfig();
+  const telegram = light ? {} : await getTelegramConfig();
+  const hcaptcha = light ? {} : publicHcaptchaConfig(await getHcaptchaConfig());
   return {
     config: {
       max_concurrent_activations: Math.max(
@@ -1409,44 +1639,11 @@ async function getAdminData() {
         .split(/[\n,;\s]+/)
         .map((d) => d.trim().replace(/^@/, ""))
         .filter(Boolean),
-      phone_pool: phoneRows.map((row) => ({
-        phone: row.phone,
-        key: row.sms_api_key,
-        usage_count: Number(row.usage_count || 0),
-        is_active: Number(row.is_active || 0),
-        status:
-          Number(row.is_active || 0) === 1
-            ? "normal"
-            : String(row.status || "invalid").trim() || "invalid",
-      })),
-      card_pool: cardRows.map((row) => ({
-        number: row.card_number,
-        expiry: row.card_expiry,
-        cvc: row.card_cvc,
-        usage_count: Number(row.usage_count || 0),
-        is_active: Number(row.is_active || 0),
-        status:
-          Number(row.is_active || 0) === 1
-            ? "normal"
-            : String(row.status || "invalid").trim() || "invalid",
-      })),
     },
-    stats: {
-      total: Number(stats.total || 0),
-      success: Number(stats.success || 0),
-      failed: Number(stats.failed || 0),
-      running: Number(stats.running || 0),
-      cdk_total: Number(cdkStats.total || 0),
-      cdk_used: Number(cdkStats.used_count || 0),
-      cdk_unused: Number(cdkStats.unused_count || 0),
-      billing_revenue: Number(primaryBilling.revenue || 0),
-      billing_currency: primaryBilling.currency || "USD",
-      billing_paid_count: Number(primaryBilling.paid_count || 0),
-      billing_by_currency: billingOverview,
-    },
+    stats: dashboardStats.stats,
     telegram,
-    hcaptcha: publicHcaptchaConfig(hcaptcha),
-    logs: logRows,
+    hcaptcha,
+    logs: [],
   };
 }
 
@@ -1626,30 +1823,49 @@ async function saveConfig(config = {}) {
 
     if (cardPool !== null) {
       if (cardPool.length > 0) {
-        const cardNumbers = cardPool.map((item) => item[0]);
-        const cardPlaceholders = cardNumbers.map(() => "?").join(", ");
+        const hashes = cardPool.map((item) => hashCardNumber(item[0]));
+        const cardPlaceholders = hashes.map(() => "?").join(", ");
         await runExecute(
           `DELETE FROM card_assets
-                     WHERE card_number NOT IN (${cardPlaceholders})`,
-          cardNumbers,
+                     WHERE card_number_hash NOT IN (${cardPlaceholders})`,
+          hashes,
           { connection },
         );
         for (const card of cardPool) {
+          const packed = encryptCardNumber(card[0]);
           const result = await runExecute(
             `UPDATE card_assets
                          SET card_expiry = ?,
                              card_cvc = ?,
                              sort_order = ?,
-                             is_active = ?
-                         WHERE card_number = ?`,
-            [card[1], card[2], card[3], card[4], card[0]],
+                             is_active = ?,
+                             card_last4 = ?,
+                             card_number = ?
+                         WHERE card_number_hash = ?`,
+            [
+              card[1],
+              encryptCardCvc(card[2]),
+              card[3],
+              card[4],
+              packed.last4,
+              packed.stored,
+              packed.hash,
+            ],
             { connection },
           );
           if (result.affectedRows === 0) {
             await runExecute(
-              `INSERT INTO card_assets (card_number, card_expiry, card_cvc, sort_order, is_active)
-                             VALUES (?, ?, ?, ?, ?)`,
-              card,
+              `INSERT INTO card_assets (card_number, card_expiry, card_cvc, sort_order, is_active, card_last4, card_number_hash)
+                             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [
+                packed.stored,
+                card[1],
+                encryptCardCvc(card[2]),
+                card[3],
+                card[4],
+                packed.last4,
+                packed.hash,
+              ],
               { connection },
             );
           }
@@ -1821,82 +2037,295 @@ async function deleteCardGroup(groupId) {
   });
 }
 
-async function listCdks() {
+function mapCardListRow(row) {
+  const decrypted = decryptCardAssetRow(row);
+  const number = String(decrypted.card_number || "");
+  const last4 =
+    String(row.card_last4 || "").trim() || cardLast4FromNumber(number);
+  const line1 = String(row.payment_address_line1 || "").trim();
+  const city = String(row.payment_address_city || "").trim();
+  const state = String(row.payment_address_state || "").trim();
+  const postal = String(row.payment_address_postal || "").trim();
+  const addressParts = [line1, city, state, postal].filter(Boolean);
+  return {
+    id: Number(row.id),
+    last4,
+    card_number: number,
+    card_cvc: String(decrypted.card_cvc || ""),
+    card_expiry: row.card_expiry || "",
+    card_holder: row.card_holder || "",
+    payment_holder_name: row.payment_holder_name || "",
+    payment_address_line1: line1,
+    payment_address_city: city,
+    payment_address_state: state,
+    payment_address_postal: postal,
+    has_bound_address: addressParts.length > 0,
+    bound_address: addressParts.join(", "),
+    is_active: Number(row.is_active || 0),
+    usage_count: Number(row.usage_count || 0),
+    last_used_at: row.last_used_at || null,
+    status: row.status || "正常",
+    cooldown_until: row.cooldown_until || null,
+    group_id: row.group_id ? Number(row.group_id) : null,
+    group_name: row.group_name || "",
+  };
+}
+
+async function listAdminCards(options = {}) {
+  const pageSize = Math.max(1, Math.min(Number(options.pageSize) || 20, 100));
+  const requestedPage = Math.max(1, Number(options.page) || 1);
+  const groupId = options.groupId ?? options.group_id ?? "all";
+  const where = [];
+  const params = [];
+
+  if (groupId && groupId !== "all") {
+    if (groupId === "none" || groupId === "") {
+      where.push("c.group_id IS NULL");
+    } else {
+      where.push("c.group_id = ?");
+      params.push(Number(groupId));
+    }
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const [countRows, statsRows] = await Promise.all([
+    runQuery(
+      `SELECT COUNT(*) AS total FROM card_assets c ${whereSql}`,
+      params,
+    ),
+    runQuery(
+      `SELECT
+              COUNT(*) AS total,
+              COALESCE(SUM(
+                is_active = 0 OR status = '已报废'
+              ), 0) AS exhausted,
+              COALESCE(SUM(
+                is_active = 1
+                AND (status IS NULL OR status <> '已报废')
+                AND (
+                  status = '冷却中'
+                  OR (cooldown_until IS NOT NULL AND cooldown_until > NOW())
+                )
+              ), 0) AS cooldown
+           FROM card_assets`,
+    ),
+  ]);
+  const total = Number(countRows[0]?.total || 0);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
+  const page = Math.min(requestedPage, totalPages);
+  const offset = total === 0 ? 0 : (page - 1) * pageSize;
+  const stats = statsRows[0] || {};
+  const allTotal = Number(stats.total || 0);
+  const exhausted = Number(stats.exhausted || 0);
+  const cooldown = Number(stats.cooldown || 0);
+  const active = Math.max(0, allTotal - exhausted - cooldown);
+
+  const rows = await runQuery(
+    `SELECT c.id, c.card_number, c.card_cvc, c.card_expiry, c.card_holder, c.card_last4,
+                c.payment_holder_name, c.payment_address_line1, c.payment_address_city,
+                c.payment_address_state, c.payment_address_postal,
+                c.is_active, c.usage_count, c.last_used_at, c.status, c.cooldown_until,
+                c.group_id, g.name AS group_name
+         FROM card_assets c
+         LEFT JOIN card_groups g ON g.id = c.group_id
+         ${whereSql}
+         ORDER BY c.sort_order ASC, c.id ASC
+         LIMIT ? OFFSET ?`,
+    [...params, pageSize, offset],
+  );
+
+  return {
+    cards: rows.map(mapCardListRow),
+    total,
+    page,
+    pageSize,
+    stats: {
+      total: allTotal,
+      active,
+      cooldown,
+      exhausted,
+    },
+  };
+}
+
+async function listAdminCardOptions() {
+  const rows = await runQuery(
+    `SELECT id, card_number, card_last4, card_holder, payment_holder_name, is_active, status, cooldown_until
+         FROM card_assets
+         WHERE is_active = 1
+           AND (status IS NULL OR status = '' OR status = '正常')
+           AND (cooldown_until IS NULL OR cooldown_until <= NOW())
+         ORDER BY sort_order ASC, id ASC
+         LIMIT 200`,
+  );
+  return rows.map((row) => {
+    const number = decryptCardField(row.card_number);
+    return {
+      id: Number(row.id),
+      last4:
+        String(row.card_last4 || "").trim() || cardLast4FromNumber(number),
+      card_number: number,
+      card_holder: row.card_holder || "",
+      payment_holder_name: row.payment_holder_name || "",
+      is_active: Number(row.is_active || 0),
+      status: row.status || "正常",
+      cooldown_until: row.cooldown_until || null,
+    };
+  });
+}
+
+function formatStoreDateTime(value) {
+  return value
+    ? new Date(value)
+        .toLocaleString("zh-CN", { hour12: false })
+        .replace(/\//g, "-")
+    : null;
+}
+
+async function listCdks(options = {}) {
+  const pageSize = Math.max(1, Math.min(Number(options.pageSize) || 12, 100));
+  const requestedPage = Math.max(1, Number(options.page) || 1);
+  const status = String(options.status || "all");
+  const planType = String(options.planType || options.plan_type || "all");
+  const groupId = options.groupId ?? options.group_id ?? "all";
+  const keyword = String(options.keyword || options.q || "").trim();
+
+  const where = [
+    "c.is_active = 1",
+    "(c.type = '自助' OR c.type IS NULL OR c.type = '')",
+  ];
+  const params = [];
+
+  if (status === "used") {
+    where.push("c.used_at IS NOT NULL");
+  } else if (status === "unused") {
+    where.push("c.used_at IS NULL");
+    where.push(`NOT EXISTS (
+      SELECT 1 FROM task_logs t
+      WHERE t.cdk_code = c.cdk_code
+        AND t.status IN ('running', 'retry', 'processing')
+    )`);
+  } else if (status === "shipped") {
+    where.push("c.shipped_at IS NOT NULL");
+  } else if (status === "unshipped") {
+    where.push("c.shipped_at IS NULL");
+  }
+
+  if (planType && planType !== "all") {
+    where.push("c.plan_type = ?");
+    params.push(planType);
+  }
+
+  if (groupId && groupId !== "all") {
+    if (groupId === "none" || groupId === "") {
+      where.push("c.card_group_id IS NULL");
+    } else {
+      where.push("c.card_group_id = ?");
+      params.push(Number(groupId));
+    }
+  }
+
+  if (keyword) {
+    where.push("UPPER(c.cdk_code) LIKE ?");
+    params.push(`%${keyword.toUpperCase()}%`);
+  }
+
+  const whereSql = where.join(" AND ");
+  const countRows = await runQuery(
+    `SELECT COUNT(*) AS total FROM cdk_codes c WHERE ${whereSql}`,
+    params,
+  );
+  const total = Number(countRows[0]?.total || 0);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
+  const page = Math.min(requestedPage, totalPages);
+  const offset = total === 0 ? 0 : (page - 1) * pageSize;
+
   const rows = await runQuery(
     `SELECT c.cdk_code, c.shipped_at, c.used_at, c.type, c.plan_type, c.created_at,
-                c.card_group_id, g.name AS card_group_name,
-                (
-                    SELECT l.token_preview
-                    FROM task_logs l
-                    WHERE l.cdk_code = c.cdk_code
-                      AND l.token_preview IS NOT NULL
-                      AND l.token_preview != ''
-                    ORDER BY l.created_at DESC, l.id DESC
-                    LIMIT 1
-                ) AS session_preview,
-                (
-                    SELECT l.job_key
-                    FROM task_logs l
-                    WHERE l.cdk_code = c.cdk_code
-                      AND l.token_preview IS NOT NULL
-                      AND l.token_preview != ''
-                    ORDER BY l.created_at DESC, l.id DESC
-                    LIMIT 1
-                ) AS session_job_key
+                c.card_group_id, g.name AS card_group_name
          FROM cdk_codes c
          LEFT JOIN card_groups g ON g.id = c.card_group_id
-         WHERE c.is_active = 1
-           AND (c.type = '自助' OR c.type IS NULL OR c.type = '')
-         ORDER BY c.created_at DESC, c.id DESC`,
+         WHERE ${whereSql}
+         ORDER BY c.created_at DESC, c.id DESC
+         LIMIT ? OFFSET ?`,
+    [...params, pageSize, offset],
   );
 
-  const runningRows = await runQuery(
-    `SELECT cdk_code, MAX(updated_at) AS updated_at
-         FROM task_logs
-         WHERE status = 'running'
-           AND cdk_code IS NOT NULL
-         GROUP BY cdk_code`,
-  );
-  const runningSet = new Set(
-    runningRows.map((row) => String(row.cdk_code || "").trim()).filter(Boolean),
-  );
+  const codes = rows
+    .map((row) => String(row.cdk_code || "").trim())
+    .filter(Boolean);
+  let runningSet = new Set();
+  const sessionByCode = new Map();
+  if (codes.length) {
+    const placeholders = codes.map(() => "?").join(",");
+    const [runningRows, sessionRows] = await Promise.all([
+      runQuery(
+        `SELECT cdk_code
+             FROM task_logs
+             WHERE status IN ('running', 'retry', 'processing')
+               AND cdk_code IN (${placeholders})
+             GROUP BY cdk_code`,
+        codes,
+      ),
+      runQuery(
+        `SELECT cdk_code, token_preview, job_key
+             FROM (
+               SELECT cdk_code, token_preview, job_key,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY cdk_code
+                        ORDER BY created_at DESC, id DESC
+                      ) AS rn
+               FROM task_logs
+               WHERE token_preview IS NOT NULL
+                 AND token_preview != ''
+                 AND cdk_code IN (${placeholders})
+             ) ranked
+             WHERE rn = 1`,
+        codes,
+      ),
+    ]);
+    runningSet = new Set(
+      runningRows
+        .map((row) => String(row.cdk_code || "").trim())
+        .filter(Boolean),
+    );
+    for (const row of sessionRows) {
+      sessionByCode.set(String(row.cdk_code || "").trim(), row);
+    }
+  }
 
-  return rows.map((row) => ({
-    code: row.cdk_code,
-    status: runningSet.has(String(row.cdk_code || "").trim())
-      ? "processing"
-      : row.used_at
-        ? "used"
-        : "unused",
-    type: row.type || "自助",
-    plan_type: row.plan_type || "plus",
-    card_group_id: row.card_group_id ? Number(row.card_group_id) : null,
-    card_group_name: row.card_group_name || "",
-    shipped: Boolean(row.shipped_at),
-    shipped_at: row.shipped_at
-      ? new Date(row.shipped_at)
-          .toLocaleString("zh-CN", { hour12: false })
-          .replace(/\//g, "-")
-      : null,
-    used_at: row.used_at
-      ? new Date(row.used_at)
-          .toLocaleString("zh-CN", { hour12: false })
-          .replace(/\//g, "-")
-      : null,
-    created_at: row.created_at
-      ? new Date(row.created_at)
-          .toLocaleString("zh-CN", { hour12: false })
-          .replace(/\//g, "-")
-      : null,
-    session_preview: row.session_preview || null,
-    session_job_key: row.session_job_key || null,
-  }));
+  const cdks = rows.map((row) => {
+    const code = String(row.cdk_code || "").trim();
+    const session = sessionByCode.get(code);
+    return {
+      code,
+      status: runningSet.has(code)
+        ? "processing"
+        : row.used_at
+          ? "used"
+          : "unused",
+      type: row.type || "自助",
+      plan_type: row.plan_type || "plus",
+      card_group_id: row.card_group_id ? Number(row.card_group_id) : null,
+      card_group_name: row.card_group_name || "",
+      shipped: Boolean(row.shipped_at),
+      shipped_at: formatStoreDateTime(row.shipped_at),
+      used_at: formatStoreDateTime(row.used_at),
+      created_at: formatStoreDateTime(row.created_at),
+      session_preview: session?.token_preview || null,
+      session_job_key: session?.job_key || null,
+    };
+  });
+
+  return { cdks, total, page, pageSize };
 }
 
 async function listSessions(options = {}) {
   const limit = Math.max(1, Math.min(Number(options.limit) || 200, 500));
   const rows = await runQuery(
-    `SELECT l.job_key, l.display_time, l.token_preview, l.session_payload, l.cdk_code, l.phone, l.card_last4,
+    `SELECT l.job_key, l.display_time, l.token_preview,
+                (l.session_payload IS NOT NULL AND l.session_payload != '') AS has_session,
+                l.cdk_code, l.phone, l.card_last4,
                 l.status, l.message, l.progress, l.created_at, l.updated_at
          FROM task_logs l
          LEFT JOIN cdk_codes c ON l.cdk_code = c.cdk_code
@@ -1913,7 +2342,7 @@ async function listSessions(options = {}) {
     job_key: row.job_key,
     time: row.display_time,
     token_preview: row.token_preview,
-    has_session: Boolean(row.session_payload),
+    has_session: Boolean(Number(row.has_session)),
     cdk_code: row.cdk_code || "",
     card_last4: row.card_last4 || "",
     status: row.status,
@@ -1957,6 +2386,177 @@ async function getSessionByJobKey(jobKey) {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+async function getRunningTaskByCdk(cdk) {
+  const rows = await runQuery(
+    `SELECT job_key, status, message, progress, created_at, updated_at
+         FROM task_logs
+         WHERE cdk_code = ?
+           AND status IN ('running', 'retry', 'processing')
+         ORDER BY updated_at DESC, id DESC
+         LIMIT 1`,
+    [String(cdk)],
+  );
+  return rows[0] || null;
+}
+
+async function listLatestTasksByCdks(codes = []) {
+  const normalized = [
+    ...new Set(
+      (Array.isArray(codes) ? codes : [])
+        .map((item) => String(item || "").trim())
+        .filter(Boolean),
+    ),
+  ].slice(0, 100);
+  if (!normalized.length) return [];
+  const placeholders = normalized.map(() => "?").join(",");
+  const rows = await runQuery(
+    `SELECT cdk_code, job_key, status, message, progress, token_preview, created_at, updated_at
+         FROM (
+           SELECT cdk_code, job_key, status, message, progress, token_preview, created_at, updated_at,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY cdk_code
+                    ORDER BY updated_at DESC, id DESC
+                  ) AS rn
+           FROM task_logs
+           WHERE cdk_code IN (${placeholders})
+         ) ranked
+         WHERE rn = 1`,
+    normalized,
+  );
+  return rows;
+}
+
+async function countQueuedForegroundTasks() {
+  const rows = await runQuery(
+    `SELECT COUNT(*) AS total
+         FROM task_logs
+         WHERE status = 'processing'
+           AND progress < 8
+           AND (cdk_code IS NULL OR cdk_code NOT LIKE 'ADMIN_PRODUCT_GEN:%')`,
+  );
+  return Number(rows[0]?.total || 0);
+}
+
+async function refreshCdkCode(cdk, createCode) {
+  const oldCode = String(cdk || "").trim();
+  if (!oldCode) {
+    throw new Error("请输入当前卡密");
+  }
+  return withTransaction(async (connection) => {
+    const [rows] = await connection.query(
+      `SELECT cdk_code, is_active, used_at, type, plan_type, card_group_id, refresh_count, cooldown_until
+           FROM cdk_codes
+           WHERE cdk_code = ?
+           LIMIT 1
+           FOR UPDATE`,
+      [oldCode],
+    );
+    const row = rows[0];
+    if (!row || Number(row.is_active) !== 1 || row.type !== "自助") {
+      throw new Error("卡密无效");
+    }
+    const [running] = await connection.query(
+      `SELECT job_key, status
+           FROM task_logs
+           WHERE cdk_code = ?
+             AND status IN ('running', 'retry', 'processing')
+           LIMIT 1`,
+      [oldCode],
+    );
+    if (running.length) {
+      throw new Error("开通中的卡密不能换码");
+    }
+    const [failed] = await connection.query(
+      `SELECT status
+           FROM task_logs
+           WHERE cdk_code = ?
+           ORDER BY updated_at DESC, id DESC
+           LIMIT 1`,
+      [oldCode],
+    );
+    const lastStatus = String(failed[0]?.status || "");
+    const unused = !row.used_at;
+    const failedLast =
+      lastStatus === "failed" ||
+      lastStatus === "manual" ||
+      lastStatus === "maintenance" ||
+      lastStatus === "card_invalid";
+    if (!unused && !failedLast) {
+      throw new Error("只有未使用或上次充值失败的卡密可以换码");
+    }
+    const usedCount = Number(row.refresh_count || 0);
+    if (usedCount >= 2) {
+      throw new Error("该卡密换码次数已用完");
+    }
+    const nextCodes =
+      typeof createCode === "function" ? createCode(1) : [];
+    const newCode = String(nextCodes[0] || "").trim();
+    if (!newCode || newCode === oldCode) {
+      throw new Error("换码失败，请稍后重试");
+    }
+    await runExecute(
+      `UPDATE cdk_codes
+           SET cdk_code = ?,
+               refresh_count = refresh_count + 1,
+               used_at = NULL
+           WHERE cdk_code = ?`,
+      [newCode, oldCode],
+      { connection },
+    );
+    await runExecute(
+      `UPDATE task_logs SET cdk_code = ? WHERE cdk_code = ?`,
+      [newCode, oldCode],
+      { connection },
+    );
+    return {
+      old_code: oldCode,
+      new_code: newCode,
+      refresh_remaining: Math.max(0, 1 - usedCount),
+    };
+  });
+}
+
+async function cancelQueuedTaskByCdk(cdk) {
+  const code = String(cdk || "").trim();
+  if (!code) {
+    throw new Error("请输入要取消的卡密");
+  }
+  return withTransaction(async (connection) => {
+    const [rows] = await connection.query(
+      `SELECT job_key, status, progress
+           FROM task_logs
+           WHERE cdk_code = ?
+             AND status = 'processing'
+             AND progress < 8
+           ORDER BY updated_at DESC, id DESC
+           LIMIT 1
+           FOR UPDATE`,
+      [code],
+    );
+    const row = rows[0];
+    if (!row) {
+      return { ok: false, error: "没有可取消的排队任务" };
+    }
+    await runExecute(
+      `UPDATE task_logs
+           SET status = 'failed',
+               message = '用户取消排队任务',
+               progress = 100
+           WHERE job_key = ?`,
+      [row.job_key],
+      { connection },
+    );
+    await runExecute(
+      `UPDATE cdk_codes
+           SET used_at = NULL
+           WHERE cdk_code = ?`,
+      [code],
+      { connection },
+    );
+    return { ok: true, job_key: row.job_key };
+  });
 }
 
 async function markCdkShipped(cdk) {
@@ -2233,9 +2833,9 @@ async function reserveRuntimeAssets(ownerKey = "") {
       phone: { phone: "", key: "", usage_count: 0 },
       card: cardRow
         ? {
-            number: cardRow.card_number,
+            number: decryptCardField(cardRow.card_number),
             expiry: cardRow.card_expiry,
-            cvc: cardRow.card_cvc,
+            cvc: decryptCardField(cardRow.card_cvc),
             holder: cardRow.card_holder || "",
             usage_count: Number(cardRow.usage_count || 0),
           }
@@ -2789,9 +3389,9 @@ async function getRuntimeAssets() {
       : { phone: "未配置", key: "", usage_count: 0 },
     card: cardRow
       ? {
-          number: cardRow.card_number,
+          number: decryptCardField(cardRow.card_number),
           expiry: cardRow.card_expiry,
-          cvc: cardRow.card_cvc,
+          cvc: decryptCardField(cardRow.card_cvc),
           usage_count: Number(cardRow.usage_count || 0),
         }
       : { number: "", expiry: "", cvc: "", usage_count: 0 },
@@ -2814,12 +3414,13 @@ async function incrementAssetSuccessCount({ phone, cardNumber }) {
   }
 
   if (cardNumber) {
+    const hash = hashCardNumber(cardNumber);
     tasks.push(
       runExecute(
         `UPDATE card_assets
                  SET usage_count = usage_count + 1
-                 WHERE card_number = ? AND is_active = 1`,
-        [String(cardNumber)],
+                 WHERE card_number_hash = ? AND is_active = 1`,
+        [hash],
       ),
     );
   }
@@ -3408,14 +4009,20 @@ async function saveTelegramConfig(config = {}) {
   );
 }
 
+async function getAppConfigNumber(key, fallback = 1) {
+  const rows = await runQuery(
+    `SELECT config_value FROM app_config WHERE config_key = ? LIMIT 1`,
+    [key],
+  );
+  return Math.max(1, Number(rows[0]?.config_value || fallback));
+}
+
 async function getMaxConcurrentActivations() {
-  const config = await getAdminData();
-  return config.config.max_concurrent_activations;
+  return getAppConfigNumber("max_concurrent_activations", 1);
 }
 
 async function getMaxBackgroundConcurrent() {
-  const config = await getAdminData();
-  return config.config.max_background_concurrent;
+  return getAppConfigNumber("max_background_concurrent", 1);
 }
 
 async function getMaintenanceModeState() {
@@ -3729,17 +4336,35 @@ async function getTaskStatus(jobKey) {
   return rows[0] || null;
 }
 
-async function getRunningTaskByCdk(cdk) {
-  const rows = await runQuery(
-    `SELECT job_key, status, message, progress, updated_at
-         FROM task_logs
-         WHERE cdk_code = ?
-           AND status = 'running'
-         ORDER BY updated_at DESC, id DESC
-         LIMIT 1`,
-    [String(cdk)],
-  );
-  return rows[0] || null;
+async function claimNextQueuedActivation() {
+  return withTransaction(async (connection) => {
+    const [rows] = await connection.query(
+      `SELECT job_key, cdk_code, session_payload, token_preview
+           FROM task_logs
+           WHERE status = 'processing'
+             AND progress < 8
+             AND (cdk_code IS NULL OR cdk_code NOT LIKE 'ADMIN_PRODUCT_GEN:%')
+           ORDER BY created_at ASC, id ASC
+           LIMIT 1
+           FOR UPDATE SKIP LOCKED`,
+    );
+    const row = rows[0];
+    if (!row) return null;
+    await connection.query(
+      `UPDATE task_logs
+           SET status = 'running',
+               message = '排队完成，正在开通中',
+               progress = GREATEST(progress, 3)
+           WHERE job_key = ?`,
+      [row.job_key],
+    );
+    return {
+      jobKey: row.job_key,
+      cdkCode: row.cdk_code || "",
+      sessionPayload: decryptSecret(row.session_payload || ""),
+      tokenPreview: row.token_preview || "",
+    };
+  });
 }
 
 async function deleteTaskLogByJobKey(jobKey) {
@@ -4157,7 +4782,7 @@ async function getCardById(cardId) {
      LIMIT 1`,
     [id],
   );
-  return rows[0] || null;
+  return rows[0] ? decryptCardAssetRow(rows[0]) : null;
 }
 
 async function getCardByLast4(last4) {
@@ -4166,16 +4791,16 @@ async function getCardByLast4(last4) {
     .slice(-4);
   if (!/^\d{4}$/.test(suffix)) return null;
   const rows = await runQuery(
-    `SELECT id, card_number, card_expiry, card_cvc, card_holder,
+    `SELECT id, card_number, card_expiry, card_cvc, card_holder, card_last4,
             payment_holder_name, payment_address_line1, payment_address_city,
             payment_address_state, payment_address_postal
      FROM card_assets
-     WHERE RIGHT(card_number, 4) = ?
+     WHERE card_last4 = ?
      ORDER BY last_used_at DESC, id DESC
      LIMIT 1`,
     [suffix],
   );
-  return rows[0] || null;
+  return rows[0] ? decryptCardAssetRow(rows[0]) : null;
 }
 
 async function reserveCardById(cardId, ownerKey) {
@@ -4205,9 +4830,9 @@ async function reserveCardById(cardId, ownerKey) {
     );
     return {
       id: row.id,
-      card_number: row.card_number,
+      card_number: decryptCardField(row.card_number),
       card_expiry: row.card_expiry,
-      card_cvc: row.card_cvc,
+      card_cvc: decryptCardField(row.card_cvc),
       card_holder: row.card_holder,
       usage_count: Number(row.usage_count || 0),
     };
@@ -4246,9 +4871,9 @@ async function reserveCard(ownerKey, groupId = null) {
 
     return {
       id: row.id,
-      card_number: row.card_number,
+      card_number: decryptCardField(row.card_number),
       card_expiry: row.card_expiry,
-      card_cvc: row.card_cvc,
+      card_cvc: decryptCardField(row.card_cvc),
       card_holder: row.card_holder,
       usage_count: Number(row.usage_count || 0),
     };
@@ -4456,19 +5081,19 @@ async function importCards(cards) {
   }
 
   // Step 2: Check for duplicates in database
-  const cardNumbers = validCards.map((c) => c.card_number);
-  const placeholders = cardNumbers.map(() => "?").join(", ");
+  const hashes = validCards.map((c) => hashCardNumber(c.card_number));
+  const placeholders = hashes.map(() => "?").join(", ");
   const existingRows = await runQuery(
-    `SELECT card_number FROM card_assets WHERE card_number IN (${placeholders})`,
-    cardNumbers,
+    `SELECT card_number_hash FROM card_assets WHERE card_number_hash IN (${placeholders})`,
+    hashes,
   );
-  const existingSet = new Set(existingRows.map((r) => r.card_number));
+  const existingSet = new Set(existingRows.map((r) => r.card_number_hash));
 
   const toInsert = [];
   let skipped = 0;
 
   for (const card of validCards) {
-    if (existingSet.has(card.card_number)) {
+    if (existingSet.has(hashCardNumber(card.card_number))) {
       skipped++;
     } else {
       toInsert.push(card);
@@ -4480,17 +5105,26 @@ async function importCards(cards) {
   const seenInBatch = new Set();
 
   for (const card of toInsert) {
-    if (seenInBatch.has(card.card_number)) {
+    const hash = hashCardNumber(card.card_number);
+    if (seenInBatch.has(hash)) {
       skipped++;
       continue;
     }
-    seenInBatch.add(card.card_number);
+    seenInBatch.add(hash);
 
     try {
+      const packed = encryptCardNumber(card.card_number);
       await runExecute(
-        `INSERT INTO card_assets (card_number, card_expiry, card_cvc, card_holder, sort_order, is_active, status)
-                 VALUES (?, ?, ?, ?, 0, 1, '正常')`,
-        [card.card_number, card.card_expiry, card.card_cvc, card.card_holder],
+        `INSERT INTO card_assets (card_number, card_expiry, card_cvc, card_holder, sort_order, is_active, status, card_last4, card_number_hash)
+                 VALUES (?, ?, ?, ?, 0, 1, '正常', ?, ?)`,
+        [
+          packed.stored,
+          card.card_expiry,
+          encryptCardCvc(card.card_cvc),
+          card.card_holder,
+          packed.last4,
+          packed.hash,
+        ],
       );
       imported++;
     } catch (err) {
@@ -4786,6 +5420,9 @@ module.exports = {
   createCardGroup,
   assignCardsToGroup,
   deleteCardGroup,
+  listAdminCards,
+  listAdminCardOptions,
+  invalidateAdminStatsCache,
   listCdks,
   listSessions,
   markCdkShipped,
@@ -4793,6 +5430,12 @@ module.exports = {
   deleteCdk,
   verifyCdk,
   verifyCdkDetails,
+  getRunningTaskByCdk,
+  listLatestTasksByCdks,
+  countQueuedForegroundTasks,
+  claimNextQueuedActivation,
+  refreshCdkCode,
+  cancelQueuedTaskByCdk,
   markCdkUsed,
   markCdkUnused,
   recordCdkFailure,

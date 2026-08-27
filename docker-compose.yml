@@ -76,6 +76,7 @@ services:
       - ./product_files:/app/product_files
       - ./public:/app/public
       - ./server.js:/app/server.js
+      - ./cdk-codes.js:/app/cdk-codes.js
       - ./chatgpt.js:/app/chatgpt.js
       - ./index.js:/app/index.js
       - ./browser-fingerprint.js:/app/browser-fingerprint.js

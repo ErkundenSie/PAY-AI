@@ -720,6 +720,105 @@ button::after {
   font-weight: 600;
 }
 
+.jz-hero-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.jz-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+
+.jz-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #111827;
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
+.jz-hero h1 {
+  font-family: "Playfair Display", "Times New Roman", serif;
+  font-size: clamp(26px, 4vw, 34px);
+}
+
+.jz-hero-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.jz-chip {
+  border: 1px solid var(--glass-border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.queue-badge {
+  display: inline-flex;
+  margin: 8px auto 4px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #111827;
+  color: #fff;
+  font-size: 12px;
+}
+
+.jz-tabs {
+  flex-wrap: wrap;
+}
+
+.jz-tabs .tab-btn {
+  flex: 1 1 18%;
+  min-width: 88px;
+}
+
+.btn-row {
+  display: flex;
+  gap: 10px;
+}
+
+.confirm-summary,
+.lookup-results {
+  margin: 12px 0;
+}
+
+.lookup-results .query-result-card {
+  margin-bottom: 8px;
+}
+
+body.theme-dark {
+  --bg-page: #111827;
+  --surface: #1f2937;
+  --surface-soft: #111827;
+  --text-main: #f8fafc;
+  --text-secondary: #e2e8f0;
+  --text-dim: #94a3b8;
+  --glass-border: #334155;
+}
+
+body.theme-dark .queue-badge,
+body.theme-dark .jz-logo {
+  background: #0f172a;
+}
+
+body.lang-en .jz-tabs [data-tab="redeem"] { font-size: 12px; }
+}
+
 .tab-btn:disabled {
   background: transparent;
   color: var(--text-muted);
@@ -2159,6 +2258,748 @@ button.is-loading .loader {
 
 @media (max-width: 768px) {
   .plan-showcase {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============ jzplus 一比一兑换站 ============ */
+body.jzplus-theme.recharge-page {
+  display: block;
+  min-height: 100vh;
+  background-color: #f8fafc;
+  background-image:
+    linear-gradient(rgba(248, 250, 252, 0.98), rgba(240, 253, 250, 0.72) 48%, rgba(248, 250, 252, 0.98)),
+    linear-gradient(#e2e8f0 1px, transparent 1px),
+    linear-gradient(90deg, #e2e8f0 1px, transparent 1px);
+  background-size: auto, 48px 48px, 48px 48px;
+  color: #0f172a;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+body.jzplus-theme.recharge-page button {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: inherit;
+  padding: 0;
+  font-weight: inherit;
+}
+
+body.jzplus-theme.recharge-page button:hover,
+body.jzplus-theme.recharge-page button:active {
+  background: transparent;
+  transform: none;
+  box-shadow: none;
+}
+
+.exchange-container {
+  width: min(1040px, calc(100% - 32px));
+  max-width: 1040px;
+  margin: 28px auto 48px;
+  color: #101828;
+}
+
+.exchange-shell {
+  background: rgba(255, 255, 255, 0.82);
+  border: 0.8px solid rgba(219, 227, 239, 0.9);
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
+}
+
+.exchange-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.exchange-title-block {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.exchange-brand-mark {
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+  background: #1d4ed8;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.2);
+}
+
+.exchange-eyebrow {
+  display: block;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.72px;
+  text-transform: uppercase;
+}
+
+.exchange-title-copy h1 {
+  margin: 4px 0 6px;
+  font-family: "Noto Serif SC", "Songti SC", "SimSun", serif;
+  font-size: 38px;
+  font-weight: 900;
+  line-height: 1.1;
+  color: #101828;
+  letter-spacing: 0;
+}
+
+.exchange-title-copy p {
+  margin: 0;
+  color: #475467;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.exchange-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 10px 10px !important;
+  border-radius: 8px;
+  border: 0.8px solid #dbe3ef !important;
+  background: #fff !important;
+  color: #475467;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+#langToggle {
+  min-width: 46px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.btn-ghost:hover {
+  background: #f8fafc !important;
+}
+
+.theme-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.exchange-switchboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.exchange-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  border: 0.8px solid #e2e8f0;
+}
+
+.exchange-tab {
+  height: 40px;
+  padding: 8px 12px !important;
+  border-radius: 6px;
+  border: 0.8px solid transparent !important;
+  background: transparent !important;
+  color: #475467;
+  font-size: 14px;
+  font-weight: 800;
+  box-shadow: none !important;
+}
+
+.exchange-tab:hover {
+  color: #1d4ed8;
+  background: rgba(255, 255, 255, 0.55) !important;
+}
+
+.exchange-tab.active {
+  background: #fff !important;
+  color: #1d4ed8;
+  border-color: #dbeafe !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08) !important;
+}
+
+.exchange-queue-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fff;
+  border: 0.8px solid #e4eaf3;
+  color: #475467;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.exchange-queue-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.exchange-queue-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.16);
+}
+
+.exchange-queue-count {
+  color: #1d4ed8;
+  font-size: 18px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.exchange-queue-state {
+  color: #667085;
+}
+
+.exchange-section {
+  margin-top: 16px;
+}
+
+.exchange-steps {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.68);
+  border: 0.8px solid rgba(219, 227, 239, 0.9);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.exchange-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #98a2b3;
+  white-space: nowrap;
+}
+
+.exchange-step-number {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e4eaf3;
+  color: #667085;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.exchange-step.active .exchange-step-number,
+.exchange-step.done .exchange-step-number {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.exchange-step.active .exchange-step-label,
+.exchange-step.done .exchange-step-label {
+  color: #101828;
+  font-weight: 800;
+}
+
+.exchange-step-label {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.exchange-step-line {
+  flex: 1;
+  height: 2px;
+  background: #e5eaf3;
+  border-radius: 999px;
+}
+
+.exchange-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 0.8px solid rgba(219, 227, 239, 0.95);
+  border-radius: 8px;
+  padding: 30px;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
+}
+
+.exchange-form-group {
+  margin-bottom: 20px;
+}
+
+.exchange-form-group label {
+  display: block;
+  margin-bottom: 8px;
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.exchange-input {
+  width: 100%;
+  padding: 13px 14px !important;
+  border: 0.8px solid #cfd8e7 !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+  color: #101828 !important;
+  font-size: 15px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.exchange-input.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.exchange-hint {
+  margin-top: 8px;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.exchange-hint a {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.exchange-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.exchange-buttons.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.exchange-btn {
+  width: 100%;
+  min-height: 50px;
+  padding: 12px 18px !important;
+  border-radius: 8px !important;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.exchange-btn.primary {
+  background: #1d4ed8 !important;
+  border: 0.8px solid #1d4ed8 !important;
+  color: #fff !important;
+  box-shadow: 0 14px 24px rgba(37, 99, 235, 0.22) !important;
+}
+
+.exchange-btn.primary:hover {
+  background: #1e40af !important;
+}
+
+.exchange-btn.ghost {
+  background: #fff !important;
+  border: 0.8px solid #d0d5dd !important;
+  color: #344054 !important;
+  box-shadow: none !important;
+}
+
+.exchange-valid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #ecfdf3;
+  border: 0.8px solid #abefc6;
+  color: #067647;
+  font-weight: 800;
+}
+
+.exchange-plan-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.plan-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 800;
+}
+
+body.jzplus-theme.theme-dark {
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+body.jzplus-theme.theme-dark .exchange-shell,
+body.jzplus-theme.theme-dark .exchange-card,
+body.jzplus-theme.theme-dark .exchange-steps,
+body.jzplus-theme.theme-dark .exchange-queue-bar,
+body.jzplus-theme.theme-dark .exchange-tab.active {
+  background: rgba(15, 23, 42, 0.86);
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+body.jzplus-theme.theme-dark .exchange-title-copy h1,
+body.jzplus-theme.theme-dark .exchange-form-group label,
+body.jzplus-theme.theme-dark .exchange-step.active .exchange-step-label {
+  color: #f8fafc;
+}
+
+body.jzplus-theme.theme-dark .exchange-input {
+  background: #0b1220 !important;
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+
+.exchange-query-count {
+  margin-top: 8px;
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.exchange-results-layout {
+  margin-top: 16px;
+}
+
+.exchange-results-layout.with-list {
+  display: grid;
+  grid-template-columns: 390px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.batch-result-card {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.exchange-batch-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.exchange-result-kicker {
+  display: block;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+}
+
+.exchange-batch-headline h2,
+.exchange-detail-banner h2 {
+  margin: 4px 0 6px;
+  font-size: 22px;
+  font-weight: 900;
+  color: #101828;
+}
+
+.exchange-batch-headline p,
+.exchange-detail-banner p {
+  margin: 0;
+  color: #475467;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.exchange-reuse-btn,
+.exchange-mini-btn,
+.exchange-batch-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 6px 12px !important;
+  border-radius: 999px !important;
+  border: 0.8px solid #d0d5dd !important;
+  background: #fff !important;
+  color: #344054 !important;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: none !important;
+  white-space: nowrap;
+}
+
+.exchange-reuse-btn:hover,
+.exchange-mini-btn:hover,
+.exchange-batch-copy:hover {
+  background: #f8fafc !important;
+}
+
+.exchange-batch-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.exchange-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 0.8px solid #e5eaf3;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.exchange-chip strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.exchange-chip.found strong { color: #067647; }
+.exchange-chip.processing strong { color: #1d4ed8; }
+.exchange-chip.failed strong { color: #b42318; }
+.exchange-chip.unused strong { color: #b54708; }
+
+.exchange-batch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  max-height: 560px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.exchange-batch-item {
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  padding: 12px 13px;
+  border-radius: 8px;
+  background: #fff;
+  border: 0.8px solid #e5eaf3;
+  text-align: left;
+  color: #101828;
+}
+
+.exchange-batch-item.completed {
+  border-color: #abefc6;
+  background: #f6fef9;
+  box-shadow: inset 3px 0 0 #12b76a;
+}
+
+.exchange-batch-item.unused {
+  box-shadow: inset 3px 0 0 #f79009;
+}
+
+.exchange-batch-item.processing,
+.exchange-batch-item.queued {
+  box-shadow: inset 3px 0 0 #2e90fa;
+}
+
+.exchange-batch-item.failed,
+.exchange-batch-item.missing {
+  box-shadow: inset 3px 0 0 #f04438;
+}
+
+.exchange-batch-item.active {
+  border-color: #12b76a;
+}
+
+.exchange-batch-item.clickable {
+  cursor: pointer;
+}
+
+.exchange-batch-codeline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.exchange-batch-code {
+  font-size: 13px;
+  font-weight: 800;
+  color: #101828;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.exchange-batch-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.exchange-batch-meta strong {
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.exchange-batch-meta.completed strong { color: #067647; }
+.exchange-batch-meta.unused strong { color: #b54708; }
+.exchange-batch-meta.processing strong,
+.exchange-batch-meta.queued strong { color: #175cd3; }
+.exchange-batch-meta.failed strong,
+.exchange-batch-meta.missing strong { color: #b42318; }
+
+.exchange-batch-sub {
+  color: #475467;
+}
+
+.exchange-plan-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #ecfdf3;
+  color: #067647;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.exchange-plan-mini::before {
+  content: "+";
+  font-weight: 900;
+}
+
+.exchange-detail-card {
+  min-height: 360px;
+}
+
+.exchange-detail-banner {
+  position: relative;
+  margin: -6px 0 18px;
+  padding: 16px 18px;
+  border-radius: 8px;
+  background: #ecfdf3;
+  border: 0.8px solid #abefc6;
+}
+
+.exchange-detail-banner.unused {
+  background: #fff7ed;
+  border-color: #fdc674;
+}
+
+.exchange-detail-banner.processing,
+.exchange-detail-banner.queued {
+  background: #eff8ff;
+  border-color: #b2ddff;
+}
+
+.exchange-detail-banner.failed,
+.exchange-detail-banner.missing {
+  background: #fef3f2;
+  border-color: #fecdca;
+}
+
+.exchange-detail-status {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  color: #067647;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.exchange-detail-banner.unused .exchange-detail-status { color: #b54708; }
+.exchange-detail-banner.processing .exchange-detail-status,
+.exchange-detail-banner.queued .exchange-detail-status { color: #175cd3; }
+.exchange-detail-banner.failed .exchange-detail-status,
+.exchange-detail-banner.missing .exchange-detail-status { color: #b42318; }
+
+.exchange-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 24px;
+  padding: 4px 4px 18px;
+}
+
+.exchange-detail-grid span {
+  display: block;
+  margin-bottom: 6px;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.exchange-detail-grid strong {
+  color: #101828;
+  font-size: 15px;
+  font-weight: 800;
+  word-break: break-all;
+}
+
+.exchange-detail-grid .span-2 {
+  grid-column: 1 / -1;
+}
+
+.exchange-detail-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 0.8px solid #e5eaf3;
+}
+
+.exchange-job-id {
+  margin-left: auto;
+  color: #98a2b3;
+  font-size: 12px;
+}
+
+@media (max-width: 860px) {
+  .exchange-header,
+  .exchange-switchboard {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .exchange-buttons.split {
+    grid-template-columns: 1fr;
+  }
+  .exchange-title-copy h1 {
+    font-size: 28px;
+  }
+  .exchange-results-layout.with-list {
     grid-template-columns: 1fr;
   }
 }

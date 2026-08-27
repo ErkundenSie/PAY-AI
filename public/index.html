@@ -3,189 +3,282 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ChatGPT 订阅自动开通 | OAI充值系统</title>
+    <title>GPTPlus | CDK 兑换</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=3" />
     <link rel="stylesheet" href="style.css" />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700;900&display=swap"
       rel="stylesheet"
     />
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="/jwt-decode.js"></script>
   </head>
 
-  <body class="recharge-page">
-    <div class="page-shell">
-      <header class="site-hero">
-        <div class="hero-eyebrow">Instant AI Top-Ups</div>
-        <h1>ChatGPT 订阅自动开通</h1>
-        <p class="hero-subtitle">
-          通过官方 Checkout 流程自助开通 ChatGPT PLUS，兑换卡密后粘贴 Session
-          即可自动完成支付开通。
-        </p>
-        <div class="feature-badges">
-          <span class="feature-badge"
-            ><i data-lucide="shield-check"></i> 官方结账</span
-          >
-          <span class="feature-badge"><i data-lucide="zap"></i> 极速开通</span>
-          <span class="feature-badge"
-            ><i data-lucide="rotate-ccw"></i> 失败可回滚</span
-          >
-          <a href="/subscription" class="feature-badge feature-link"
-            ><i data-lucide="receipt"></i> 发票助手</a
-          >
-        </div>
-      </header>
-
-      <section class="plan-showcase">
-        <article class="plan-card">
-          <div class="plan-card-head">
-            <h3>ChatGPT Plus</h3>
-            <span class="plan-tag">标准版</span>
+  <body class="recharge-page jzplus-theme">
+    <main class="exchange-container">
+      <div class="exchange-shell">
+        <div class="exchange-header">
+          <div class="exchange-title-block">
+            <span class="exchange-brand-mark" aria-hidden="true">KC</span>
+            <div class="exchange-title-copy">
+              <span class="exchange-eyebrow">Account Upgrade Service</span>
+              <h1 data-i18n="title">充值与账户升级服务</h1>
+              <p data-i18n="subtitle">按步骤校验账号、卡密并确认信息</p>
+            </div>
           </div>
-          <p>
-            适合日常使用：GPT-5.5、高级数据分析、DALL·E 等 Plus 权益，按月订阅。
-          </p>
-        </article>
-        <article class="plan-card highlight">
-          <div class="plan-card-head">
-            <h3>Pro 5x</h3>
-            <span class="plan-tag pro">高用量</span>
-          </div>
-          <p>
-            在 Pro 基础上提供约
-            <strong>5 倍</strong> 的消息/推理额度，适合重度个人用户与创作者。
-          </p>
-        </article>
-        <article class="plan-card">
-          <div class="plan-card-head">
-            <h3>Pro 20x</h3>
-            <span class="plan-tag pro">旗舰</span>
-          </div>
-          <p>
-            最高约 <strong>20 倍</strong> Pro
-            用量上限，适合团队主力账号、开发测试与高并发场景。
-          </p>
-        </article>
-      </section>
-      <p id="paymentRegionHint" class="region-hint">
-        当前账单地区：菲律宾，结算币种：PHP
-      </p>
-
-      <main class="recharge-card">
-        <div class="card-head">
-          <div>
-            <h2>卡密兑换</h2>
-            <p>按步骤完成自助开通</p>
-          </div>
-          <span id="flowStatusBadge" class="flow-badge pending">待开始</span>
-        </div>
-
-        <div class="stepper" id="flowStepper">
-          <div class="step-item active" data-step="1">
-            <span class="step-num">1</span>
-            <span class="step-label">输入卡密</span>
-          </div>
-          <div class="step-line"></div>
-          <div class="step-item" data-step="2">
-            <span class="step-num">2</span>
-            <span class="step-label">提交 Session</span>
-          </div>
-        </div>
-
-        <div class="notice-banner">
-          <i data-lucide="info"></i>
-          <p>
-            ChatGPT Plus 自助开通：提交后系统将自动打开官方 Checkout
-            页面并完成订阅开通，无需提供账号密码。一卡一充，3-5分钟开通完毕，如遇到卡住，请联系客服进行处理。
-          </p>
-        </div>
-
-        <nav class="tab-nav">
-          <button class="tab-btn active" data-tab="redeem">兑换开通</button>
-          <button class="tab-btn" data-tab="query">查询状态</button>
-        </nav>
-
-        <div id="redeemSection">
-          <div id="step1">
-            <label class="field-label" for="cdkInput"
-              >输入您的 Plus 充值码</label
+          <div class="exchange-tools">
+            <button
+              id="langToggle"
+              class="btn-ghost"
+              type="button"
+              title="切换到英文"
+              aria-label="切换到英文"
             >
-            <section class="input-group">
-              <input
-                type="text"
-                id="cdkInput"
-                placeholder="请输入卡密 / CDK"
-                maxlength="32"
-              />
-              <button id="redeemBtn" class="btn-primary">
-                <span class="btn-text">兑换卡密</span>
-                <div class="loader"></div>
-              </button>
-            </section>
-          </div>
-
-          <div id="step2" style="display: none">
-            <div
-              id="redeemCdkInfo"
-              class="cdk-confirmed"
-              style="display: none"
-            ></div>
-            <div
-              id="redeemPlanInfo"
-              class="plan-confirmed"
-              style="display: none"
-            ></div>
-            <label class="field-label" for="tokenInput"
-              >粘贴完整 Session JSON</label
+              EN
+            </button>
+            <button
+              id="themeToggle"
+              class="btn-ghost"
+              type="button"
+              title="切换到暗色"
+              aria-label="切换到暗色"
             >
-            <section class="input-group">
-              <div class="textarea-wrapper">
-                <a
-                  href="https://chatgpt.com/api/auth/session"
-                  target="_blank"
-                  class="get-token-btn-floating"
-                  >获取 Session</a
-                >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="theme-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
+                ></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="exchange-switchboard">
+          <div class="exchange-tabs" role="tablist" aria-label="兑换站功能" data-i18n-aria="tabsAria">
+            <button class="exchange-tab active" data-tab="redeem" type="button" role="tab" aria-selected="true" data-i18n="tabRedeem">充值提交</button>
+            <button class="exchange-tab" data-tab="query" type="button" role="tab" aria-selected="false" data-i18n="tabQuery">任务查询</button>
+            <button class="exchange-tab" data-tab="subscription" type="button" role="tab" aria-selected="false" data-i18n="tabSub">订阅查询</button>
+            <button class="exchange-tab" data-tab="refresh" type="button" role="tab" aria-selected="false" data-i18n="tabRefresh">更换卡密</button>
+            <button class="exchange-tab" data-tab="cancel" type="button" role="tab" aria-selected="false" data-i18n="tabCancel">取消任务</button>
+          </div>
+          <div id="queueBadge" class="exchange-queue-bar" aria-live="polite">
+            <div class="exchange-queue-main">
+              <span class="exchange-queue-dot connected"></span>
+              <span data-i18n="queuePending">后台待处理</span>
+            </div>
+            <strong id="queueCount" class="exchange-queue-count">0</strong>
+            <span data-i18n="queueTasks">个任务</span>
+            <span class="exchange-queue-state" data-i18n="queueLive">实时同步中</span>
+          </div>
+        </div>
+      </div>
+
+      <section id="redeemSection" class="exchange-section" role="tabpanel">
+        <div class="exchange-steps" id="flowStepper" aria-label="充值进度" data-i18n-aria="stepsAria">
+          <div class="exchange-step active" data-step="1">
+            <div class="exchange-step-number">1</div>
+            <div class="exchange-step-label" data-i18n="stepCdk">CDK 验证</div>
+          </div>
+          <div class="exchange-step-line"></div>
+          <div class="exchange-step" data-step="2">
+            <div class="exchange-step-number">2</div>
+            <div class="exchange-step-label" data-i18n="stepSession">提交 Session</div>
+          </div>
+          <div class="exchange-step-line"></div>
+          <div class="exchange-step" data-step="3">
+            <div class="exchange-step-number">3</div>
+            <div class="exchange-step-label" data-i18n="stepConfirm">确认提交</div>
+          </div>
+        </div>
+        <span id="flowStatusBadge" class="flow-badge pending" hidden>待开始</span>
+        <div class="exchange-card">
+          <div class="exchange-card-panel">
+            <div id="step1">
+              <div id="redeemValidBanner" class="exchange-valid" style="display: none">
+                <strong data-i18n="cdkValid">✓ CDK 有效</strong>
+                <div id="redeemPlanInfo" class="exchange-plan-chip"></div>
+              </div>
+              <div id="redeemCdkInfo" style="display: none"></div>
+              <div class="exchange-form-group">
+                <label for="cdkInput" data-i18n="labelCdk">验证 CDK 卡密</label>
+                <input
+                  id="cdkInput"
+                  class="exchange-input mono"
+                  type="text"
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  maxlength="48"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              </div>
+              <div class="exchange-buttons">
+                <button id="redeemBtn" class="exchange-btn primary" type="button">
+                  <span class="btn-text" data-i18n="btnVerify">验证 CDK</span>
+                  <div class="loader"></div>
+                </button>
+              </div>
+            </div>
+
+            <div id="step2" style="display: none">
+              <div class="exchange-form-group">
+                <label for="tokenInput" data-i18n="labelSession">提交 Session</label>
                 <textarea
                   id="tokenInput"
-                  placeholder="打开上方链接，全选复制完整 JSON 粘贴到此处（保留 user、expires、accessToken 等全部字段）"
+                  class="exchange-input mono"
+                  rows="6"
+                  placeholder='{"user":{"email":"..."},"accessToken":"...","expires":"..."}'
+                ></textarea>
+                <p class="exchange-hint" data-i18n-html="hintSession">
+                  登录 ChatGPT 后，在浏览器打开
+                  <a href="https://chatgpt.com/api/auth/session" target="_blank" rel="noreferrer">chatgpt.com/api/auth/session</a>
+                  ，将页面返回的完整 JSON 全部复制，粘贴到下方输入框。
+                </p>
+              </div>
+              <div class="exchange-buttons split">
+                <button id="backToStep1" class="exchange-btn ghost" type="button" data-i18n="btnBack">← 上一步</button>
+                <button id="toConfirmBtn" class="exchange-btn primary" type="button">
+                  <span class="btn-text" data-i18n="btnNext">下一步 →</span>
+                </button>
+              </div>
+            </div>
+
+            <div id="step3" style="display: none">
+              <div id="confirmSummary" class="confirm-summary"></div>
+              <div class="exchange-buttons split">
+                <button id="backToStep2" class="exchange-btn ghost" type="button" data-i18n="btnBack">← 上一步</button>
+                <button id="startBtn" class="exchange-btn primary" type="button">
+                  <span class="btn-text" data-i18n="btnSubmit">确认提交</span>
+                  <div class="loader"></div>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+        <section id="querySection" class="exchange-section" style="display: none" role="tabpanel" aria-label="任务查询">
+          <div class="exchange-card query-card">
+            <div class="exchange-card-panel">
+              <div class="exchange-form-group">
+                <label for="queryInput" data-i18n="labelLookup">批量卡密查询</label>
+                <textarea
+                  id="queryInput"
+                  class="exchange-input mono"
+                  placeholder="每行一个 CDK，或用逗号分隔多条卡密"
+                  data-i18n-placeholder="phLookup"
+                  rows="6"
+                  maxlength="4000"
+                ></textarea>
+                <p class="exchange-hint" data-i18n="hintLookup">支持一次粘贴多条 CDK（最多 100 条），使用换行、空格、逗号或分号分隔；系统会自动去重并展示每条任务状态。</p>
+                <p id="queryCount" class="exchange-query-count" hidden></p>
+              </div>
+              <div class="exchange-buttons split">
+                <button id="queryClearBtn" class="exchange-btn ghost" type="button" data-i18n="btnLookupClear">清空查询</button>
+                <button id="queryBtn" class="exchange-btn primary" type="button">
+                  <span class="btn-text" data-i18n="btnLookup">批量查询</span>
+                  <div class="loader"></div>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div id="lookupResults" class="exchange-results-layout" hidden></div>
+        </section>
+
+        <div id="subscriptionSection" class="exchange-section" style="display: none">
+          <div class="exchange-card">
+            <div class="exchange-card-panel">
+              <div class="exchange-form-group">
+                <label for="subSessionInput" data-i18n="labelSub">粘贴 Session 查询订阅</label>
+                <textarea
+                  id="subSessionInput"
+                  class="exchange-input mono"
+                  placeholder="粘贴完整 Session JSON 或 AccessToken"
+                  data-i18n-placeholder="phSub"
                   rows="5"
                 ></textarea>
+                <p class="exchange-hint" data-i18n-html="hintSub">
+                  打开
+                  <a href="https://chatgpt.com/api/auth/session" target="_blank" rel="noreferrer">chatgpt.com/api/auth/session</a>
+                  复制完整 JSON。
+                </p>
               </div>
-              <button id="startBtn" class="btn-primary btn-lg">
-                <span class="btn-text">确认并启动自动化开通</span>
-                <div class="loader"></div>
-              </button>
-              <p class="field-hint">
-                必须点击「确认并启动」才会执行自动化；仅粘贴不会自动运行。
-              </p>
-              <button id="backToStep1" class="btn-secondary">
-                返回重新输入卡密
-              </button>
-            </section>
+              <div class="exchange-buttons split">
+                <button id="subCheckBtn" class="exchange-btn primary" type="button">
+                  <span class="btn-text" data-i18n="btnSubCheck">查询订阅</span>
+                  <div class="loader"></div>
+                </button>
+                <button id="subCancelBtn" class="exchange-btn ghost" type="button">
+                  <span class="btn-text" data-i18n="btnSubCancel">取消自动续费</span>
+                  <div class="loader"></div>
+                </button>
+              </div>
+              <div id="subResult"></div>
+            </div>
           </div>
         </div>
 
-        <div id="querySection" style="display: none">
-          <label class="field-label" for="queryInput">输入卡密查询状态</label>
-          <section class="input-group">
-            <input
-              type="text"
-              id="queryInput"
-              placeholder="请输入要查询的激活码"
-              maxlength="32"
-            />
-            <button id="queryBtn" class="btn-primary">
-              <span class="btn-text">查询状态</span>
-              <div class="loader"></div>
-            </button>
-          </section>
+        <div id="refreshSection" class="exchange-section" style="display: none">
+          <div class="exchange-card">
+            <div class="exchange-card-panel">
+              <div class="exchange-form-group">
+                <label for="refreshInput" data-i18n="labelRefresh">输入当前卡密</label>
+                <input
+                  id="refreshInput"
+                  class="exchange-input mono"
+                  type="text"
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  maxlength="48"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <p class="exchange-hint" data-i18n="hintRefresh">未使用或上次充值失败的卡密可换码，次数有限。</p>
+              </div>
+              <div class="exchange-buttons">
+                <button id="refreshBtn" class="exchange-btn primary" type="button">
+                  <span class="btn-text" data-i18n="btnRefresh">更换卡密</span>
+                  <div class="loader"></div>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="cancelSection" class="exchange-section" style="display: none">
+          <div class="exchange-card">
+            <div class="exchange-card-panel">
+              <div class="exchange-form-group">
+                <label for="cancelInput" data-i18n="labelCancel">输入要取消的卡密</label>
+                <input
+                  id="cancelInput"
+                  class="exchange-input mono"
+                  type="text"
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  maxlength="48"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <p class="exchange-hint" data-i18n="hintCancel">仅能取消「还在排队、尚未开始处理」的任务。取消后卡密退回未使用，可以重新提交。</p>
+              </div>
+              <div class="exchange-buttons">
+                <button id="cancelBtn" class="exchange-btn primary" type="button">
+                  <span class="btn-text" data-i18n="btnCancel">取消排队</span>
+                  <div class="loader"></div>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div id="taskProgress" class="task-progress" style="display: none">
           <div class="task-progress-header">
-            <span>开通进度</span>
+            <span data-i18n="progress">开通进度</span>
             <b id="taskProgressPercent">0%</b>
           </div>
           <div class="task-progress-track">
@@ -194,41 +287,27 @@
           <p id="taskProgressText" class="task-progress-text"></p>
         </div>
         <div id="statusMessage" class="status-message"></div>
-      </main>
-
-      <details class="faq-panel">
-        <summary>常见问题 / 安全说明</summary>
-        <ul>
-          <li>Session 仅用于本次官方结账，不会保存您的账号密码。</li>
-          <li>开通失败时卡密会自动回滚，可更换账号或稍后重试。</li>
-          <li>若长时间停留在「开通中」，可在「查询状态」查看进度。</li>
-        </ul>
-      </details>
-
-      <aside id="publicRuntimeCard" class="public-runtime-panel load-low">
-        <div class="public-runtime-layout">
-          <div class="public-runtime-title">前台并发</div>
-          <div id="publicForegroundSlots" class="public-runtime-value">0/0</div>
-          <div id="publicForegroundSlotsMeta" class="public-runtime-meta">
-            当前空闲
-          </div>
-          <div id="publicForegroundSlotGrid" class="public-slot-grid"></div>
-        </div>
-      </aside>
-    </div>
+        <p id="paymentRegionHint" class="region-hint" hidden></p>
+    </main>
 
     <script>
       const step1 = document.getElementById("step1");
       const step2 = document.getElementById("step2");
+      const step3 = document.getElementById("step3");
       const cdkInput = document.getElementById("cdkInput");
       const tokenInput = document.getElementById("tokenInput");
       const redeemBtn = document.getElementById("redeemBtn");
       const startBtn = document.getElementById("startBtn");
+      const toConfirmBtn = document.getElementById("toConfirmBtn");
+      const backToStep2 = document.getElementById("backToStep2");
       const statusMsg = document.getElementById("statusMessage");
       const queryBtn = document.getElementById("queryBtn");
       const queryInput = document.getElementById("queryInput");
       const redeemSection = document.getElementById("redeemSection");
       const querySection = document.getElementById("querySection");
+      const subscriptionSection = document.getElementById("subscriptionSection");
+      const refreshSection = document.getElementById("refreshSection");
+      const cancelSection = document.getElementById("cancelSection");
       const backToStep1 = document.getElementById("backToStep1");
       const taskProgress = document.getElementById("taskProgress");
       const taskProgressBar = document.getElementById("taskProgressBar");
@@ -248,7 +327,9 @@
       );
       const flowStatusBadge = document.getElementById("flowStatusBadge");
       const flowStepper = document.getElementById("flowStepper");
-      const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
+      const queueBadge = document.getElementById("queueBadge");
+      const queueCount = document.getElementById("queueCount");
+      const tabButtons = Array.from(document.querySelectorAll(".exchange-tab"));
       let taskProgressValue = 0;
       let activationLocked = false;
       let publicRuntimeTimer = null;
@@ -258,12 +339,21 @@
         pro_5x: "ChatGPT Pro 5x",
         pro_20x: "ChatGPT Pro 20x",
       };
+      const TAB_SECTIONS = {
+        redeem: redeemSection,
+        query: querySection,
+        subscription: subscriptionSection,
+        refresh: refreshSection,
+        cancel: cancelSection,
+      };
 
       function updateFlowUI(step, status = "pending") {
         if (flowStatusBadge) {
           const labels = {
             pending: "待开始",
             cdk_ok: "待提交 Session",
+            confirm: "待确认",
+            queued: "排队中",
             running: "开通中",
             success: "已完成",
             failed: "失败",
@@ -273,7 +363,7 @@
           flowStatusBadge.className = `flow-badge ${status}`;
         }
         if (flowStepper) {
-          flowStepper.querySelectorAll(".step-item").forEach((el) => {
+          flowStepper.querySelectorAll(".exchange-step").forEach((el) => {
             const n = Number(el.getAttribute("data-step"));
             el.classList.toggle("active", n === step);
             el.classList.toggle("done", n < step);
@@ -357,70 +447,355 @@
 
       function setActivationLock(locked) {
         activationLocked = Boolean(locked);
-        backToStep1.disabled = activationLocked;
+        if (backToStep1) backToStep1.disabled = activationLocked;
+        if (backToStep2) backToStep2.disabled = activationLocked;
         tabButtons.forEach((btn) => {
           btn.disabled = activationLocked;
         });
       }
 
+      function showTab(tab) {
+        Object.entries(TAB_SECTIONS).forEach(([key, el]) => {
+          if (el) el.style.display = key === tab ? "block" : "none";
+        });
+        tabButtons.forEach((btn) => {
+          const on = btn.dataset.tab === tab;
+          btn.classList.toggle("active", on);
+          btn.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        if (tab !== "redeem") hideProgress();
+      }
+
       tabButtons.forEach((btn) => {
         btn.addEventListener("click", () => {
-          if (activationLocked) {
-            return;
-          }
-          document
-            .querySelectorAll(".tab-btn")
-            .forEach((b) => b.classList.remove("active"));
-          btn.classList.add("active");
-          const tab = btn.dataset.tab;
-          if (tab === "redeem") {
-            redeemSection.style.display = "block";
-            querySection.style.display = "none";
-          } else {
-            redeemSection.style.display = "none";
-            querySection.style.display = "block";
-            hideProgress();
-          }
+          if (activationLocked) return;
+          showTab(btn.dataset.tab);
           statusMsg.style.display = "none";
         });
       });
 
+      let lookupItems = [];
+      let lookupActiveIndex = 0;
+
+      function parseLookupCodes(raw) {
+        return [
+          ...new Set(
+            String(raw || "")
+              .split(/[\n,;\s]+/)
+              .map((item) => item.trim())
+              .filter(Boolean),
+          ),
+        ].slice(0, 100);
+      }
+
+      function lookupKind(item) {
+        if (item?.kind) return item.kind;
+        if (item?.error) return "missing";
+        const status = String(item?.status || "");
+        if (status === "已完成" || status === "已使用") return "completed";
+        if (status === "失败") return "failed";
+        if (status === "处理中" || status === "开通中") return "processing";
+        if (status === "排队中") return "queued";
+        if (status === "未找到") return "missing";
+        return "unused";
+      }
+
+      function lookupKindLabel(kind, lang) {
+        const en = lang === "en";
+        return {
+          completed: en ? "Completed" : "已完成",
+          processing: en ? "Processing" : "处理中",
+          queued: en ? "Queued" : "排队中",
+          failed: en ? "Failed" : "失败",
+          unused: en ? "Unused" : "未使用",
+          missing: en ? "Not found" : "未找到",
+        }[kind] || (en ? "Unknown" : "未知");
+      }
+
+      function formatLookupTime(value) {
+        if (!value) return "-";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value).replace("T", " ").slice(0, 19);
+        const pad = (n) => String(n).padStart(2, "0");
+        return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function copyText(text) {
+        const value = String(text || "");
+        if (!value) return Promise.resolve();
+        if (navigator.clipboard?.writeText) {
+          return navigator.clipboard.writeText(value);
+        }
+        const area = document.createElement("textarea");
+        area.value = value;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        area.remove();
+        return Promise.resolve();
+      }
+
+      function renderLookupDetail(item, lang) {
+        const kind = lookupKind(item);
+        const en = lang === "en";
+        const title =
+          kind === "completed"
+            ? en ? "Recharge completed" : "充值已完成"
+            : kind === "processing"
+              ? en ? "Processing" : "处理中"
+              : kind === "queued"
+                ? en ? "Queued" : "排队中"
+                : kind === "failed"
+                  ? en ? "Recharge failed" : "充值失败"
+                  : kind === "missing"
+                    ? en ? "Code not found" : "未找到该激活码"
+                    : en ? "Unused code" : "卡密未使用";
+        const desc =
+          kind === "completed"
+            ? en
+              ? "✓ Task finished. Your account has been upgraded."
+              : "✓ 任务已完成，您的账号已成功升级"
+            : kind === "processing"
+              ? item.task?.message || (en ? "This code is being processed." : "该卡密正在开通中。")
+              : kind === "queued"
+                ? item.task?.message || (en ? "This code is waiting in queue." : "该卡密正在排队，尚未开始处理。")
+                : kind === "failed"
+                  ? item.task?.message || (en ? "Last recharge failed." : "最近一次充值失败。")
+                  : kind === "missing"
+                    ? en ? "No record for this CDK." : "未找到该激活码记录"
+                    : en
+                      ? "This CDK has not been used yet and can still be redeemed."
+                      : "该卡密尚未使用，可以继续兑换。";
+        const email = item.email || "-";
+        const plan = item.plan_type || "plus";
+        const jobId = item.task?.task_id || "";
+        const copyCdk = en ? "Copy CDK" : "复制卡密";
+        const copyAccount = en ? "Copy account" : "复制账号";
+        const fields =
+          kind === "missing"
+            ? ""
+            : `<div class="exchange-detail-grid">
+                <div><span>${en ? "Account" : "充值账号"}</span><strong>${escapeHtml(email)}</strong></div>
+                <div><span>${en ? "Plan" : "订阅类型"}</span><span class="exchange-plan-mini">${escapeHtml(plan)}</span></div>
+                <div><span>${en ? "Submitted" : "提交时间"}</span><strong>${escapeHtml(formatLookupTime(item.created_at || item.task?.created_at))}</strong></div>
+                <div><span>${en ? "Finished" : "完成时间"}</span><strong>${escapeHtml(formatLookupTime(item.updated_at || item.task?.updated_at))}</strong></div>
+                <div class="span-2"><span>CDK</span><strong class="mono">${escapeHtml(item.code)}</strong></div>
+              </div>
+              <div class="exchange-detail-actions">
+                <button type="button" class="exchange-mini-btn" data-copy="${escapeHtml(item.code)}">${copyCdk}</button>
+                ${email !== "-" ? `<button type="button" class="exchange-mini-btn" data-copy="${escapeHtml(email)}">${copyAccount}</button>` : ""}
+                ${jobId ? `<span class="exchange-job-id">任务 ID ${escapeHtml(jobId)}</span>` : ""}
+              </div>`;
+        return `<div class="exchange-card exchange-detail-card ${kind}">
+          <div class="exchange-detail-banner ${kind}">
+            <span class="exchange-result-kicker">${en ? "Query result" : "查询结果"}</span>
+            <h2>${title}</h2>
+            <p>${escapeHtml(desc)}</p>
+            <strong class="exchange-detail-status">${lookupKindLabel(kind, lang)}</strong>
+          </div>
+          ${fields}
+        </div>`;
+      }
+
+      function renderLookupResults(activeIndex = 0) {
+        const box = document.getElementById("lookupResults");
+        if (!box) return;
+        const lang = document.body.classList.contains("lang-en") ? "en" : "zh";
+        const en = lang === "en";
+        const items = lookupItems;
+        if (!items.length) {
+          box.hidden = true;
+          box.innerHTML = "";
+          return;
+        }
+        lookupActiveIndex = Math.max(0, Math.min(activeIndex, items.length - 1));
+        const stats = items.reduce(
+          (acc, item) => {
+            const kind = lookupKind(item);
+            acc.total += 1;
+            if (kind !== "missing") acc.found += 1;
+            if (kind === "processing" || kind === "queued") acc.processing += 1;
+            if (kind === "failed") acc.failed += 1;
+            if (kind === "unused") acc.unused += 1;
+            return acc;
+          },
+          { total: 0, found: 0, processing: 0, failed: 0, unused: 0 },
+        );
+        const reuseCodes = items.filter((item) => lookupKind(item) === "unused").map((item) => item.code);
+        const list = items
+          .map((item, index) => {
+            const kind = lookupKind(item);
+            const clickable = kind === "completed" || kind === "processing" || kind === "queued" || kind === "failed";
+            const active = index === lookupActiveIndex ? " active" : "";
+            const email = item.email ? `<span class="exchange-batch-sub">${escapeHtml(item.email)}</span>` : "";
+            const plan = item.plan_type
+              ? `<span class="exchange-plan-mini">${escapeHtml(item.plan_type)}</span>`
+              : "";
+            const tag = clickable ? "button" : "div";
+            return `<${tag} class="exchange-batch-item ${kind}${clickable ? " clickable" : ""}${active}" data-index="${index}" ${clickable ? `type="button"` : ""}>
+              <div class="exchange-batch-codeline">
+                <span class="exchange-batch-code mono">${escapeHtml(item.code)}</span>
+                <button type="button" class="exchange-batch-copy" data-copy="${escapeHtml(item.code)}">${en ? "Copy" : "复制"}</button>
+              </div>
+              <span class="exchange-batch-meta ${kind}">
+                <strong>${lookupKindLabel(kind, lang)}</strong>
+                ${email}
+                ${plan}
+              </span>
+            </${tag}>`;
+          })
+          .join("");
+        box.hidden = false;
+        box.className = "exchange-results-layout with-list";
+        box.innerHTML = `
+          <div class="exchange-card batch-result-card">
+            <div class="exchange-batch-head">
+              <div class="exchange-batch-headline">
+                <span class="exchange-result-kicker">${en ? "Batch result" : "批量结果"}</span>
+                <h2>${en ? "Lookup overview" : "查询概览"}</h2>
+                <p>${en ? `Found ${stats.found}/${stats.total} tasks, ${stats.unused} unused.` : `已找到 ${stats.found}/${stats.total} 条任务，${stats.unused} 条未使用。`}</p>
+              </div>
+              <button type="button" class="exchange-reuse-btn" data-reuse="${escapeHtml(reuseCodes.join("\n"))}" ${reuseCodes.length ? "" : "disabled"}>
+                ${en ? `Copy unused (${reuseCodes.length})` : `复制可再用（${reuseCodes.length}）`}
+              </button>
+            </div>
+            <div class="exchange-batch-chips" aria-label="${en ? "Lookup stats" : "批量查询统计"}">
+              <span class="exchange-chip">${en ? "Total" : "查询总数"} <strong>${stats.total}</strong></span>
+              <span class="exchange-chip found">${en ? "Found" : "已找到"} <strong>${stats.found}</strong></span>
+              <span class="exchange-chip processing">${en ? "Processing" : "处理中"} <strong>${stats.processing}</strong></span>
+              <span class="exchange-chip failed">${en ? "Failed" : "失败"} <strong>${stats.failed}</strong></span>
+              <span class="exchange-chip unused">${en ? "Unused" : "未使用"} <strong>${stats.unused}</strong></span>
+            </div>
+            <div class="exchange-batch-list" role="list" aria-label="${en ? "Lookup results" : "批量查询结果列表"}">${list}</div>
+          </div>
+          ${renderLookupDetail(items[lookupActiveIndex], lang)}`;
+      }
+
+      function updateQueryCount() {
+        const countEl = document.getElementById("queryCount");
+        if (!countEl) return;
+        const n = parseLookupCodes(queryInput.value).length;
+        const en = document.body.classList.contains("lang-en");
+        countEl.hidden = n === 0;
+        countEl.textContent = n
+          ? en
+            ? `Recognized ${n} unique CDK${n > 1 ? "s" : ""}`
+            : `已识别 ${n} 条唯一 CDK`
+          : "";
+      }
+
+      queryInput?.addEventListener("input", updateQueryCount);
+
+      document.getElementById("queryClearBtn")?.addEventListener("click", () => {
+        queryInput.value = "";
+        lookupItems = [];
+        renderLookupResults();
+        updateQueryCount();
+        statusMsg.style.display = "none";
+      });
+
+      document.getElementById("lookupResults")?.addEventListener("click", (event) => {
+        const copyBtn = event.target.closest("[data-copy]");
+        if (copyBtn) {
+          event.preventDefault();
+          event.stopPropagation();
+          copyText(copyBtn.getAttribute("data-copy") || "").then(() => {
+            const prev = copyBtn.textContent;
+            copyBtn.textContent = document.body.classList.contains("lang-en") ? "Copied" : "已复制";
+            setTimeout(() => {
+              copyBtn.textContent = prev;
+            }, 1200);
+          });
+          return;
+        }
+        const reuseBtn = event.target.closest("[data-reuse]");
+        if (reuseBtn && !reuseBtn.disabled) {
+          copyText(reuseBtn.getAttribute("data-reuse") || "");
+          return;
+        }
+        const item = event.target.closest(".exchange-batch-item[data-index]");
+        if (item) {
+          renderLookupResults(Number(item.dataset.index || 0));
+        }
+      });
+
       queryBtn.addEventListener("click", async () => {
-        const cdk = queryInput.value.trim();
-        if (!cdk) return showStatus("请输入激活码", "error");
+        const codes = parseLookupCodes(queryInput.value);
+        if (!codes.length) return showStatus("请输入激活码", "error");
 
         toggleLoading(queryBtn, true);
         statusMsg.style.display = "none";
+        queryInput.value = codes.join("\n");
+        updateQueryCount();
 
         try {
-          const response = await fetch(
-            `/api/cdk/query?cdk=${encodeURIComponent(cdk)}`,
-          );
-          const data = await response.json();
+          let data = null;
+          const response = await fetch("/api/cdk/lookup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ codes }),
+          });
+          const raw = await response.text();
+          try {
+            data = raw ? JSON.parse(raw) : null;
+          } catch (_) {
+            data = null;
+          }
+          if (!response.ok || !data?.success) {
+            const fallback = [];
+            for (const code of codes.slice(0, 20)) {
+              const one = await fetch(
+                `/api/cdk/query?cdk=${encodeURIComponent(code)}`,
+              );
+              const payload = await one.json().catch(() => null);
+              if (payload?.success) {
+                fallback.push({
+                  code,
+                  status: payload.data?.status || "未知",
+                  plan_type: payload.data?.plan_type || "plus",
+                  email: "",
+                  created_at: payload.data?.createdAt || null,
+                  updated_at: payload.data?.usedAt || null,
+                  task: payload.data?.jobKey
+                    ? {
+                        task_id: payload.data.jobKey,
+                        message: payload.data.message || "",
+                        created_at: payload.data.createdAt,
+                        updated_at: payload.data.usedAt,
+                      }
+                    : payload.data?.message
+                      ? { message: payload.data.message }
+                      : null,
+                });
+              } else {
+                fallback.push({
+                  code,
+                  error: payload?.message || "未找到该激活码记录",
+                  status: "未找到",
+                  kind: "missing",
+                });
+              }
+            }
+            data = { success: true, tasks: fallback };
+          }
           if (data.success) {
-            const statusText = String(
-              data.data.status || (data.data.usedAt ? "已使用" : "未使用"),
-            );
-            const isProcessing = statusText === "开通中";
-            const isUsed = statusText === "已使用";
-            const statusClass = isProcessing
-              ? "processing"
-              : isUsed
-                ? "used"
-                : "unused";
-            const resultHtml = `
-                        <div class="query-result-card">
-                            <div class="query-row"><span>CDK 类型</span><strong>自助激活码</strong></div>
-                            <div class="query-row"><span>当前状态</span><strong class="status-${statusClass}">${statusText}</strong></div>
-                            ${isUsed ? `<div class="query-row"><span>使用时间</span><strong>${data.data.usedAt || "-"}</strong></div>` : ""}
-                        </div>
-                    `;
-            showStatus(resultHtml, isUsed ? "error" : "success");
+            lookupItems = data.tasks || [];
+            const firstDone = lookupItems.findIndex((item) => lookupKind(item) === "completed");
+            renderLookupResults(firstDone >= 0 ? firstDone : 0);
+            statusMsg.style.display = "none";
           } else {
-            showStatus(data.message, "error");
+            showStatus(data.message || "查询失败", "error");
           }
         } catch (error) {
-          showStatus("查询失败", "error");
+          showStatus(error.message || "查询失败", "error");
         } finally {
           toggleLoading(queryBtn, false);
         }
@@ -430,7 +805,7 @@
       const START_DEFAULT_TEXT = "确认并启动自动化开通";
       const START_PENDING_TEXT = "开通中...";
       const START_FAILED_TEXT = "重新尝试";
-      const decodeJwtPart = window.JwtDecode.decodeJwtPart;
+      const START_SUCCESS_TEXT = "开通完成";
       const parseSessionJsonInput = window.JwtDecode.parseSessionJson;
 
       function extractAccessTokenFromInput(rawValue) {
@@ -531,34 +906,45 @@
 
           if (data.success) {
             verifiedCdk = cdk;
-            const isProcessing = data.data?.status === "processing";
+            const isProcessing =
+              data.data?.status === "processing" ||
+              data.data?.status === "queued";
 
             if (isProcessing && data.data?.jobKey) {
               taskCompleted = false;
               activeJobKey = data.data.jobKey;
               setActivationLock(true);
               showProgress();
-              setProgress(3, "正在恢复任务进度...");
-              updateFlowUI(2, "running");
+              setProgress(
+                data.data?.status === "queued" ? 1 : 3,
+                data.data?.status === "queued"
+                  ? "正在排队..."
+                  : "正在恢复任务进度...",
+              );
+              updateFlowUI(3, data.data?.status === "queued" ? "queued" : "running");
               showStatus(
                 data.data?.message ||
                   "检测到当前 CDK 正在开通中，正在恢复任务进度...",
                 "success",
               );
               step1.style.display = "none";
-              step2.style.display = "block";
+              step2.style.display = "none";
+              if (step3) step3.style.display = "block";
               initWebSocket(data.data.jobKey, data.data.viewerToken || "");
               return;
             }
 
             step1.style.display = "none";
             step2.style.display = "block";
+            if (step3) step3.style.display = "none";
             updateFlowUI(2, "cdk_ok");
 
             let infoDiv = document.getElementById("redeemCdkInfo");
+            const banner = document.getElementById("redeemValidBanner");
+            if (banner) banner.style.display = "flex";
             if (infoDiv) {
-              infoDiv.style.display = "block";
-              infoDiv.innerHTML = `<span>已验证卡密</span><code>${cdk}</code>`;
+              infoDiv.style.display = "none";
+              infoDiv.innerHTML = "";
             }
             const planDiv = document.getElementById("redeemPlanInfo");
             const planType = data.data?.plan_type || "plus";
@@ -567,8 +953,8 @@
               PLAN_LABELS[planType] ||
               PLAN_LABELS.plus;
             if (planDiv) {
-              planDiv.style.display = "block";
-              planDiv.innerHTML = `<span>套餐类型</span><strong>${planLabel}</strong>`;
+              planDiv.style.display = "flex";
+              planDiv.innerHTML = `<span>套餐类型</span><span class="plan-pill">${planLabel}</span>`;
             }
             statusMsg.style.display = "none";
           } else {
@@ -587,6 +973,46 @@
         }
         resetRedeemFlow();
       });
+
+      if (toConfirmBtn) {
+        toConfirmBtn.addEventListener("click", () => {
+          const rawSession = tokenInput.value.trim();
+          const sessionCheck = validateSessionInput(rawSession);
+          if (!sessionCheck.session) {
+            return showStatus(
+              sessionCheck.message || "请粘贴完整 Session JSON",
+              "error",
+            );
+          }
+          if (!verifiedCdk) return showStatus("请先验证 CDK", "error");
+          if (!sessionCheck.valid) {
+            return showStatus(sessionCheck.message, "error");
+          }
+          const planDiv = document.getElementById("redeemPlanInfo");
+          const summary = document.getElementById("confirmSummary");
+          if (summary) {
+            summary.innerHTML = `
+              <div class="query-result-card">
+                <div class="query-row"><span>卡密</span><strong>${verifiedCdk}</strong></div>
+                <div class="query-row"><span>套餐</span><strong>${planDiv ? planDiv.textContent.replace("套餐类型", "").trim() : "Plus"}</strong></div>
+                <div class="query-row"><span>Session</span><strong>已填写</strong></div>
+              </div>`;
+          }
+          step2.style.display = "none";
+          step3.style.display = "block";
+          updateFlowUI(3, "confirm");
+          statusMsg.style.display = "none";
+        });
+      }
+
+      if (backToStep2) {
+        backToStep2.addEventListener("click", () => {
+          if (activationLocked) return;
+          step3.style.display = "none";
+          step2.style.display = "block";
+          updateFlowUI(2, "cdk_ok");
+        });
+      }
 
       let socket = null;
       let reconnectTimer = null;
@@ -656,6 +1082,7 @@
         redeemBtn.disabled = false;
         startBtn.disabled = false;
         setButtonText(startBtn, START_DEFAULT_TEXT);
+        if (step3) step3.style.display = "none";
         step2.style.display = "none";
         step1.style.display = "block";
         cdkInput.value = "";
@@ -684,13 +1111,14 @@
         const status = String(data.status || "running");
         const message = String(data.message || "");
         const forceProgress = data.type === "snapshot";
+        const queued = status === "processing" || Number(progress) < 8;
 
         if (status === "success") {
           taskCompleted = true;
           closeTaskSocket();
           setActivationLock(false);
           setProgress(100, message || "激活成功", "success", { force: true });
-          updateFlowUI(2, "success");
+          updateFlowUI(3, "success");
           showStatus(message || "激活成功！", "success");
           setButtonText(startBtn, START_SUCCESS_TEXT);
           toggleLoading(startBtn, false);
@@ -711,7 +1139,7 @@
               ? progress
               : Math.max(taskProgressValue, 1);
           setProgress(failPct, message || "开通失败", "error", { force: true });
-          updateFlowUI(2, status === "manual" ? "manual" : "failed");
+          updateFlowUI(3, status === "manual" ? "manual" : "failed");
           showStatus(
             status === "maintenance"
               ? message || "系统维护中"
@@ -726,14 +1154,15 @@
           return;
         }
 
-        updateFlowUI(2, "running");
+        updateFlowUI(3, queued ? "queued" : "running");
         if (Number.isFinite(progress)) {
-          setProgress(progress, message || "正在开通中...", "running", {
-            force: forceProgress,
-          });
-          if (message) {
-            showStatus(message, "success");
-          }
+          setProgress(
+            progress,
+            message || (queued ? "排队中..." : "正在开通中..."),
+            "running",
+            { force: forceProgress },
+          );
+          if (message) showStatus(message, "success");
         }
       }
 
@@ -833,7 +1262,7 @@
         resetProgressState();
         showProgress();
         setProgress(3, "正在启动自动化...", "running", { force: true });
-        updateFlowUI(2, "running");
+        updateFlowUI(3, "running");
 
         try {
           const response = await fetch("/api/run-process", {
@@ -847,12 +1276,22 @@
           const data = await response.json();
 
           if (data.success && data.jobKey) {
-            setProgress(8, "任务已启动，正在开通中...");
-            showStatus("任务已启动，正在为您开通中...", "success");
+            setProgress(
+              data.queued ? 1 : 8,
+              data.queued ? "已加入排队..." : "任务已启动，正在开通中...",
+            );
+            showStatus(
+              data.message ||
+                (data.queued
+                  ? "当前任务较多，已加入排队"
+                  : "任务已启动，正在为您开通中..."),
+              "success",
+            );
+            updateFlowUI(3, data.queued ? "queued" : "running");
             initWebSocket(data.jobKey, data.viewerToken || "");
           } else {
             hideProgress();
-            updateFlowUI(2, "failed");
+            updateFlowUI(3, "failed");
             showStatus(data.message || "启动失败", "error");
             setButtonText(startBtn, START_FAILED_TEXT);
             toggleLoading(startBtn, false);
@@ -861,7 +1300,7 @@
           }
         } catch (error) {
           hideProgress();
-          updateFlowUI(2, "failed");
+          updateFlowUI(3, "failed");
           showStatus("网络连接失败，请重试", "error");
           setButtonText(startBtn, START_FAILED_TEXT);
           toggleLoading(startBtn, false);
@@ -871,6 +1310,7 @@
       });
 
       function toggleLoading(btn, isLoading, options = {}) {
+        if (!btn) return;
         const keepTextVisible = Boolean(options.keepTextVisible);
         const text = btn.querySelector(".btn-text");
         const loader = btn.querySelector(".loader");
@@ -987,6 +1427,8 @@
           }
           const active = Number(data.runtime?.active_foreground_jobs || 0);
           const max = Number(data.runtime?.max_foreground_jobs || 1);
+          const queued = Number(data.runtime?.queued_tasks || 0);
+          if (queueCount) queueCount.textContent = String(queued);
           if (publicForegroundSlots) {
             publicForegroundSlots.textContent = `${active}/${max}`;
           }
@@ -1005,6 +1447,243 @@
           }
         } catch (_) {}
       }
+
+      document.getElementById("refreshBtn")?.addEventListener("click", async () => {
+        const cdk = document.getElementById("refreshInput")?.value.trim();
+        if (!cdk) return showStatus("请输入当前卡密", "error");
+        const btn = document.getElementById("refreshBtn");
+        toggleLoading(btn, true);
+        try {
+          const res = await fetch("/api/cdk/refresh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cdk }),
+          });
+          const data = await res.json();
+          if (data.success) {
+            showStatus(
+              `换码成功：${data.new_code}（剩余 ${data.refresh_remaining} 次）`,
+              "success",
+            );
+            document.getElementById("refreshInput").value = data.new_code;
+          } else {
+            showStatus(data.message || "换码失败", "error");
+          }
+        } catch (_) {
+          showStatus("换码失败", "error");
+        } finally {
+          toggleLoading(btn, false);
+        }
+      });
+
+      document.getElementById("cancelBtn")?.addEventListener("click", async () => {
+        const cdk = document.getElementById("cancelInput")?.value.trim();
+        if (!cdk) return showStatus("请输入要取消的卡密", "error");
+        const btn = document.getElementById("cancelBtn");
+        toggleLoading(btn, true);
+        try {
+          const res = await fetch("/api/cdk/cancel", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cdk }),
+          });
+          const data = await res.json();
+          showStatus(
+            data.success ? "排队任务已取消，卡密已退回未使用" : data.message,
+            data.success ? "success" : "error",
+          );
+        } catch (_) {
+          showStatus("取消失败", "error");
+        } finally {
+          toggleLoading(btn, false);
+        }
+      });
+
+      async function postSubscription(url, btn) {
+        const raw = document.getElementById("subSessionInput")?.value.trim();
+        if (!raw) return showStatus("请粘贴 Session", "error");
+        toggleLoading(btn, true);
+        try {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session: raw,
+              timezone_offset_min: -new Date().getTimezoneOffset(),
+            }),
+          });
+          const data = await res.json();
+          const box = document.getElementById("subResult");
+          if (data.success) {
+            const d = data.data || {};
+            if (box) {
+              box.innerHTML = `<div class="query-result-card">
+                <div class="query-row"><span>邮箱</span><strong>${d.email || "-"}</strong></div>
+                <div class="query-row"><span>订阅</span><strong>${d.plan || d.subscriptionChannel || (d.hasActiveSubscription ? "已订阅" : "未订阅")}</strong></div>
+                <div class="query-row"><span>自动续费</span><strong>${d.autoRenew || "-"}</strong></div>
+              </div>`;
+            }
+            showStatus(data.message || "查询成功", "success");
+          } else {
+            showStatus(data.message || "操作失败", "error");
+          }
+        } catch (_) {
+          showStatus("请求失败", "error");
+        } finally {
+          toggleLoading(btn, false);
+        }
+      }
+
+      document.getElementById("subCheckBtn")?.addEventListener("click", () => {
+        postSubscription(
+          "/api/public/subscription/check",
+          document.getElementById("subCheckBtn"),
+        );
+      });
+      document.getElementById("subCancelBtn")?.addEventListener("click", () => {
+        postSubscription(
+          "/api/public/subscription/cancel-auto-renew",
+          document.getElementById("subCancelBtn"),
+        );
+      });
+      document.getElementById("themeToggle")?.addEventListener("click", () => {
+        document.body.classList.toggle("theme-dark");
+      });
+
+      const I18N = {
+        zh: {
+          title: "充值与账户升级服务",
+          subtitle: "按步骤校验账号、卡密并确认信息",
+          tabRedeem: "充值提交",
+          tabQuery: "任务查询",
+          tabSub: "订阅查询",
+          tabRefresh: "更换卡密",
+          tabCancel: "取消任务",
+          queuePending: "后台待处理",
+          queueTasks: "个任务",
+          queueLive: "实时同步中",
+          stepCdk: "CDK 验证",
+          stepSession: "提交 Session",
+          stepConfirm: "确认提交",
+          cdkValid: "✓ CDK 有效",
+          labelCdk: "验证 CDK 卡密",
+          btnVerify: "验证 CDK",
+          labelSession: "提交 Session",
+          hintSession:
+            '登录 ChatGPT 后，在浏览器打开 <a href="https://chatgpt.com/api/auth/session" target="_blank" rel="noreferrer">chatgpt.com/api/auth/session</a> ，将页面返回的完整 JSON 全部复制，粘贴到下方输入框。',
+          btnBack: "← 上一步",
+          btnNext: "下一步 →",
+          btnSubmit: "确认提交",
+          labelLookup: "批量卡密查询",
+          phLookup: "每行一个 CDK，或用逗号分隔多条卡密",
+          hintLookup: "支持一次粘贴多条 CDK（最多 100 条），使用换行、空格、逗号或分号分隔；系统会自动去重并展示每条任务状态。",
+          btnLookup: "批量查询",
+          btnLookupClear: "清空查询",
+          labelSub: "粘贴 Session 查询订阅",
+          phSub: "粘贴完整 Session JSON 或 AccessToken",
+          hintSub:
+            '打开 <a href="https://chatgpt.com/api/auth/session" target="_blank" rel="noreferrer">chatgpt.com/api/auth/session</a> 复制完整 JSON。',
+          btnSubCheck: "查询订阅",
+          btnSubCancel: "取消自动续费",
+          labelRefresh: "输入当前卡密",
+          hintRefresh: "未使用或上次充值失败的卡密可换码，次数有限。",
+          btnRefresh: "更换卡密",
+          labelCancel: "输入要取消的卡密",
+          hintCancel:
+            "仅能取消「还在排队、尚未开始处理」的任务。取消后卡密退回未使用，可以重新提交。",
+          btnCancel: "取消排队",
+          progress: "开通进度",
+          tabsAria: "兑换站功能",
+          stepsAria: "充值进度",
+          langBtn: "EN",
+          langTitle: "切换到英文",
+        },
+        en: {
+          title: "Recharge & Account Upgrade Service",
+          subtitle: "Verify your account and CDK, then confirm — step by step",
+          tabRedeem: "Recharge",
+          tabQuery: "Task Lookup",
+          tabSub: "Subscription",
+          tabRefresh: "Replace CDK",
+          tabCancel: "Cancel Task",
+          queuePending: "Pending in Console",
+          queueTasks: "tasks",
+          queueLive: "Live sync on",
+          stepCdk: "Verify CDK",
+          stepSession: "Submit Session",
+          stepConfirm: "Confirm",
+          cdkValid: "✓ CDK valid",
+          labelCdk: "Verify CDK Code",
+          btnVerify: "Verify CDK",
+          labelSession: "Submit Session",
+          hintSession:
+            'After signing in to ChatGPT, open <a href="https://chatgpt.com/api/auth/session" target="_blank" rel="noreferrer">chatgpt.com/api/auth/session</a> and paste the full JSON below.',
+          btnBack: "← Back",
+          btnNext: "Next →",
+          btnSubmit: "Confirm",
+          labelLookup: "Batch CDK lookup",
+          phLookup: "One CDK per line, or comma-separated",
+          hintLookup: "Paste up to 100 CDKs. Separate with line breaks, spaces, commas, or semicolons. Duplicates are removed automatically.",
+          btnLookup: "Look up",
+          btnLookupClear: "Clear",
+          labelSub: "Paste Session to check subscription",
+          phSub: "Paste full Session JSON or AccessToken",
+          hintSub:
+            'Open <a href="https://chatgpt.com/api/auth/session" target="_blank" rel="noreferrer">chatgpt.com/api/auth/session</a> and copy the full JSON.',
+          btnSubCheck: "Check subscription",
+          btnSubCancel: "Cancel auto-renew",
+          labelRefresh: "Enter current CDK",
+          hintRefresh: "Unused or last-failed codes can be replaced, limited times.",
+          btnRefresh: "Replace CDK",
+          labelCancel: "Enter CDK to cancel",
+          hintCancel:
+            "Only queued tasks that have not started can be cancelled. The CDK returns to unused.",
+          btnCancel: "Cancel queue",
+          progress: "Progress",
+          tabsAria: "Recharge portal sections",
+          stepsAria: "Recharge progress",
+          langBtn: "ZH",
+          langTitle: "Switch to Chinese",
+        },
+      };
+
+      function applyI18n(lang) {
+        const dict = I18N[lang] || I18N.zh;
+        document.documentElement.lang = lang === "en" ? "en" : "zh-CN";
+        document.title =
+          lang === "en" ? "GPTPlus | CDK Exchange" : "GPTPlus | CDK 兑换";
+        document.querySelectorAll("[data-i18n]").forEach((el) => {
+          const key = el.getAttribute("data-i18n");
+          if (dict[key] != null) el.textContent = dict[key];
+        });
+        document.querySelectorAll("[data-i18n-html]").forEach((el) => {
+          const key = el.getAttribute("data-i18n-html");
+          if (dict[key] != null) el.innerHTML = dict[key];
+        });
+        document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+          const key = el.getAttribute("data-i18n-placeholder");
+          if (dict[key] != null) el.setAttribute("placeholder", dict[key]);
+        });
+        document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+          const key = el.getAttribute("data-i18n-aria");
+          if (dict[key] != null) el.setAttribute("aria-label", dict[key]);
+        });
+        const langBtn = document.getElementById("langToggle");
+        if (langBtn) {
+          langBtn.textContent = dict.langBtn;
+          langBtn.title = dict.langTitle;
+          langBtn.setAttribute("aria-label", dict.langTitle);
+        }
+      }
+
+      let currentLang = "zh";
+      document.getElementById("langToggle")?.addEventListener("click", () => {
+        currentLang = currentLang === "zh" ? "en" : "zh";
+        document.body.classList.toggle("lang-en", currentLang === "en");
+        applyI18n(currentLang);
+        updateQueryCount();
+        if (lookupItems.length) renderLookupResults(lookupActiveIndex);
+      });
 
       updateFlowUI(1, "pending");
       loadPaymentRegionHint();

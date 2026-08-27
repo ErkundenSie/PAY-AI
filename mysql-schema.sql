@@ -25,10 +25,12 @@ CREATE TABLE IF NOT EXISTS phone_assets (
 
 CREATE TABLE IF NOT EXISTS card_assets (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    card_number VARCHAR(32) NOT NULL,
+    card_number VARCHAR(255) NOT NULL,
     card_expiry VARCHAR(16) NOT NULL DEFAULT '',
-    card_cvc VARCHAR(16) NOT NULL DEFAULT '',
+    card_cvc VARCHAR(255) NOT NULL DEFAULT '',
     card_holder VARCHAR(128) NOT NULL DEFAULT '' COMMENT '持卡人姓名',
+    card_last4 CHAR(4) NOT NULL DEFAULT '',
+    card_number_hash CHAR(64) NOT NULL DEFAULT '',
     usage_count INT NOT NULL DEFAULT 0,
     sort_order INT NOT NULL DEFAULT 0,
     is_active TINYINT (1) NOT NULL DEFAULT 1,
@@ -45,7 +47,9 @@ CREATE TABLE IF NOT EXISTS card_assets (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     KEY idx_card_assets_sort (sort_order, id),
     KEY idx_card_assets_pick (is_active, in_use, locked_at, usage_count),
-    KEY idx_card_assets_group (group_id)
+    KEY idx_card_assets_group (group_id),
+    KEY idx_card_assets_last4 (card_last4),
+    KEY idx_card_assets_number_hash (card_number_hash)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS card_groups (
@@ -69,8 +73,10 @@ CREATE TABLE IF NOT EXISTS cdk_codes (
     card_group_id BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '仅可使用该银行卡分组',
     fail_count INT DEFAULT 0,
     cooldown_until TIMESTAMP NULL DEFAULT NULL,
+    refresh_count INT NOT NULL DEFAULT 0,
     UNIQUE KEY uniq_cdk_codes_code (cdk_code),
-    KEY idx_cdk_codes_card_group (card_group_id)
+    KEY idx_cdk_codes_card_group (card_group_id),
+    KEY idx_cdk_codes_list (is_active, type, created_at, id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS task_logs (
@@ -90,7 +96,9 @@ CREATE TABLE IF NOT EXISTS task_logs (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_task_logs_job_key (job_key),
     KEY idx_task_logs_created (created_at),
-    KEY idx_task_logs_status_created (status, created_at)
+    KEY idx_task_logs_status_created (status, created_at),
+    KEY idx_task_logs_cdk_preview (cdk_code, created_at, id),
+    KEY idx_task_logs_updated (updated_at, id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS activation_attempt_limits (
