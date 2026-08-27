@@ -12,11 +12,14 @@ const WebSocket = require("ws");
 const axios = require("axios");
 const store = require("./mysql-store");
 const runtimeLog = require("./runtime-log");
+const { REGION_CONFIG, isSupportedRegion } = require("./region-config");
+const { getPlanTypeLabel } = require("./credit-quantity");
 const {
-  REGION_CONFIG,
-  isSupportedRegion,
-  getPlanTypeLabel,
-} = require("./region-config");
+  isPaymentDebugCdk,
+  resolvePublicCheckoutCdk,
+  buildCheckoutTaskCreate,
+  buildCheckoutTaskUpdate,
+} = require("./checkout-task-log");
 const taxFreeAddress = require("./tax-free-address");
 const { testProxyUrl, normalizeProxyLines } = require("./proxy-pool");
 const {
@@ -57,6 +60,7 @@ const {
 } = require("./subscription-check");
 const gptApi = require("./gpt-api-client");
 const cardValidator = require("./card-validator");
+const { decodeJwtPart } = require("./public/jwt-decode");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -98,7 +102,12 @@ function cleanupProcesses() {
 
 // WebSocket 客户端映射: jobKey -> Set<WebSocket>
 const taskClients = new Map();
-const TERMINAL_TASK_STATUSES = new Set(["success", "failed", "maintenance"]);
+const TERMINAL_TASK_STATUSES = new Set([
+  "success",
+  "failed",
+  "maintenance",
+  "manual",
+]);
 const activeForegroundJobs = new Set();
 
 let systemMetricsCache = {
@@ -540,6 +549,11 @@ app.use(async (req, res, next) => {
   return next();
 });
 
+app.get("/us-tax-free-address.js", (req, res) => {
+  res.type("application/javascript");
+  res.sendFile(path.join(__dirname, "us-tax-free-address.js"));
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 
 function ensureStoreReady() {
@@ -552,35 +566,12 @@ function ensureStoreReady() {
   return storeReadyPromise;
 }
 
-function decodeJwtPart(part) {
-  const normalized = String(part || "")
-    .replace(/-/g, "+")
-    .replace(/_/g, "/");
-  const padded = normalized.padEnd(
-    normalized.length + ((4 - (normalized.length % 4)) % 4),
-    "=",
-  );
-  return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
-}
-
 function normalizeSessionToken(raw) {
   return extractAccessTokenFromRaw(raw);
 }
 
 function normalizeSessionRaw(raw) {
-  const content = String(raw || "").trim();
-  if (!content.startsWith("{")) {
-    return "";
-  }
-  try {
-    const data = JSON.parse(content);
-    if (data?.accessToken || data?.access_token || data?.user) {
-      return content;
-    }
-  } catch (_) {
-    return "";
-  }
-  return "";
+  return parseSessionJson(raw) ? String(raw || "").trim() : "";
 }
 
 function buildStoredSessionPayload(rawSession, sessionJson, token) {
@@ -957,7 +948,7 @@ function parseManualBillingAddress(raw) {
 
 async function startPublicCheckoutPay(body = {}, options = {}) {
   const requireManualPayment = Boolean(options.requireManualPayment);
-  const isAdminDebug = String(body.cdk_code || "") === "[payment-debug]";
+  const isAdminDebug = isPaymentDebugCdk(body.cdk_code);
   const rawSession = String(body.session || "").trim();
   if (!rawSession) {
     return {
@@ -1104,21 +1095,24 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
     token,
   );
   const email = extractEmailFromSession(sessionJson);
-  const task = await store.createTaskLog({
-    tokenPreview: extractSessionPreview(storedSession),
-    sessionPayload: storedSession,
-    cdkCode: String(body.cdk_code || "[self-pay]"),
-    phone: null,
-    cardLast4: manualCard ? String(manualCard.card_number).slice(-4) : null,
-    status: "running",
-    progress: 5,
-  });
+  const task = await store.createTaskLog(
+    buildCheckoutTaskCreate({
+      tokenPreview: extractSessionPreview(storedSession),
+      sessionPayload: storedSession,
+      cdkCode: body.cdk_code,
+      cardLast4: manualCard ? manualCard.card_number : null,
+    }),
+  );
   const taskLabel = isAdminDebug ? "付款调试" : "自助开通";
-  await store.updateTaskLog(task.jobKey, {
-    status: "running",
-    message: `${taskLabel}：${planType}${creditQuantity ? ` x${creditQuantity}` : ""} / ${regionCode}`,
-    progress: 5,
-  });
+  await store.updateTaskLog(
+    task.jobKey,
+    buildCheckoutTaskUpdate({
+      cdkCode: body.cdk_code,
+      planType,
+      creditQuantity,
+      regionCode,
+    }),
+  );
   logTask(
     task.jobKey,
     `${taskLabel}任务已创建 plan=${planType} plan_name=${resolvedPlanName}${creditQuantity ? ` credits=${creditQuantity}` : ""} region=${regionCode} email=${email || "-"}`,
@@ -1136,6 +1130,7 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
     preferredCardId,
     manualCard,
     manualAddress,
+    taskLabel,
   });
 
   return {
@@ -2366,11 +2361,45 @@ app.post(
       const result = await startPublicCheckoutPay(
         {
           ...body,
-          cdk_code: "[self-pay]",
+          cdk_code: resolvePublicCheckoutCdk(),
         },
         { requireManualPayment: true },
       );
       return res.status(result.status).json(result.payload);
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  },
+);
+
+app.get(
+  "/api/public/checkout/status/:jobKey",
+  limitPublicRequests("public-checkout-status", 60, 60 * 1000),
+  async (req, res) => {
+    try {
+      await ensureStoreReady();
+      const jobKey = decodeURIComponent(String(req.params.jobKey || "").trim());
+      const viewerToken = String(
+        req.query?.token || req.query?.viewerToken || "",
+      ).trim();
+      if (!jobKey || !/^[A-Za-z0-9._-]{1,80}$/.test(jobKey)) {
+        return res.status(400).json({ success: false, error: "缺少任务标识" });
+      }
+      if (!adminAuth.verifyTaskViewerToken(viewerToken, jobKey)) {
+        return res.status(401).json({ success: false, error: "未授权订阅" });
+      }
+      const task = await store.getTaskStatus(jobKey);
+      if (!task) {
+        return res.status(404).json({ success: false, error: "任务不存在" });
+      }
+      return res.json({
+        success: true,
+        jobKey,
+        status: task.status,
+        message: task.message,
+        progress: Number(task.progress || 0),
+        isTerminal: TERMINAL_TASK_STATUSES.has(task.status),
+      });
     } catch (error) {
       return res.status(500).json({ success: false, error: error.message });
     }
@@ -4296,9 +4325,12 @@ function spawnCheckoutPaymentWorker({
   preferredCardId = 0,
   manualCard = null,
   manualAddress = null,
+  taskLabel = "付款调试",
 }) {
   (async () => {
     const checkoutScript = path.join(__dirname, "index.js");
+    const runningMessage = `${taskLabel}进行中...`;
+    const failedMessage = `${taskLabel}失败`;
     try {
       const proxy = await store.getActiveProxy();
       const hcaptchaCfg = await store.getHcaptchaConfig();
@@ -4327,7 +4359,7 @@ function spawnCheckoutPaymentWorker({
 
       logTask(
         task.jobKey,
-        `启动付款调试 Playwright 浏览器 proxy=${proxy ? "yes" : "no"}`,
+        `启动${taskLabel} Playwright 浏览器 proxy=${proxy ? "yes" : "no"}`,
       );
       const run = await spawnWorkerWithBrowser({
         jobKey: task.jobKey,
@@ -4340,10 +4372,18 @@ function spawnCheckoutPaymentWorker({
             1,
             async (progress) => {
               if (progress > 0) {
+                const runningProgress = Math.min(progress, 99);
                 await store.updateTaskLog(task.jobKey, {
                   status: "running",
-                  message: "付款调试进行中...",
-                  progress: Math.min(progress, 99),
+                  message: runningMessage,
+                  progress: runningProgress,
+                });
+                broadcastToTask(task.jobKey, {
+                  type: "progress",
+                  jobKey: task.jobKey,
+                  status: "running",
+                  message: runningMessage,
+                  progress: runningProgress,
                 });
               }
             },
@@ -4359,23 +4399,38 @@ function spawnCheckoutPaymentWorker({
         finalStatus === "success"
           ? 100
           : Math.min(getCheckoutProgress(run.output, finalStatus), 99);
+      const finalMessage = analysis.message || failedMessage;
 
       await store.updateTaskLog(task.jobKey, {
         status: finalStatus,
-        message: analysis.message || "付款调试失败",
+        message: finalMessage,
         rawOutput: run.output,
         progress: finalProgress,
         cardLast4,
         failureScreenshots: [...taskMedia.screenshots, ...taskMedia.videos],
       });
+      broadcastToTask(task.jobKey, {
+        type: "status",
+        jobKey: task.jobKey,
+        status: finalStatus,
+        message: finalMessage,
+        progress: finalProgress,
+      });
       logTask(
         task.jobKey,
-        `付款调试结束 status=${finalStatus} card=${cardLast4 || "-"}`,
+        `${taskLabel}结束 status=${finalStatus} card=${cardLast4 || "-"}`,
       );
     } catch (error) {
-      console.error(`[Checkout Payment Debug] ${task.jobKey}:`, error);
-      logTask(task.jobKey, `付款调试任务异常: ${error.message}`, "error");
+      console.error(`[Checkout Payment] ${task.jobKey}:`, error);
+      logTask(task.jobKey, `${taskLabel}任务异常: ${error.message}`, "error");
       await store.updateTaskLog(task.jobKey, {
+        status: "failed",
+        message: error.message,
+        progress: 0,
+      });
+      broadcastToTask(task.jobKey, {
+        type: "status",
+        jobKey: task.jobKey,
         status: "failed",
         message: error.message,
         progress: 0,
@@ -5514,7 +5569,7 @@ async function start() {
         }
         if (data.type === "subscribe" && data.jobKey) {
           const jobKey = String(data.jobKey || "").trim();
-          if (!/^[A-Za-z0-9_-]{1,64}$/.test(jobKey)) {
+          if (!/^[A-Za-z0-9._-]{1,80}$/.test(jobKey)) {
             return ws.close(1008, "无效任务标识");
           }
           if (!(await authorizeTaskSubscription(data, jobKey))) {

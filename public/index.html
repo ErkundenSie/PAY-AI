@@ -4,13 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ChatGPT 订阅自动开通 | OAI充值系统</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=3" />
     <link rel="stylesheet" href="style.css" />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="/jwt-decode.js"></script>
   </head>
 
   <body class="recharge-page">
@@ -280,16 +281,7 @@
         }
       }
 
-      function decodeJwtPart(part) {
-        const normalized = String(part || "")
-          .replace(/-/g, "+")
-          .replace(/_/g, "/");
-        const padded = normalized.padEnd(
-          normalized.length + ((4 - (normalized.length % 4)) % 4),
-          "=",
-        );
-        return JSON.parse(atob(padded));
-      }
+      const decodeJwtPart = window.JwtDecode.decodeJwtPart;
 
       function validateAccessToken(token) {
         const value = String(token || "").trim();
@@ -438,26 +430,8 @@
       const START_DEFAULT_TEXT = "确认并启动自动化开通";
       const START_PENDING_TEXT = "开通中...";
       const START_FAILED_TEXT = "重新尝试";
-      const START_SUCCESS_TEXT = "激活成功";
-
-      function parseSessionJsonInput(rawValue) {
-        const content = String(rawValue || "").trim();
-        if (!content) {
-          return null;
-        }
-        if (!content.startsWith("{")) {
-          return null;
-        }
-        try {
-          const data = JSON.parse(content);
-          if (data?.accessToken || data?.access_token || data?.user) {
-            return data;
-          }
-        } catch (_) {
-          return null;
-        }
-        return null;
-      }
+      const decodeJwtPart = window.JwtDecode.decodeJwtPart;
+      const parseSessionJsonInput = window.JwtDecode.parseSessionJson;
 
       function extractAccessTokenFromInput(rawValue) {
         const session = parseSessionJsonInput(rawValue);

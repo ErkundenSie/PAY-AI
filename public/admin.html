@@ -114,6 +114,17 @@
         gap: 12px;
         margin-bottom: 32px;
         padding: 0 8px;
+        border: 0;
+        background: transparent;
+        width: 100%;
+        text-align: left;
+        color: inherit;
+        cursor: pointer;
+        border-radius: var(--radius-md);
+      }
+
+      .sidebar-brand:hover .brand-name {
+        color: var(--primary);
       }
 
       .brand-logo {
@@ -2139,10 +2150,12 @@
         font-family:
           "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
         font-size: 12px;
-        line-height: 1.55;
+        line-height: 1.5;
         color: var(--text-main);
-        white-space: pre-wrap;
-        word-break: break-word;
+        white-space: pre;
+        word-break: normal;
+        overflow-wrap: normal;
+        font-variant-numeric: tabular-nums;
       }
 
       .log-page-toolbar {
@@ -2490,12 +2503,18 @@
     </div>
 
     <aside class="sidebar">
-      <div class="sidebar-brand">
+      <button
+        type="button"
+        class="sidebar-brand"
+        title="回到概览中心"
+        aria-label="回到概览中心"
+        onclick="switchPage('dashboard')"
+      >
         <div class="brand-logo">
           <img src="/favicon.svg?v=3" alt="" />
         </div>
         <span class="brand-name">OAI充值系统</span>
-      </div>
+      </button>
       <button
         id="sidebar_toggle"
         class="sidebar-toggle"
@@ -4260,10 +4279,17 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 <option value="plus">Plus — chatgptplusplan</option>
                 <option value="pro_5x">Pro 5x — chatgptprolite</option>
                 <option value="pro_20x">Pro 20x — chatgptpro</option>
-                <option value="credits">Codex 点数 — platformbusiness_usage_based</option>
+                <option value="credits">
+                  Codex 点数 — platformbusiness_usage_based
+                </option>
               </select>
             </div>
-            <div class="form-group" style="margin-bottom: 0" id="checkout_credit_quantity_wrap" hidden>
+            <div
+              class="form-group"
+              style="margin-bottom: 0"
+              id="checkout_credit_quantity_wrap"
+              hidden
+            >
               <label style="margin-bottom: 6px">充值点数</label>
               <select id="checkout_credit_quantity" class="asset-input">
                 <option value="500">500</option>
@@ -4667,13 +4693,17 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 </button>
                 <button
                   class="filter-option"
-                  onclick="selectCdkPlanTypeFilter('credits_1000', 'Codex 1000')"
+                  onclick="
+                    selectCdkPlanTypeFilter('credits_1000', 'Codex 1000')
+                  "
                 >
                   Codex 1000
                 </button>
                 <button
                   class="filter-option"
-                  onclick="selectCdkPlanTypeFilter('credits_2000', 'Codex 2000')"
+                  onclick="
+                    selectCdkPlanTypeFilter('credits_2000', 'Codex 2000')
+                  "
                 >
                   Codex 2000
                 </button>
@@ -4825,8 +4855,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               刷新
             </button>
             <span class="log-page-toolbar-hint"
-              >默认每 3
-              秒自动拉取；点击详情可查看执行日志、阶段与媒体信息。</span
+              >默认每 1
+              秒自动拉取任务记录；点击详情可查看执行日志、阶段与媒体信息。</span
             >
           </div>
           <div class="task-filter-bar" aria-label="任务筛选">
@@ -4968,9 +4998,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 <option value="plus">Plus</option>
                 <option value="pro_5x">Pro 5x</option>
                 <option value="pro_20x">Pro 20x</option>
+                <option value="credits">Codex 点数</option>
               </select>
-            </  <option value="credits">Codex 点数</option>
-              div>
+            </div>
             <div class="form-group" style="margin-bottom: 0">
               <label>支付状态</label>
               <select id="billing_status" class="asset-input">
@@ -5135,6 +5165,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       </div>
     </main>
 
+    <script src="/task-type.js"></script>
     <script>
       const TOKEN_KEY = "plus_admin_token";
       let adminLoginPath = "/admin-login";
@@ -5207,6 +5238,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       /** 后台定时 loadData（含任务管理列表）；为便于阅读可暂停 */
       let adminDataRefreshPaused = false;
       let adminDataRefreshTimer = null;
+      let lastAdminDataRefreshAt = 0;
 
       /** 当前成品批量生产 WebSocket 对应的 jobKey，用于「停止生产」 */
       window.__adminProductGenJobKey = "";
@@ -5214,13 +5246,37 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       function formatRuntimeLogTs(ts) {
         try {
           const d = new Date(Number(ts) || 0);
-          return d.toLocaleTimeString("zh-CN", {
+          return d.toLocaleTimeString("en-GB", {
             timeZone: adminDefaultTimeZone,
             hour12: false,
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
           });
         } catch (_) {
           return "--:--:--";
         }
+      }
+
+      function runtimeLogDisplayWidth(value) {
+        let width = 0;
+        for (const char of String(value || "")) {
+          width += char.codePointAt(0) > 255 ? 2 : 1;
+        }
+        return width;
+      }
+
+      function padRuntimeLogField(value, width) {
+        let text = "";
+        for (const char of String(value || "")) {
+          const next =
+            runtimeLogDisplayWidth(text) + (char.codePointAt(0) > 255 ? 2 : 1);
+          if (next > width) break;
+          text += char;
+        }
+        return (
+          text + " ".repeat(Math.max(0, width - runtimeLogDisplayWidth(text)))
+        );
       }
 
       function formatAdminDateTime(value, includeSeconds = false) {
@@ -5283,28 +5339,29 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         if (RUNTIME_LOG_SOURCE_MAP[raw]) {
           return RUNTIME_LOG_SOURCE_MAP[raw];
         }
-        // 兜底：fork/xxx.js → 提取文件名前 6 个字符
         const forkMatch = raw.match(/^fork\/([\w.-]+)$/);
         if (forkMatch) {
-          return forkMatch[1].replace(/\.js$/, "").slice(0, 8);
+          return forkMatch[1].replace(/\.js$/, "").slice(0, 4);
         }
-        return raw.slice(0, 8);
+        return raw.slice(0, 4) || "日志";
       }
 
       function formatRuntimeLogJob(jobKey) {
         const k = String(jobKey || "").trim();
         if (!k) {
-          return "—";
+          return "-";
         }
-        // 取末 8 位作为短码
         return k.slice(-8);
       }
 
       function formatRuntimeLogLine(entry) {
-        const t = formatRuntimeLogTs(entry.ts);
-        const j = formatRuntimeLogJob(entry.jobKey);
-        const src = formatRuntimeLogSource(entry);
-        return `${t}  ${j}  ${src}  ${entry.text}`;
+        const time = padRuntimeLogField(formatRuntimeLogTs(entry.ts), 8);
+        const job = padRuntimeLogField(formatRuntimeLogJob(entry.jobKey), 8);
+        const source = padRuntimeLogField(formatRuntimeLogSource(entry), 4);
+        const text = String(entry.text || "")
+          .replace(/\s+/g, " ")
+          .trim();
+        return `${time}  ${job}  ${source}  ${text}`;
       }
 
       function appendRuntimeLogEntries(entries) {
@@ -5455,8 +5512,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         updateAdminDataRefreshButton();
         showMessage(
           adminDataRefreshPaused
-            ? "已停止自动刷新：概览与各列表（含任务管理）不再每 3 秒更新"
-            : "已恢复每 3 秒自动刷新",
+            ? "已停止自动刷新：概览与各列表（含任务记录）不再自动更新"
+            : "已恢复自动刷新：任务记录每 1 秒，其它页面每 3 秒",
           "success",
         );
       }
@@ -5795,9 +5852,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             qrImg.style.display = "block";
           }
           document.getElementById("totp_secret_text").innerHTML = `
-                    <div style="margin-bottom:6px;">请用 Google Authenticator 扫描上方二维码</div>
-                    <div>手动密钥：<code style="word-break:break-all;">${escapeHtml(data.secret || "")}</code></div>
-                `;
+                          <div style="margin-bottom:6px;">请用 Google Authenticator 扫描上方二维码</div>
+                          <div>手动密钥：<code style="word-break:break-all;">${escapeHtml(data.secret || "")}</code></div>
+                      `;
           showMessage("扫码后输入 6 位验证码确认启用", "success");
         } catch (error) {
           showMessage(error.message || "绑定失败", "error");
@@ -5869,16 +5926,16 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           body.innerHTML = logs
             .map(
               (row) => `
-                    <tr>
-                        <td>${escapeHtml(formatAdminDateTime(row.created_at))}</td>
-                        <td>${escapeHtml(ADMIN_LOGIN_EVENT_LABELS[row.event] || row.event || "")}</td>
-                        <td>${escapeHtml(String(row.admin_email || ""))}</td>
-                        <td>${escapeHtml(String(row.ip || ""))}</td>
-                        <td style="word-break:break-all;">${escapeHtml(String(row.fingerprint || ""))}</td>
-                        <td style="word-break:break-word;">${escapeHtml(String(row.user_agent || ""))}</td>
-                        <td>${escapeHtml(String(row.detail || ""))}</td>
-                    </tr>
-                `,
+                          <tr>
+                              <td>${escapeHtml(formatAdminDateTime(row.created_at))}</td>
+                              <td>${escapeHtml(ADMIN_LOGIN_EVENT_LABELS[row.event] || row.event || "")}</td>
+                              <td>${escapeHtml(String(row.admin_email || ""))}</td>
+                              <td>${escapeHtml(String(row.ip || ""))}</td>
+                              <td style="word-break:break-all;">${escapeHtml(String(row.fingerprint || ""))}</td>
+                              <td style="word-break:break-word;">${escapeHtml(String(row.user_agent || ""))}</td>
+                              <td>${escapeHtml(String(row.detail || ""))}</td>
+                          </tr>
+                      `,
             )
             .join("");
         } catch (error) {
@@ -6182,9 +6239,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           .map(
             ([label, value]) =>
               `<div style="display:flex; justify-content:space-between; gap:16px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
-                    <span style="color: var(--text-dim);">${escapeHtml(label)}</span>
-                    <strong>${escapeHtml(String(value))}</strong>
-                </div>`,
+                          <span style="color: var(--text-dim);">${escapeHtml(label)}</span>
+                          <strong>${escapeHtml(String(value))}</strong>
+                      </div>`,
           )
           .join("");
       }
@@ -6637,16 +6694,16 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             return `<p style="color:#f87171;">无法加载录像：${escapeHtml(rel)}</p>`;
           }
           return `
-                    <div style="margin-bottom:16px;">
-                        <div style="font-size:12px; color:var(--text-dim); margin-bottom:6px;">${escapeHtml(rel)}</div>
-                        <video src="${src}" controls playsinline preload="metadata" style="width:100%; border-radius:8px; background:#000;"></video>
-                        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-                            <a class="btn btn-secondary" href="${src}" target="_blank" rel="noopener">浏览打开</a>
-                            <button type="button" class="btn btn-secondary" data-copy-video-url="${src.replace(/"/g, "&quot;")}">复制链接</button>
-                        </div>
-                        <p style="font-size:12px; color:var(--text-dim); margin:8px 0 0;">VS Code 内置预览经常播不了 WebM，请点上面用 Edge 打开。</p>
-                    </div>
-                `;
+                          <div style="margin-bottom:16px;">
+                              <div style="font-size:12px; color:var(--text-dim); margin-bottom:6px;">${escapeHtml(rel)}</div>
+                              <video src="${src}" controls playsinline preload="metadata" style="width:100%; border-radius:8px; background:#000;"></video>
+                              <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+                                  <a class="btn btn-secondary" href="${src}" target="_blank" rel="noopener">浏览打开</a>
+                                  <button type="button" class="btn btn-secondary" data-copy-video-url="${src.replace(/"/g, "&quot;")}">复制链接</button>
+                              </div>
+                              <p style="font-size:12px; color:var(--text-dim); margin:8px 0 0;">VS Code 内置预览经常播不了 WebM，请点上面用 Edge 打开。</p>
+                          </div>
+                      `;
         });
         body.innerHTML = `<p style="color:var(--text-dim); margin:0 0 12px;">自动化全程录像（可拖动进度条查看卡在哪一步）</p>${blocks.join("") || '<p style="color:var(--text-dim);">暂无录像</p>'}`;
       }
@@ -6679,11 +6736,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             const objectUrl = URL.createObjectURL(blob);
             screenshotObjectUrls.push(objectUrl);
             blocks.push(`
-                        <div>
-                            <div style="font-size:12px; color:var(--text-dim); margin-bottom:6px;">${escapeHtml(relativePath)}</div>
-                            <img src="${objectUrl}" alt="${escapeHtml(relativePath)}">
-                        </div>
-                    `);
+                              <div>
+                                  <div style="font-size:12px; color:var(--text-dim); margin-bottom:6px;">${escapeHtml(relativePath)}</div>
+                                  <img src="${objectUrl}" alt="${escapeHtml(relativePath)}">
+                              </div>
+                          `);
           } catch (error) {
             blocks.push(
               `<p style="color:#f87171;">加载失败：${escapeHtml(relativePath)} (${escapeHtml(error.message)})</p>`,
@@ -6807,7 +6864,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           .trim()
           .toLowerCase();
         const status = String(taskLogFilters.status || "all");
-        return (Array.isArray(logs) ? logs : []).filter((task) => {
+        const filtered = (Array.isArray(logs) ? logs : []).filter((task) => {
           if (type !== "all" && getTaskType(task) !== type) return false;
           if (
             cdk &&
@@ -6825,7 +6882,31 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           ) {
             return false;
           }
-          return status === "all" || String(task.status || "") === status;
+          const taskStatus = String(task.status || "");
+          if (status === "all") return true;
+          if (status === "running") {
+            return (
+              taskStatus === "running" ||
+              taskStatus === "retry" ||
+              taskStatus === "processing"
+            );
+          }
+          if (status === "failed") {
+            return (
+              taskStatus === "failed" ||
+              taskStatus === "manual" ||
+              taskStatus === "maintenance" ||
+              taskStatus === "card_invalid"
+            );
+          }
+          return taskStatus === status;
+        });
+        return filtered.sort((left, right) => {
+          const isActive = (value) =>
+            value === "running" || value === "retry" || value === "processing";
+          const leftRunning = isActive(String(left.status || "")) ? 1 : 0;
+          const rightRunning = isActive(String(right.status || "")) ? 1 : 0;
+          return rightRunning - leftRunning;
         });
       }
 
@@ -7143,19 +7224,19 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         const end = Math.min(state.page * state.pageSize, total);
         const pageItems = getPaginationItems(state.page, totalPages);
         document.getElementById(containerId).innerHTML = `
-                <div class="pagination-meta">共 ${total} 条，当前显示 ${start}-${end}</div>
-                <div class="pagination">
-                    <button class="pagination-nav" onclick="changePage('${stateKey}', ${state.page - 1})" ${state.page <= 1 ? "disabled" : ""}>上一页</button>
-                    ${pageItems
-                      .map((item) =>
-                        item === "ellipsis"
-                          ? '<span class="pagination-ellipsis">...</span>'
-                          : `<button class="${item === state.page ? "active" : ""}" onclick="changePage('${stateKey}', ${item})">${item}</button>`,
-                      )
-                      .join("")}
-                    <button class="pagination-nav" onclick="changePage('${stateKey}', ${state.page + 1})" ${state.page >= totalPages ? "disabled" : ""}>下一页</button>
-                </div>
-            `;
+                      <div class="pagination-meta">共 ${total} 条，当前显示 ${start}-${end}</div>
+                      <div class="pagination">
+                          <button class="pagination-nav" onclick="changePage('${stateKey}', ${state.page - 1})" ${state.page <= 1 ? "disabled" : ""}>上一页</button>
+                          ${pageItems
+                            .map((item) =>
+                              item === "ellipsis"
+                                ? '<span class="pagination-ellipsis">...</span>'
+                                : `<button class="${item === state.page ? "active" : ""}" onclick="changePage('${stateKey}', ${item})">${item}</button>`,
+                            )
+                            .join("")}
+                          <button class="pagination-nav" onclick="changePage('${stateKey}', ${state.page + 1})" ${state.page >= totalPages ? "disabled" : ""}>下一页</button>
+                      </div>
+                  `;
       }
 
       function resolveNavItem(pId, el) {
@@ -7332,21 +7413,21 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               : "-";
             const safeEmail = escapeHtml(row.email || "");
             return `
-                <tr>
-                    <td><code>${safeEmail}</code></td>
-                    <td style="text-align:center">${pwdCell}</td>
-                    <td style="text-align:center">${regBadge}</td>
-                    <td style="text-align:center">${lockBadge}</td>
-                    <td>${escapeHtml(regAt)}</td>
-                    <td style="text-align:center">
-                        <button type="button" class="btn btn-success" style="padding:8px 12px;margin-right:8px;border-radius:10px;" onclick="previewPoolMailbox(${id})">
-                            <i data-lucide="inbox"></i> 邮件
-                        </button>
-                        <button type="button" class="btn-delete" onclick="deletePoolEmailRow(${id})">
-                            <i data-lucide="trash-2"></i>
-                        </button>
-                    </td>
-                </tr>`;
+                      <tr>
+                          <td><code>${safeEmail}</code></td>
+                          <td style="text-align:center">${pwdCell}</td>
+                          <td style="text-align:center">${regBadge}</td>
+                          <td style="text-align:center">${lockBadge}</td>
+                          <td>${escapeHtml(regAt)}</td>
+                          <td style="text-align:center">
+                              <button type="button" class="btn btn-success" style="padding:8px 12px;margin-right:8px;border-radius:10px;" onclick="previewPoolMailbox(${id})">
+                                  <i data-lucide="inbox"></i> 邮件
+                              </button>
+                              <button type="button" class="btn-delete" onclick="deletePoolEmailRow(${id})">
+                                  <i data-lucide="trash-2"></i>
+                              </button>
+                          </td>
+                      </tr>`;
           })
           .join("");
         lucide.createIcons();
@@ -7440,12 +7521,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             tbody.innerHTML = rows
               .map(
                 (m) => `
-                    <tr>
-                        <td>${escapeHtml(m.folder)}</td>
-                        <td>${escapeHtml(m.subject)}</td>
-                        <td>${escapeHtml(m.from)}</td>
-                        <td>${escapeHtml(m.date)}</td>
-                    </tr>`,
+                          <tr>
+                              <td>${escapeHtml(m.folder)}</td>
+                              <td>${escapeHtml(m.subject)}</td>
+                              <td>${escapeHtml(m.from)}</td>
+                              <td>${escapeHtml(m.date)}</td>
+                          </tr>`,
               )
               .join("");
           }
@@ -7965,26 +8046,26 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 ? `<button type="button" class="btn btn-success" style="padding:4px 8px; font-size:12px;" data-enable-renew="${jobKey}" title="开启自动续费">开启续费</button>`
                 : "";
             return `
-                <tr>
-                    <td>${escapeHtml(row.time || row.created_at || "-")}</td>
-                    <td><code>${escapeHtml(row.cdk_code || "-")}</code></td>
-                    <td>${sessionCell}</td>
-                    <td style="text-align:center">${escapeHtml(row.card_last4 || "-")}</td>
-                    <td>${escapeHtml(row.message || "-")}</td>
-                    <td>${renderStatus(row.status)}</td>
-                    <td style="text-align:center">${renderAutoRenewCell(row)}</td>
-                    <td style="text-align:center">
-                        <div class="table-action-group">
-                            <button type="button" class="btn btn-primary" style="padding:4px 8px; font-size:12px;" data-copy-session="${jobKey}" title="复制 Session">复制</button>
-                            <button type="button" class="btn btn-success" style="padding:4px 8px; font-size:12px;" data-export-session="${jobKey}" title="导出 Session">导出</button>
-                            ${enableRenewBtn}
-                            ${cancelRenewBtn}
-                            <button type="button" class="btn-delete" title="删除此任务记录" data-delete-task="${jobKey}">
-                                <i data-lucide="trash-2"></i>
-                            </button>
-                        </div>
-                    </td>
-                </tr>`;
+                      <tr>
+                          <td>${escapeHtml(row.time || row.created_at || "-")}</td>
+                          <td><code>${escapeHtml(row.cdk_code || "-")}</code></td>
+                          <td>${sessionCell}</td>
+                          <td style="text-align:center">${escapeHtml(row.card_last4 || "-")}</td>
+                          <td>${escapeHtml(row.message || "-")}</td>
+                          <td>${renderStatus(row.status)}</td>
+                          <td style="text-align:center">${renderAutoRenewCell(row)}</td>
+                          <td style="text-align:center">
+                              <div class="table-action-group">
+                                  <button type="button" class="btn btn-primary" style="padding:4px 8px; font-size:12px;" data-copy-session="${jobKey}" title="复制 Session">复制</button>
+                                  <button type="button" class="btn btn-success" style="padding:4px 8px; font-size:12px;" data-export-session="${jobKey}" title="导出 Session">导出</button>
+                                  ${enableRenewBtn}
+                                  ${cancelRenewBtn}
+                                  <button type="button" class="btn-delete" title="删除此任务记录" data-delete-task="${jobKey}">
+                                      <i data-lucide="trash-2"></i>
+                                  </button>
+                              </div>
+                          </td>
+                      </tr>`;
           })
           .join("");
         lucide.createIcons();
@@ -8058,33 +8139,33 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               ? `${item.last_check_latency_ms || 0}ms`
               : "—";
             return `
-                    <tr id="proxy_row_${item.id}">
-                        <td style="text-align:center;">
-                            <label class="toggle-control" style="justify-content:center;">
-                                <input type="checkbox" class="toggle-input" ${item.is_active ? "checked" : ""} onchange="toggleProxyActive(${item.id}, this.checked)">
-                                <span class="toggle-switch"></span>
-                            </label>
-                        </td>
-                        <td style="text-align:center;" id="proxy_check_${item.id}">${renderProxyCheckBadge(item)}</td>
-                        <td id="proxy_ip_${item.id}">${ipCell}</td>
-                        <td style="text-align:center;" id="proxy_lat_${item.id}">${latency}</td>
-                        <td style="text-align:center;"><code>${escapeHtml(item.protocol || "-")}</code></td>
-                        <td><code style="font-size:12px; word-break:break-all;">${escapeHtml(item.proxy_url || "")}</code></td>
-                        <td style="text-align:center;">
-                          <button type="button" class="btn btn-secondary" style="min-width:32px; padding:6px 8px; justify-content:center;" onclick="editSavedProxy(${item.id})" title="编辑代理">
-                            <i data-lucide="pencil"></i>
-                          </button>
-                        </td>
-                        <td style="text-align:center;">
-                          <button type="button" class="btn btn-secondary" style="min-width:58px; padding:4px 10px; font-size:12px; justify-content:center;" onclick="testSavedProxy(${item.id})">检测</button>
-                        </td>
-                        <td style="text-align:center;">
-                            <button type="button" class="btn-delete" onclick="deleteSavedProxy(${item.id})" title="删除">
-                                <i data-lucide="trash-2"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `;
+                          <tr id="proxy_row_${item.id}">
+                              <td style="text-align:center;">
+                                  <label class="toggle-control" style="justify-content:center;">
+                                      <input type="checkbox" class="toggle-input" ${item.is_active ? "checked" : ""} onchange="toggleProxyActive(${item.id}, this.checked)">
+                                      <span class="toggle-switch"></span>
+                                  </label>
+                              </td>
+                              <td style="text-align:center;" id="proxy_check_${item.id}">${renderProxyCheckBadge(item)}</td>
+                              <td id="proxy_ip_${item.id}">${ipCell}</td>
+                              <td style="text-align:center;" id="proxy_lat_${item.id}">${latency}</td>
+                              <td style="text-align:center;"><code>${escapeHtml(item.protocol || "-")}</code></td>
+                              <td><code style="font-size:12px; word-break:break-all;">${escapeHtml(item.proxy_url || "")}</code></td>
+                              <td style="text-align:center;">
+                                <button type="button" class="btn btn-secondary" style="min-width:32px; padding:6px 8px; justify-content:center;" onclick="editSavedProxy(${item.id})" title="编辑代理">
+                                  <i data-lucide="pencil"></i>
+                                </button>
+                              </td>
+                              <td style="text-align:center;">
+                                <button type="button" class="btn btn-secondary" style="min-width:58px; padding:4px 10px; font-size:12px; justify-content:center;" onclick="testSavedProxy(${item.id})">检测</button>
+                              </td>
+                              <td style="text-align:center;">
+                                  <button type="button" class="btn-delete" onclick="deleteSavedProxy(${item.id})" title="删除">
+                                      <i data-lucide="trash-2"></i>
+                                  </button>
+                              </td>
+                          </tr>
+                      `;
           })
           .join("");
 
@@ -8150,19 +8231,19 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 .join("") ||
               '<div style="font-size:11px; opacity:0.6;">无打开页面</div>';
             return `
-                <div style="border:1px solid ${border}; background:${bg}; border-radius:14px; padding:16px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                        <strong style="font-size:16px;">Slot #${slot.slotId}</strong>
-                        <span class="status-badge ${busy ? "status-warning" : "status-success"}">${statusText}</span>
-                    </div>
-                    <div style="font-size:13px; line-height:1.65; color:var(--text-dim);">
-                        <div>CDP: <code>${escapeHtml(slot.cdpUrl || "")}</code></div>
-                        <div>端口: ${slot.port} · 累计 ${slot.uses || 0} 次 · 运行 ${formatDurationShort(slot.uptimeSec)}</div>
-                        <div>Profile: ${escapeHtml(slot.profileSizeText || "0 B")}</div>
-                        <div>页面数: ${slot.pageCount || 0}${busy ? ` · 任务 <code>${job}</code>` : ""}</div>
-                    </div>
-                    <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--divider);">${urls}</div>
-                </div>`;
+                      <div style="border:1px solid ${border}; background:${bg}; border-radius:14px; padding:16px;">
+                          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                              <strong style="font-size:16px;">Slot #${slot.slotId}</strong>
+                              <span class="status-badge ${busy ? "status-warning" : "status-success"}">${statusText}</span>
+                          </div>
+                          <div style="font-size:13px; line-height:1.65; color:var(--text-dim);">
+                              <div>CDP: <code>${escapeHtml(slot.cdpUrl || "")}</code></div>
+                              <div>端口: ${slot.port} · 累计 ${slot.uses || 0} 次 · 运行 ${formatDurationShort(slot.uptimeSec)}</div>
+                              <div>Profile: ${escapeHtml(slot.profileSizeText || "0 B")}</div>
+                              <div>页面数: ${slot.pageCount || 0}${busy ? ` · 任务 <code>${job}</code>` : ""}</div>
+                          </div>
+                          <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--divider);">${urls}</div>
+                      </div>`;
           })
           .join("");
       }
@@ -8645,11 +8726,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       }
 
       function getTaskType(task) {
-        const cdk = String(task?.cdk || "");
-        if (cdk === "[checkout-debug]") return "链接调试";
-        if (cdk === "[payment-debug]") return "支付调试";
-        if (cdk === "[self-pay]") return "自助开通";
-        return "CDK 开通";
+        return window.TaskType.getTaskType(task);
       }
 
       async function loadTaskLogs(showToast = false) {
@@ -8729,27 +8806,27 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 : "rgba(37, 99, 235, 0.12)");
 
             return `
-                <tr>
-                    <td class="select-cell"><input type="checkbox" ${selectedItems.cdk.has(code) ? "checked" : ""} onchange="toggleSelection('cdk', '${code}', this.checked)"></td>
-                    <td><span class="cdk-copy" onclick="copyCDK('${code}')"><code>${code}</code><i data-lucide="copy"></i></span></td>
-                    <td style="text-align:center"><span class="status-badge" style="background: ${planTypeBg}; color: ${planTypeColor}">${planTypeLabel}</span></td>
-                    <td><code>${sessionPreview ? escapeHtml(sessionPreview) : "-"}</code></td>
-                    <td style="text-align:center"><span class="readonly-switch ${shipped ? "active" : ""}" title="${shipped ? "已出库" : "未出库"}"></span></td>
-                    <td>${
-                      status === "processing"
-                        ? '<span class="status-badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">开通中</span>'
-                        : status === "used"
-                          ? '<span class="status-badge status-success">已使用</span>'
-                          : '<span class="status-badge status-running">未使用</span>'
-                    }</td>
-                    <td>${usedAt || "-"}</td>
-                    <td style="text-align:center">
-                        <button class="btn-delete" onclick="deleteCDK('${code}')">
-                            <i data-lucide="trash-2"></i>
-                        </button>
-                    </td>
-                </tr>
-            `;
+                      <tr>
+                          <td class="select-cell"><input type="checkbox" ${selectedItems.cdk.has(code) ? "checked" : ""} onchange="toggleSelection('cdk', '${code}', this.checked)"></td>
+                          <td><span class="cdk-copy" onclick="copyCDK('${code}')"><code>${code}</code><i data-lucide="copy"></i></span></td>
+                          <td style="text-align:center"><span class="status-badge" style="background: ${planTypeBg}; color: ${planTypeColor}">${planTypeLabel}</span></td>
+                          <td><code>${sessionPreview ? escapeHtml(sessionPreview) : "-"}</code></td>
+                          <td style="text-align:center"><span class="readonly-switch ${shipped ? "active" : ""}" title="${shipped ? "已出库" : "未出库"}"></span></td>
+                          <td>${
+                            status === "processing"
+                              ? '<span class="status-badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">开通中</span>'
+                              : status === "used"
+                                ? '<span class="status-badge status-success">已使用</span>'
+                                : '<span class="status-badge status-running">未使用</span>'
+                          }</td>
+                          <td>${usedAt || "-"}</td>
+                          <td style="text-align:center">
+                              <button class="btn-delete" onclick="deleteCDK('${code}')">
+                                  <i data-lucide="trash-2"></i>
+                              </button>
+                          </td>
+                      </tr>
+                  `;
           })
           .join("");
         renderPagination("cdk_pagination", "cdk", pageData.total);
@@ -8945,22 +9022,22 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               : "-";
             const statusBadge = getCardStatusBadge(card);
             return `
-                <tr>
-                    <td><code>${cardNumber}</code></td>
-                    <td><code>${cardExpiry}</code></td>
-                    <td><code>${cardCvc}</code></td>
-                    <td>${importHolder}</td>
-                    <td>${paymentHolder}</td>
-                    <td style="font-size:12px; color:var(--text-secondary); max-width:280px; word-break:break-word;">${boundAddress}</td>
-                    <td style="text-align:center">${statusBadge}</td>
-                    <td style="text-align:center">${usageCount}</td>
-                    <td style="text-align:center">${lastUsed}</td>
-                    <td style="text-align:center">
-                        <button class="btn-delete" onclick="deleteCardPoolItem(${card.id})" title="删除">
-                            <i data-lucide="trash-2"></i>
-                        </button>
-                    </td>
-                </tr>`;
+                      <tr>
+                          <td><code>${cardNumber}</code></td>
+                          <td><code>${cardExpiry}</code></td>
+                          <td><code>${cardCvc}</code></td>
+                          <td>${importHolder}</td>
+                          <td>${paymentHolder}</td>
+                          <td style="font-size:12px; color:var(--text-secondary); max-width:280px; word-break:break-word;">${boundAddress}</td>
+                          <td style="text-align:center">${statusBadge}</td>
+                          <td style="text-align:center">${usageCount}</td>
+                          <td style="text-align:center">${lastUsed}</td>
+                          <td style="text-align:center">
+                              <button class="btn-delete" onclick="deleteCardPoolItem(${card.id})" title="删除">
+                                  <i data-lucide="trash-2"></i>
+                              </button>
+                          </td>
+                      </tr>`;
           })
           .join("");
         lucide.createIcons();
@@ -9112,27 +9189,27 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                   ? "status-success"
                   : "status-warning";
             return `
-                <tr>
-                    <td class="col-time">${escapeHtml(l.time || "-")}</td>
-                    <td><span class="status-badge ${taskTypeClass}">${taskType}</span></td>
-                    <td class="col-cdk"><code>${escapeHtml(l.cdk || "-")}</code></td>
-                    <td class="col-token"><code>${escapeHtml(l.token || "-")}</code></td>
-                    <td class="col-progress">
-                        <div style="font-size: 12px; margin-bottom: 2px;">${l.progress}%</div>
-                        <div class="progress-mini-track">
-                            <div class="progress-mini-bar ${l.status}" style="width: ${l.progress}%"></div>
-                        </div>
-                    </td>
-                    <td class="col-duration">${escapeHtml(formatDurationText(l.durationSeconds))}</td>
-                    <td class="col-status">${renderStatus(l.status)}</td>
-                    <td class="col-media">${mediaCell}</td>
-                    <td class="col-action" style="text-align:center">
-                      <div class="table-action-group task-action-buttons">
-                        <button type="button" class="btn btn-primary" data-view-task-detail="${escapeHtml(l.id)}">详情</button>
-                        <button type="button" class="btn-delete" title="删除此任务记录" data-delete-task="${escapeHtml(l.id)}"><i data-lucide="trash-2"></i></button>
-                      </div>
-                    </td>
-                </tr>`;
+                      <tr>
+                          <td class="col-time">${escapeHtml(l.time || "-")}</td>
+                          <td><span class="status-badge ${taskTypeClass}">${taskType}</span></td>
+                          <td class="col-cdk"><code>${escapeHtml(l.cdk || "-")}</code></td>
+                          <td class="col-token"><code>${escapeHtml(l.token || "-")}</code></td>
+                          <td class="col-progress">
+                              <div style="font-size: 12px; margin-bottom: 2px;">${l.progress}%</div>
+                              <div class="progress-mini-track">
+                                  <div class="progress-mini-bar ${l.status}" style="width: ${l.progress}%"></div>
+                              </div>
+                          </td>
+                          <td class="col-duration">${escapeHtml(formatDurationText(l.durationSeconds))}</td>
+                          <td class="col-status">${renderStatus(l.status)}</td>
+                          <td class="col-media">${mediaCell}</td>
+                          <td class="col-action" style="text-align:center">
+                            <div class="table-action-group task-action-buttons">
+                              <button type="button" class="btn btn-primary" data-view-task-detail="${escapeHtml(l.id)}">详情</button>
+                              <button type="button" class="btn-delete" title="删除此任务记录" data-delete-task="${escapeHtml(l.id)}"><i data-lucide="trash-2"></i></button>
+                            </div>
+                          </td>
+                      </tr>`;
           })
           .join("");
         renderPagination("log_pagination", "log", pageData.total);
@@ -9248,15 +9325,15 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             const isActive = isAssetActive(item);
             const key = item.phone || "";
             return `
-                <tr>
-                    <td class="select-cell"><input type="checkbox" ${selectedItems.phone_pool.has(key) ? "checked" : ""} onchange="toggleSelection('phone_pool', '${key}', this.checked)"></td>
-                    <td><input type="text" class="asset-input" value="${item.phone}" onchange="phonePool[${actualIndex}].phone=this.value" placeholder="13800000000"></td>
-                    <td><input type="text" class="asset-input" value="${item.key}" onchange="phonePool[${actualIndex}].key=this.value" placeholder="API Key"></td>
-                    <td style="text-align:center">${Number(item.usage_count || 0)}</td>
-                    <td style="text-align:center">${renderAssetStatus(isActive)}</td>
-                    <td style="text-align:center"><button class="btn-delete" onclick="phonePool.splice(${actualIndex},1);renderPhoneTable()" title="删除"><i data-lucide="trash-2"></i></button></td>
-                </tr>
-            `;
+                      <tr>
+                          <td class="select-cell"><input type="checkbox" ${selectedItems.phone_pool.has(key) ? "checked" : ""} onchange="toggleSelection('phone_pool', '${key}', this.checked)"></td>
+                          <td><input type="text" class="asset-input" value="${item.phone}" onchange="phonePool[${actualIndex}].phone=this.value" placeholder="13800000000"></td>
+                          <td><input type="text" class="asset-input" value="${item.key}" onchange="phonePool[${actualIndex}].key=this.value" placeholder="API Key"></td>
+                          <td style="text-align:center">${Number(item.usage_count || 0)}</td>
+                          <td style="text-align:center">${renderAssetStatus(isActive)}</td>
+                          <td style="text-align:center"><button class="btn-delete" onclick="phonePool.splice(${actualIndex},1);renderPhoneTable()" title="删除"><i data-lucide="trash-2"></i></button></td>
+                      </tr>
+                  `;
           })
           .join("");
         renderPagination("phone_pool_pagination", "phone_pool", pageData.total);
@@ -9953,36 +10030,36 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           .map((p) => {
             const isActive = p.status === "正常";
             return `
-                <tr>
-                    <td class="select-cell"><input type="checkbox" ${selectedItems.product.has(String(p.id)) ? "checked" : ""} onchange="toggleSelection('product', '${p.id}', this.checked)"></td>
-                    <td><code>${p.email}</code></td>
-                    <td>${p.claimed_cdk ? `<code>${p.claimed_cdk}</code>` : '<span style="color: var(--text-dim);">-</span>'}</td>
-                    <td>
-                        ${
-                          p.imap_key
-                            ? `<a href="https://imap.chiyiyi.cloud/?key=${encodeURIComponent(p.imap_key)}" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: none; font-family: monospace;">${p.imap_key}</a>`
-                            : '<span style="color: var(--text-dim);">-</span>'
-                        }
-                    </td>
-                    <td>${p.time}</td>
-                    <td style="text-align:center">
-                        <span class="status-badge ${isActive ? "status-success" : "status-failed"}" style="cursor: pointer;" onclick="toggleProductStatus('${p.id}', '${p.status}')" title="${isActive ? "点击封禁" : "点击恢复"}">${p.status}</span>
-                    </td>
-                    <td style="text-align:center">
-                        <span class="readonly-switch ${p.shipped ? "active" : ""}" title="${p.shipped ? "已出库" : "未出库"}"></span>
-                    </td>
-                    <td>
-                        <div style="display: flex; justify-content: center; gap: 8px;">
-                            <button class="btn-delete" style="background: rgba(16, 185, 129, 0.12); color: var(--success);" onclick="exportSingleProduct('${p.id}', '${p.email}')" title="单个出库下载">
-                                <i data-lucide="download"></i>
-                            </button>
-                            <button class="btn-delete" onclick="deleteProduct('${p.id}')" title="删除">
-                                <i data-lucide="trash-2"></i>
-                            </button>
-                        </div>
-                    </td>
-                </tr>
-            `;
+                      <tr>
+                          <td class="select-cell"><input type="checkbox" ${selectedItems.product.has(String(p.id)) ? "checked" : ""} onchange="toggleSelection('product', '${p.id}', this.checked)"></td>
+                          <td><code>${p.email}</code></td>
+                          <td>${p.claimed_cdk ? `<code>${p.claimed_cdk}</code>` : '<span style="color: var(--text-dim);">-</span>'}</td>
+                          <td>
+                              ${
+                                p.imap_key
+                                  ? `<a href="https://imap.chiyiyi.cloud/?key=${encodeURIComponent(p.imap_key)}" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: none; font-family: monospace;">${p.imap_key}</a>`
+                                  : '<span style="color: var(--text-dim);">-</span>'
+                              }
+                          </td>
+                          <td>${p.time}</td>
+                          <td style="text-align:center">
+                              <span class="status-badge ${isActive ? "status-success" : "status-failed"}" style="cursor: pointer;" onclick="toggleProductStatus('${p.id}', '${p.status}')" title="${isActive ? "点击封禁" : "点击恢复"}">${p.status}</span>
+                          </td>
+                          <td style="text-align:center">
+                              <span class="readonly-switch ${p.shipped ? "active" : ""}" title="${p.shipped ? "已出库" : "未出库"}"></span>
+                          </td>
+                          <td>
+                              <div style="display: flex; justify-content: center; gap: 8px;">
+                                  <button class="btn-delete" style="background: rgba(16, 185, 129, 0.12); color: var(--success);" onclick="exportSingleProduct('${p.id}', '${p.email}')" title="单个出库下载">
+                                      <i data-lucide="download"></i>
+                                  </button>
+                                  <button class="btn-delete" onclick="deleteProduct('${p.id}')" title="删除">
+                                      <i data-lucide="trash-2"></i>
+                                  </button>
+                              </div>
+                          </td>
+                      </tr>
+                  `;
           })
           .join("");
         renderPagination("product_pagination", "product", pageData.total);
@@ -10461,20 +10538,20 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 (r.card_number ? String(r.card_number).slice(-4) : ""),
             );
             return `<tr>
-                    <td>${escapeHtml(time)}</td>
-                    <td><a href="javascript:void(0)" onclick="showCardBillingSummary('${cardSummaryKey}')" style="cursor:pointer; color:var(--primary); font-weight:600; font-family:monospace;">${cardDisplay}</a></td>
-                    <td>${escapeHtml(r.amount != null ? Number(r.amount).toFixed(2) : "-")}</td>
-                    <td>${escapeHtml(r.currency || "-")}</td>
-                    <td>${escapeHtml(planLabel)}</td>
-                    <td style="font-family:monospace; font-size:12px;">${escapeHtml(r.cdk_code || "-")}</td>
-                    <td style="font-size:12px;">${escapeHtml(r.email || "-")}</td>
-                    <td style="text-align:center"><span class="status-badge ${statusClass}">${statusText}</span></td>
-                    <td style="text-align:center">
-                        <button type="button" class="btn-delete" data-delete-billing="${escapeHtml(String(r.id))}" title="删除此账单">
-                            <i data-lucide="trash-2"></i>
-                        </button>
-                    </td>
-                </tr>`;
+                          <td>${escapeHtml(time)}</td>
+                          <td><a href="javascript:void(0)" onclick="showCardBillingSummary('${cardSummaryKey}')" style="cursor:pointer; color:var(--primary); font-weight:600; font-family:monospace;">${cardDisplay}</a></td>
+                          <td>${escapeHtml(r.amount != null ? Number(r.amount).toFixed(2) : "-")}</td>
+                          <td>${escapeHtml(r.currency || "-")}</td>
+                          <td>${escapeHtml(planLabel)}</td>
+                          <td style="font-family:monospace; font-size:12px;">${escapeHtml(r.cdk_code || "-")}</td>
+                          <td style="font-size:12px;">${escapeHtml(r.email || "-")}</td>
+                          <td style="text-align:center"><span class="status-badge ${statusClass}">${statusText}</span></td>
+                          <td style="text-align:center">
+                              <button type="button" class="btn-delete" data-delete-billing="${escapeHtml(String(r.id))}" title="删除此账单">
+                                  <i data-lucide="trash-2"></i>
+                              </button>
+                          </td>
+                      </tr>`;
           })
           .join("");
         lucide.createIcons();
@@ -10629,34 +10706,34 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           }
           const summary = data;
           stats.innerHTML = `
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <span class="stat-label">累计消费金额</span>
-                            <div class="stat-icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
-                                <i data-lucide="banknote"></i>
-                            </div>
-                        </div>
-                        <div class="stat-value" style="color: #047857;">${Number(summary.cumulative_amount || 0).toFixed(2)}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <span class="stat-label">成功支付次数</span>
-                            <div class="stat-icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
-                                <i data-lucide="check-circle"></i>
-                            </div>
-                        </div>
-                        <div class="stat-value" style="color: var(--success);">${summary.success_count || 0}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-header">
-                            <span class="stat-label">失败支付次数</span>
-                            <div class="stat-icon" style="background: rgba(239, 68, 68, 0.1); color: #f87171;">
-                                <i data-lucide="x-circle"></i>
-                            </div>
-                        </div>
-                        <div class="stat-value" style="color: var(--error);">${summary.failed_count || 0}</div>
-                    </div>
-                `;
+                          <div class="stat-card">
+                              <div class="stat-header">
+                                  <span class="stat-label">累计消费金额</span>
+                                  <div class="stat-icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
+                                      <i data-lucide="banknote"></i>
+                                  </div>
+                              </div>
+                              <div class="stat-value" style="color: #047857;">${Number(summary.cumulative_amount || 0).toFixed(2)}</div>
+                          </div>
+                          <div class="stat-card">
+                              <div class="stat-header">
+                                  <span class="stat-label">成功支付次数</span>
+                                  <div class="stat-icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
+                                      <i data-lucide="check-circle"></i>
+                                  </div>
+                              </div>
+                              <div class="stat-value" style="color: var(--success);">${summary.success_count || 0}</div>
+                          </div>
+                          <div class="stat-card">
+                              <div class="stat-header">
+                                  <span class="stat-label">失败支付次数</span>
+                                  <div class="stat-icon" style="background: rgba(239, 68, 68, 0.1); color: #f87171;">
+                                      <i data-lucide="x-circle"></i>
+                                  </div>
+                              </div>
+                              <div class="stat-value" style="color: var(--error);">${summary.failed_count || 0}</div>
+                          </div>
+                      `;
           lucide.createIcons();
         } catch (e) {
           stats.innerHTML = `<div style="padding:20px; color:var(--error);">加载失败: ${escapeHtml(e.message)}</div>`;
@@ -10717,7 +10794,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             adminLoginPath = data.loginUrl;
           }
         } catch (_) {}
-
         document
           .getElementById("admin_login_path")
           ?.addEventListener("input", updateAdminPathPreview);
@@ -10739,10 +10815,17 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             clearInterval(adminDataRefreshTimer);
           }
           adminDataRefreshTimer = setInterval(() => {
-            if (!adminDataRefreshPaused) {
-              loadData(false).catch(() => {});
+            if (adminDataRefreshPaused) return;
+            const logsPage = document.getElementById("logs");
+            if (logsPage && logsPage.classList.contains("active")) {
+              loadTaskLogs(false).catch(() => {});
+              return;
             }
-          }, 3000);
+            const now = Date.now();
+            if (now - lastAdminDataRefreshAt < 3000) return;
+            lastAdminDataRefreshAt = now;
+            loadData(false).catch(() => {});
+          }, 1000);
           updateAdminDataRefreshButton();
           lucide.createIcons();
         } catch (error) {
@@ -11051,12 +11134,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         }
         cardOptions += '<option value="manual">手动输入新卡片</option>';
         const extraHtml = `
-          <label>用卡方式</label>
-          <select class="asset-input" data-confirm-value onchange="document.getElementById('checkout_manual_card_input').hidden = this.value !== 'manual'">
-            ${cardOptions}
-          </select>
-          <input id="checkout_manual_card_input" class="asset-input" data-confirm-extra hidden placeholder="卡号|月/年|CVC|持卡人（可选）">
-        `;
+                <label>用卡方式</label>
+                <select class="asset-input" data-confirm-value onchange="document.getElementById('checkout_manual_card_input').hidden = this.value !== 'manual'">
+                  ${cardOptions}
+                </select>
+                <input id="checkout_manual_card_input" class="asset-input" data-confirm-extra hidden placeholder="卡号|月/年|CVC|持卡人（可选）">
+              `;
         const confirmed = await showAdminConfirm(
           "默认跟随系统从卡池选卡。也可指定一张卡，或手动输入新卡片。",
           "确认支付调试",
@@ -11579,20 +11662,20 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               ? '<button class="btn-delete" disabled style="opacity:0.4;cursor:not-allowed;" title="已绑定不可删"><i data-lucide="trash-2"></i></button>'
               : `<button class="btn-delete" onclick="deleteAddress(${addr.id})" title="删除"><i data-lucide="trash-2"></i></button>`;
             return `
-                <tr>
-                    <td>${escapeHtml(addr.line1)}</td>
-                    <td>${escapeHtml(addr.city)}</td>
-                    <td>${escapeHtml(addr.state)}</td>
-                    <td>${escapeHtml(addr.postal_code)}</td>
-                    <td>${escapeHtml(addr.country)}</td>
-                    <td style="text-align:center">${statusBadge}</td>
-                    <td style="text-align:center">
-                        <div style="display: flex; justify-content: center; gap: 8px;">
-                            ${editBtn}
-                            ${deleteBtn}
-                        </div>
-                    </td>
-                </tr>`;
+                      <tr>
+                          <td>${escapeHtml(addr.line1)}</td>
+                          <td>${escapeHtml(addr.city)}</td>
+                          <td>${escapeHtml(addr.state)}</td>
+                          <td>${escapeHtml(addr.postal_code)}</td>
+                          <td>${escapeHtml(addr.country)}</td>
+                          <td style="text-align:center">${statusBadge}</td>
+                          <td style="text-align:center">
+                              <div style="display: flex; justify-content: center; gap: 8px;">
+                                  ${editBtn}
+                                  ${deleteBtn}
+                              </div>
+                          </td>
+                      </tr>`;
           })
           .join("");
         lucide.createIcons();

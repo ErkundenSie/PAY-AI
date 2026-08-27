@@ -11,6 +11,8 @@
       rel="stylesheet"
     />
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="/jwt-decode.js"></script>
+    <script src="/us-tax-free-address.js"></script>
   </head>
 
   <body class="recharge-page checkout-page">
@@ -287,34 +289,11 @@
       let activeJobKey = "";
       let activeViewerToken = "";
       let taskCompleted = false;
+      let taskStatusPollTimer = null;
       const WS_HEARTBEAT_INTERVAL_MS = 15000;
       const WS_HEARTBEAT_TIMEOUT_MS = 45000;
-
-      function decodeJwtPart(part) {
-        const normalized = String(part || "")
-          .replace(/-/g, "+")
-          .replace(/_/g, "/");
-        const padded = normalized.padEnd(
-          normalized.length + ((4 - (normalized.length % 4)) % 4),
-          "=",
-        );
-        return JSON.parse(atob(padded));
-      }
-
-      function parseSessionJsonInput(content) {
-        const trimmed = String(content || "")
-          .trim()
-          .replace(/^\uFEFF/, "");
-        if (!trimmed.startsWith("{")) return null;
-        try {
-          const data = JSON.parse(trimmed);
-          if (data?.accessToken || data?.access_token || data?.user)
-            return data;
-        } catch (_) {
-          return null;
-        }
-        return null;
-      }
+      const decodeJwtPart = window.JwtDecode.decodeJwtPart;
+      const parseSessionJsonInput = window.JwtDecode.parseSessionJson;
 
       function validateAccessToken(token) {
         const value = String(token || "").trim();
@@ -519,6 +498,7 @@
       }
 
       function closeTaskSocket() {
+        stopTaskStatusPoll();
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
         clearSocketHeartbeat();
@@ -576,13 +556,59 @@
         }
       }
 
+      function stopTaskStatusPoll() {
+        clearInterval(taskStatusPollTimer);
+        taskStatusPollTimer = null;
+      }
+
+      async function pollTaskStatus() {
+        if (!activeJobKey || taskCompleted) {
+          stopTaskStatusPoll();
+          return;
+        }
+        try {
+          const response = await fetch(
+            `/api/public/checkout/status/${encodeURIComponent(activeJobKey)}?token=${encodeURIComponent(activeViewerToken)}`,
+          );
+          const data = await response.json();
+          if (response.status === 401 || response.status === 400) {
+            stopTaskStatusPoll();
+            if (!taskCompleted) {
+              showStatus(data.error || "任务状态查询失败", "error");
+              setButtonText(START_FAILED_TEXT);
+              setLoading(false);
+              payBtn.disabled = false;
+            }
+            return;
+          }
+          if (!data.success) return;
+          applyTaskState({
+            type: "snapshot",
+            jobKey: activeJobKey,
+            status: data.status,
+            message: data.message,
+            progress: Number(data.progress || 0),
+          });
+        } catch (_) {}
+      }
+
+      function startTaskStatusPoll() {
+        stopTaskStatusPoll();
+        pollTaskStatus();
+        taskStatusPollTimer = setInterval(pollTaskStatus, 1000);
+      }
+
       function initWebSocket(jobKey, viewerToken = activeViewerToken) {
         if (!jobKey || !viewerToken) {
           showStatus("任务订阅凭据缺失，请重新提交", "error");
+          setButtonText(START_FAILED_TEXT);
+          setLoading(false);
+          payBtn.disabled = false;
           return;
         }
         activeJobKey = jobKey;
         activeViewerToken = viewerToken;
+        startTaskStatusPoll();
         if (
           socket &&
           (socket.readyState === WebSocket.OPEN ||
@@ -621,9 +647,15 @@
             }
           } catch (_) {}
         };
-        socket.onclose = () => {
+        socket.onclose = (event) => {
           clearSocketHeartbeat();
           socket = null;
+          if (event && event.code === 1008) {
+            if (!taskCompleted) {
+              showStatus("任务订阅失败，进度将通过状态查询继续更新", "error");
+            }
+            return;
+          }
           if (activeJobKey && !taskCompleted) {
             clearTimeout(reconnectTimer);
             reconnectTimer = setTimeout(
@@ -635,7 +667,10 @@
       }
 
       function isCreditsPlan(planType) {
-        return String(planType || "").startsWith("credits");
+        const raw = String(planType || "")
+          .trim()
+          .toLowerCase();
+        return raw === "credits" || raw.startsWith("credits_");
       }
 
       function syncCreditQuantityUi() {
@@ -643,26 +678,94 @@
         if (creditQuantityWrap) creditQuantityWrap.hidden = !show;
       }
 
+      function pickRandom(list) {
+        return list[Math.floor(Math.random() * list.length)];
+      }
+
+      function generateRandomHolderName() {
+        const firstNames = [
+          "James",
+          "Mary",
+          "Robert",
+          "Patricia",
+          "John",
+          "Jennifer",
+          "Michael",
+          "Linda",
+          "David",
+          "Elizabeth",
+          "William",
+          "Barbara",
+          "Richard",
+          "Susan",
+          "Joseph",
+          "Jessica",
+          "Thomas",
+          "Sarah",
+          "Christopher",
+          "Karen",
+          "Charles",
+          "Lisa",
+          "Daniel",
+          "Nancy",
+          "Matthew",
+          "Betty",
+          "Anthony",
+          "Margaret",
+          "Mark",
+          "Sandra",
+        ];
+        const lastNames = [
+          "Smith",
+          "Johnson",
+          "Williams",
+          "Brown",
+          "Jones",
+          "Garcia",
+          "Miller",
+          "Davis",
+          "Rodriguez",
+          "Martinez",
+          "Hernandez",
+          "Lopez",
+          "Gonzalez",
+          "Wilson",
+          "Anderson",
+          "Thomas",
+          "Taylor",
+          "Moore",
+          "Jackson",
+          "Martin",
+          "Lee",
+          "Perez",
+          "Thompson",
+          "White",
+          "Harris",
+          "Sanchez",
+          "Clark",
+          "Ramirez",
+          "Lewis",
+          "Robinson",
+        ];
+        return `${pickRandom(firstNames)} ${pickRandom(lastNames)}`;
+      }
+
       function fillSampleAddress() {
-        const streets = [
-          "182 Highland Ave",
-          "410 Market Street",
-          "88 Cedar Lane",
-          "215 Pine Street",
-        ];
-        const cities = [
-          { city: "Portland", state: "Oregon", zip: "97201" },
-          { city: "Salem", state: "Oregon", zip: "97301" },
-          { city: "Eugene", state: "Oregon", zip: "97401" },
-          { city: "Dover", state: "Delaware", zip: "19901" },
-        ];
-        const place = cities[Math.floor(Math.random() * cities.length)];
-        addrLine1.value = streets[Math.floor(Math.random() * streets.length)];
-        addrCity.value = place.city;
-        addrState.value = place.state;
-        addrPostal.value = place.zip;
-        addrCountry.value = "US";
-        if (!cardHolder.value.trim()) cardHolder.value = "Alex Johnson";
+        const generator = window.UsTaxFreeAddress;
+        if (
+          !generator ||
+          typeof generator.generateRandomUsTaxFreeAddress !== "function"
+        ) {
+          showStatus("地址生成器未加载，请刷新页面后重试", "error");
+          return;
+        }
+        const address = generator.generateRandomUsTaxFreeAddress();
+        addrLine1.value = address.line1;
+        addrCity.value = address.city;
+        addrState.value = address.state;
+        addrPostal.value = address.postal_code;
+        addrCountry.value = address.country || "US";
+        cardHolder.value = generateRandomHolderName();
       }
 
       function updateRegionHint() {

@@ -16,6 +16,17 @@ const {
   DEFAULT_API_URL: CAPTCHA_PLATFORM_DEFAULT_URL,
   resolveCaptchaPlatformCredentials,
 } = require("./captcha-platform");
+const {
+  CREDIT_QUANTITY_MIN,
+  CREDIT_QUANTITY_STEP,
+  CREDIT_QUANTITY_PRESETS,
+  PLAN_NAME_MAP,
+  isCreditsPlan,
+  listCheckoutPlans,
+  normalizeCreditQuantity,
+  resolveCreditQuantity,
+  resolvePlanName,
+} = require("./credit-quantity");
 
 const DB_HOST = process.env.DB_HOST || "127.0.0.1";
 const DB_PORT = Number(process.env.DB_PORT || 3306);
@@ -71,63 +82,7 @@ const ASSET_LOCK_STALE_MS = Number(
   process.env.ASSET_LOCK_STALE_MS || 15 * 60 * 1000,
 );
 
-// CDK / 自助开通套餐类型 → OpenAI plan_name 映射（custom checkout API）
-const PLAN_NAME_MAP = {
-  plus: "chatgptplusplan",
-  pro_5x: "chatgptprolite",
-  pro_20x: "chatgptpro",
-  credits: "platformbusiness_usage_based",
-  credits_500: "platformbusiness_usage_based",
-  credits_1000: "platformbusiness_usage_based",
-  credits_2000: "platformbusiness_usage_based",
-};
-
 const VALID_PLAN_TYPES = new Set(Object.keys(PLAN_NAME_MAP));
-const CREDIT_QUANTITY_MIN = 250;
-const CREDIT_QUANTITY_STEP = 250;
-const CREDIT_QUANTITY_PRESETS = [500, 1000, 2000];
-
-function isCreditsPlan(planType) {
-  const raw = String(planType || "")
-    .trim()
-    .toLowerCase();
-  return raw === "credits" || raw.startsWith("credits_");
-}
-
-function normalizeCreditQuantity(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < CREDIT_QUANTITY_MIN) return 0;
-  return Math.round(n / CREDIT_QUANTITY_STEP) * CREDIT_QUANTITY_STEP;
-}
-
-function resolveCreditQuantity(planType, quantity) {
-  const raw = String(planType || "")
-    .trim()
-    .toLowerCase();
-  const fromPlan = Number((raw.match(/^credits_(\d+)$/) || [])[1] || 0);
-  return normalizeCreditQuantity(quantity || fromPlan || 0);
-}
-
-function listCheckoutPlans() {
-  return [
-    { id: "plus", label: "ChatGPT Plus" },
-    { id: "pro_5x", label: "ChatGPT Pro 5x" },
-    { id: "pro_20x", label: "ChatGPT Pro 20x" },
-    { id: "credits", label: "Codex 充值点数" },
-  ];
-}
-
-/**
- * 将 plan_type 解析为 OpenAI plan_name
- * @param {string} planType - 'plus' | 'pro_5x' | 'pro_20x' | 'credits'
- * @returns {string} 对应的 plan_name，未知值默认返回 'chatgptplusplan'
- */
-function resolvePlanName(planType) {
-  if (isCreditsPlan(planType)) {
-    return PLAN_NAME_MAP.credits;
-  }
-  return PLAN_NAME_MAP[planType] || PLAN_NAME_MAP.plus;
-}
 
 function createPasswordHash(password) {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -1283,7 +1238,7 @@ async function listAdminTaskLogs(limit = 200) {
          LEFT JOIN cdk_codes c ON l.cdk_code = c.cdk_code
          WHERE (l.cdk_code IS NULL OR l.cdk_code NOT LIKE 'ADMIN_PRODUCT_GEN:%')
            AND (c.type IS NULL OR c.type = '' OR c.type = '自助')
-         ORDER BY l.created_at DESC, l.id DESC
+         ORDER BY (l.status IN ('running', 'retry', 'processing')) DESC, l.updated_at DESC, l.id DESC
          LIMIT ?`,
     [Math.min(500, Math.max(1, Number(limit) || 200))],
   );
@@ -1353,7 +1308,7 @@ async function getAdminData() {
                 COUNT(*) AS total,
                 COALESCE(SUM(status = 'success'), 0) AS success,
                 COALESCE(SUM(status IN ('failed', 'card_invalid', 'manual', 'retry', 'maintenance')), 0) AS failed,
-                COALESCE(SUM(status = 'running'), 0) AS running
+                COALESCE(SUM(status IN ('running', 'retry', 'processing')), 0) AS running
              FROM task_logs
              WHERE cdk_code IS NULL OR cdk_code NOT LIKE 'ADMIN_PRODUCT_GEN:%'`,
     ),

@@ -88,13 +88,15 @@ services:
       - ./stripe-payment.js:/app/stripe-payment.js
       - ./hcaptcha-solver.js:/app/hcaptcha-solver.js
       - ./captcha-platform.js:/app/captcha-platform.js
-      - ./hcaptcha-runtime.js:/app/hcaptcha-runtime.js
       - ./human-verification.js:/app/human-verification.js
       - ./auth-page-detect.js:/app/auth-page-detect.js
       - ./session-auth.js:/app/session-auth.js
+      - ./credit-quantity.js:/app/credit-quantity.js
+      - ./checkout-task-log.js:/app/checkout-task-log.js
       - ./subscription-check.js:/app/subscription-check.js
       - ./pricing-checkout.js:/app/pricing-checkout.js
       - ./tax-free-address.js:/app/tax-free-address.js
+      - ./us-tax-free-address.js:/app/us-tax-free-address.js
       - ./browser-pool.js:/app/browser-pool.js
       - ./browser-pool-client.js:/app/browser-pool-client.js
       - ./browser-standalone.js:/app/browser-standalone.js

@@ -151,21 +151,6 @@ const SUPPORTED_REGIONS = Object.keys(REGION_CONFIG);
 /** 默认支付地区 */
 const DEFAULT_REGION = "PH";
 
-const PLAN_TYPE_LABELS = {
-  plus: "ChatGPT Plus",
-  pro_5x: "ChatGPT Pro 5x",
-  pro_20x: "ChatGPT Pro 20x",
-  credits: "Codex 充值点数",
-  credits_500: "Codex 500 点",
-  credits_1000: "Codex 1000 点",
-  credits_2000: "Codex 2000 点",
-};
-
-/**
- * 检查地区代码是否在支持列表中
- * @param {string} regionCode - 地区代码
- * @returns {boolean}
- */
 function isSupportedRegion(regionCode) {
   return SUPPORTED_REGIONS.includes(String(regionCode || "").toUpperCase());
 }
@@ -201,18 +186,12 @@ function getRegionBrowserProfile(regionCode) {
   };
 }
 
-function getPlanTypeLabel(planType) {
-  return PLAN_TYPE_LABELS[planType] || PLAN_TYPE_LABELS.plus;
-}
-
 module.exports = {
   REGION_CONFIG,
   SUPPORTED_REGIONS,
   DEFAULT_REGION,
-  PLAN_TYPE_LABELS,
   isSupportedRegion,
   getRegionConfig,
   getRegionBilling,
   getRegionBrowserProfile,
-  getPlanTypeLabel,
 };

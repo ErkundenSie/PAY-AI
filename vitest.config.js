@@ -1,8 +1,8 @@
-import { defineConfig } from 'vitest/config';
+const { defineConfig } = require("vitest/config");
 
-export default defineConfig({
-    test: {
-        globals: true,
-        testTimeout: 30000
-    }
+module.exports = defineConfig({
+  test: {
+    globals: true,
+    testTimeout: 30000,
+  },
 });

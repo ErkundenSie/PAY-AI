@@ -3,6 +3,7 @@
 const axios = require("axios");
 const { request: playwrightRequest } = require("playwright");
 const { extractProfileFromToken } = require("./session-auth");
+const { decodeJwtPart } = require("./public/jwt-decode");
 const { preparePlaywrightProxy } = require("./playwright-proxy");
 
 const CHECK_V4_BASE =
@@ -179,17 +180,6 @@ function buildCheckHeaders(accessToken) {
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"Windows"',
   };
-}
-
-function decodeJwtPart(part) {
-  const normalized = String(part || "")
-    .replace(/-/g, "+")
-    .replace(/_/g, "/");
-  const padded = normalized.padEnd(
-    normalized.length + ((4 - (normalized.length % 4)) % 4),
-    "=",
-  );
-  return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
 }
 
 function validateSessionTokenForQuery(token) {

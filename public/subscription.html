@@ -1,297 +1,375 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>发票助手 | AI 自助充值中心</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-    <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=3" />
+    <link rel="stylesheet" href="style.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <script src="https://unpkg.com/lucide@latest"></script>
-</head>
+    <script src="/jwt-decode.js"></script>
+  </head>
 
-<body class="recharge-page subscription-page">
+  <body class="recharge-page subscription-page">
     <div class="page-shell">
-        <header class="site-hero compact-hero">
-            <a href="/" class="back-home-link"><i data-lucide="arrow-left"></i> 返回充值中心</a>
-            <h1>发票助手</h1>
-            <p class="hero-subtitle">粘贴 Session 即可查询当前订阅状态，并跳转 OpenAI 官方账单页面下载发票。</p>
-        </header>
+      <header class="site-hero compact-hero">
+        <a href="/" class="back-home-link"
+          ><i data-lucide="arrow-left"></i> 返回充值中心</a
+        >
+        <h1>发票助手</h1>
+        <p class="hero-subtitle">
+          粘贴 Session 即可查询当前订阅状态，并跳转 OpenAI
+          官方账单页面下载发票。
+        </p>
+      </header>
 
-        <main class="recharge-card subscription-card">
-            <div class="notice-banner">
-                <i data-lucide="receipt"></i>
-                <p>发票由 OpenAI 官方账单系统出具。本工具仅查询订阅信息与提供操作指引，不代开发票。</p>
+      <main class="recharge-card subscription-card">
+        <div class="notice-banner">
+          <i data-lucide="receipt"></i>
+          <p>
+            发票由 OpenAI
+            官方账单系统出具。本工具仅查询订阅信息与提供操作指引，不代开发票。
+          </p>
+        </div>
+
+        <section class="subscription-query-section">
+          <label class="field-label" for="sessionInput"
+            >粘贴完整 Session JSON</label
+          >
+          <div class="textarea-wrapper">
+            <a
+              href="https://chatgpt.com/api/auth/session"
+              target="_blank"
+              rel="noopener"
+              class="get-token-btn-floating"
+              >获取 Session</a
+            >
+            <textarea
+              id="sessionInput"
+              placeholder="打开上方链接，全选复制完整 JSON 粘贴到此处（保留 user、expires、accessToken 等全部字段）"
+              rows="5"
+            ></textarea>
+          </div>
+          <p class="field-hint subscription-field-hint">
+            Session
+            仅用于本次查询，不会被保存。查询完成后可在下方打开官方账单页面。
+          </p>
+          <div class="subscription-query-actions">
+            <button type="button" id="checkBtn" class="btn-primary btn-lg">
+              <span class="btn-text">查询订阅</span>
+              <div class="loader"></div>
+            </button>
+          </div>
+        </section>
+
+        <div id="statusMessage" class="status-message"></div>
+
+        <section
+          id="resultSection"
+          class="subscription-result"
+          style="display: none"
+        >
+          <div class="subscription-result-head">
+            <h2>订阅信息</h2>
+            <span id="activeBadge" class="flow-badge"></span>
+          </div>
+          <div id="resultCard" class="query-result-card"></div>
+          <div class="subscription-actions subscription-billing-actions">
+            <a
+              id="billingLink"
+              href="https://chatgpt.com/account/manage"
+              target="_blank"
+              rel="noopener"
+              class="btn-primary btn-lg action-link-btn"
+            >
+              <i data-lucide="external-link"></i>
+              打开 OpenAI 账单页面
+            </a>
+          </div>
+        </section>
+
+        <details class="subscription-guide-panel">
+          <summary>发票下载步骤指引</summary>
+          <section class="guide-steps">
+            <div class="guide-step">
+              <span class="guide-step-num">1</span>
+              <div>
+                <h3>登录 ChatGPT 账号</h3>
+                <p>
+                  使用已开通 Plus / Pro 的账号登录
+                  <a href="https://chatgpt.com" target="_blank" rel="noopener"
+                    >chatgpt.com</a
+                  >。
+                </p>
+              </div>
             </div>
-
-            <section class="subscription-query-section">
-                <label class="field-label" for="sessionInput">粘贴完整 Session JSON</label>
-                <div class="textarea-wrapper">
-                    <a href="https://chatgpt.com/api/auth/session" target="_blank" rel="noopener"
-                        class="get-token-btn-floating">获取 Session</a>
-                    <textarea id="sessionInput"
-                        placeholder="打开上方链接，全选复制完整 JSON 粘贴到此处（保留 user、expires、accessToken 等全部字段）"
-                        rows="5"></textarea>
-                </div>
-                <p class="field-hint subscription-field-hint">Session 仅用于本次查询，不会被保存。查询完成后可在下方打开官方账单页面。</p>
-                <div class="subscription-query-actions">
-                    <button type="button" id="checkBtn" class="btn-primary btn-lg">
-                        <span class="btn-text">查询订阅</span>
-                        <div class="loader"></div>
-                    </button>
-                </div>
-            </section>
-
-            <div id="statusMessage" class="status-message"></div>
-
-            <section id="resultSection" class="subscription-result" style="display: none;">
-                <div class="subscription-result-head">
-                    <h2>订阅信息</h2>
-                    <span id="activeBadge" class="flow-badge"></span>
-                </div>
-                <div id="resultCard" class="query-result-card"></div>
-                <div class="subscription-actions subscription-billing-actions">
-                    <a id="billingLink" href="https://chatgpt.com/account/manage" target="_blank" rel="noopener"
-                        class="btn-primary btn-lg action-link-btn">
-                        <i data-lucide="external-link"></i>
-                        打开 OpenAI 账单页面
-                    </a>
-                </div>
-            </section>
-
-            <details class="subscription-guide-panel">
-                <summary>发票下载步骤指引</summary>
-                <section class="guide-steps">
-                    <div class="guide-step">
-                        <span class="guide-step-num">1</span>
-                        <div>
-                            <h3>登录 ChatGPT 账号</h3>
-                            <p>使用已开通 Plus / Pro 的账号登录 <a href="https://chatgpt.com" target="_blank"
-                                    rel="noopener">chatgpt.com</a>。</p>
-                        </div>
-                    </div>
-                    <div class="guide-step">
-                        <span class="guide-step-num">2</span>
-                        <div>
-                            <h3>进入订阅与账单</h3>
-                            <p>点击左下角头像 → <strong>Settings（设置）</strong> → <strong>Account（账户）</strong> →
-                                <strong>Manage（管理订阅）</strong>。</p>
-                        </div>
-                    </div>
-                    <div class="guide-step">
-                        <span class="guide-step-num">3</span>
-                        <div>
-                            <h3>查看付款记录</h3>
-                            <p>在 Stripe 账单页面找到对应扣款记录，点击 <strong>View invoice / Download invoice</strong> 下载 PDF 发票。</p>
-                        </div>
-                    </div>
-                    <div class="guide-step">
-                        <span class="guide-step-num">4</span>
-                        <div>
-                            <h3>修改账单信息（可选）</h3>
-                            <p>如需公司抬头或税号，可在 Billing 页面更新 <strong>Billing details</strong>，后续发票将按新信息生成。</p>
-                        </div>
-                    </div>
-                </section>
-            </details>
-        </main>
-
-        <details class="faq-panel" open>
-            <summary>常见问题</summary>
-            <ul>
-                <li><strong>查询失败？</strong> 请确认 Session 来自已登录的 ChatGPT 账号，且 accessToken 未过期。</li>
-                <li><strong>发票币种是什么？</strong> 以 Stripe 实际扣款币种为准，部分账号 API 不返回币种字段。</li>
-                <li><strong>开通后多久能下载？</strong> 支付成功后通常几分钟内可在 Billing 页面看到记录。</li>
-                <li><strong>找不到发票？</strong> 确认登录的是已付费账号，并检查是否使用了团队/企业工作区或 App Store 订阅。</li>
-            </ul>
+            <div class="guide-step">
+              <span class="guide-step-num">2</span>
+              <div>
+                <h3>进入订阅与账单</h3>
+                <p>
+                  点击左下角头像 → <strong>Settings（设置）</strong> →
+                  <strong>Account（账户）</strong> →
+                  <strong>Manage（管理订阅）</strong>。
+                </p>
+              </div>
+            </div>
+            <div class="guide-step">
+              <span class="guide-step-num">3</span>
+              <div>
+                <h3>查看付款记录</h3>
+                <p>
+                  在 Stripe 账单页面找到对应扣款记录，点击
+                  <strong>View invoice / Download invoice</strong> 下载 PDF
+                  发票。
+                </p>
+              </div>
+            </div>
+            <div class="guide-step">
+              <span class="guide-step-num">4</span>
+              <div>
+                <h3>修改账单信息（可选）</h3>
+                <p>
+                  如需公司抬头或税号，可在 Billing 页面更新
+                  <strong>Billing details</strong>，后续发票将按新信息生成。
+                </p>
+              </div>
+            </div>
+          </section>
         </details>
+      </main>
+
+      <details class="faq-panel" open>
+        <summary>常见问题</summary>
+        <ul>
+          <li>
+            <strong>查询失败？</strong> 请确认 Session 来自已登录的 ChatGPT
+            账号，且 accessToken 未过期。
+          </li>
+          <li>
+            <strong>发票币种是什么？</strong> 以 Stripe
+            实际扣款币种为准，部分账号 API 不返回币种字段。
+          </li>
+          <li>
+            <strong>开通后多久能下载？</strong> 支付成功后通常几分钟内可在
+            Billing 页面看到记录。
+          </li>
+          <li>
+            <strong>找不到发票？</strong>
+            确认登录的是已付费账号，并检查是否使用了团队/企业工作区或 App Store
+            订阅。
+          </li>
+        </ul>
+      </details>
     </div>
 
     <script>
-        const sessionInput = document.getElementById('sessionInput');
-        const checkBtn = document.getElementById('checkBtn');
-        const statusMessage = document.getElementById('statusMessage');
-        const resultSection = document.getElementById('resultSection');
-        const resultCard = document.getElementById('resultCard');
-        const activeBadge = document.getElementById('activeBadge');
-        const billingLink = document.getElementById('billingLink');
+      const sessionInput = document.getElementById("sessionInput");
+      const checkBtn = document.getElementById("checkBtn");
+      const statusMessage = document.getElementById("statusMessage");
+      const resultSection = document.getElementById("resultSection");
+      const resultCard = document.getElementById("resultCard");
+      const activeBadge = document.getElementById("activeBadge");
+      const billingLink = document.getElementById("billingLink");
 
-        function setLoading(loading) {
-            const text = checkBtn.querySelector('.btn-text');
-            const loader = checkBtn.querySelector('.loader');
-            checkBtn.disabled = loading;
-            checkBtn.classList.toggle('is-loading', loading);
-            if (text) {
-                text.style.display = loading ? 'none' : '';
-            }
-            if (loader) {
-                loader.style.display = loading ? 'block' : 'none';
-            }
+      function setLoading(loading) {
+        const text = checkBtn.querySelector(".btn-text");
+        const loader = checkBtn.querySelector(".loader");
+        checkBtn.disabled = loading;
+        checkBtn.classList.toggle("is-loading", loading);
+        if (text) {
+          text.style.display = loading ? "none" : "";
+        }
+        if (loader) {
+          loader.style.display = loading ? "block" : "none";
+        }
+      }
+
+      const decodeJwtPart = window.JwtDecode.decodeJwtPart;
+      const parseSessionJsonInput = window.JwtDecode.parseSessionJson;
+
+      function validateSessionInput(rawValue) {
+        const content = String(rawValue || "")
+          .trim()
+          .replace(/^\uFEFF/, "");
+        if (!content) {
+          return {
+            valid: false,
+            message: "请粘贴完整 Session JSON",
+            session: "",
+          };
         }
 
-        function decodeJwtPart(part) {
-            const normalized = String(part || '').replace(/-/g, '+').replace(/_/g, '/');
-            const padded = normalized.padEnd(normalized.length + ((4 - normalized.length % 4) % 4), '=');
-            return JSON.parse(atob(padded));
+        const session = parseSessionJsonInput(content);
+        if (!session) {
+          return {
+            valid: false,
+            message:
+              "请粘贴完整 Session JSON（从 chatgpt.com/api/auth/session 全选复制）",
+            session: "",
+          };
         }
 
-        function parseSessionJsonInput(content) {
-            const trimmed = String(content || '').trim().replace(/^\uFEFF/, '');
-            if (!trimmed.startsWith('{')) {
-                return null;
-            }
-            try {
-                const data = JSON.parse(trimmed);
-                if (data?.accessToken || data?.access_token || data?.user) {
-                    return data;
-                }
-            } catch (_) {
-                return null;
-            }
-            return null;
+        const token = String(
+          session.accessToken || session.access_token || "",
+        ).trim();
+        if (!token) {
+          return {
+            valid: false,
+            message: "Session JSON 中缺少 accessToken 字段",
+            session: content,
+          };
         }
 
-        function validateSessionInput(rawValue) {
-            const content = String(rawValue || '').trim().replace(/^\uFEFF/, '');
-            if (!content) {
-                return { valid: false, message: '请粘贴完整 Session JSON', session: '' };
-            }
-
-            const session = parseSessionJsonInput(content);
-            if (!session) {
-                return {
-                    valid: false,
-                    message: '请粘贴完整 Session JSON（从 chatgpt.com/api/auth/session 全选复制）',
-                    session: ''
-                };
-            }
-
-            const token = String(session.accessToken || session.access_token || '').trim();
-            if (!token) {
-                return { valid: false, message: 'Session JSON 中缺少 accessToken 字段', session: content };
-            }
-
-            const parts = token.split('.');
-            if (parts.length !== 3) {
-                return { valid: false, message: 'accessToken 格式不正确', session: content };
-            }
-
-            try {
-                const payload = decodeJwtPart(parts[1]);
-                const exp = Number(payload.exp || 0);
-                const now = Math.floor(Date.now() / 1000);
-                if (exp && exp <= now) {
-                    return { valid: false, message: 'accessToken 已过期，请重新获取 Session', session: content };
-                }
-            } catch (_) {
-                return { valid: false, message: 'accessToken 无法解析', session: content };
-            }
-
-            return { valid: true, session: content };
+        const parts = token.split(".");
+        if (parts.length !== 3) {
+          return {
+            valid: false,
+            message: "accessToken 格式不正确",
+            session: content,
+          };
         }
 
-        async function readJsonResponse(response) {
-            const text = await response.text();
-            if (!text) {
-                return { ok: false, message: `服务器返回空响应 (${response.status})` };
-            }
-            try {
-                return { ok: true, data: JSON.parse(text) };
-            } catch (_) {
-                const snippet = text.replace(/\s+/g, ' ').slice(0, 120);
-                if (response.status === 404) {
-                    return { ok: false, message: '接口不存在 (404)，请确认服务已重启并更新到最新版本' };
-                }
-                return {
-                    ok: false,
-                    message: `服务器响应异常 (${response.status})${snippet ? `：${snippet}` : ''}`
-                };
-            }
+        try {
+          const payload = decodeJwtPart(parts[1]);
+          const exp = Number(payload.exp || 0);
+          const now = Math.floor(Date.now() / 1000);
+          if (exp && exp <= now) {
+            return {
+              valid: false,
+              message: "accessToken 已过期，请重新获取 Session",
+              session: content,
+            };
+          }
+        } catch (_) {
+          return {
+            valid: false,
+            message: "accessToken 无法解析",
+            session: content,
+          };
         }
 
-        function showStatus(message, type = 'info') {
-            statusMessage.textContent = message;
-            if (!message) {
-                statusMessage.style.display = 'none';
-                return;
-            }
-            const className = type === 'success'
-                ? 'status-success'
-                : (type === 'error' ? 'status-error' : 'status-success');
-            statusMessage.className = `status-message ${className}`;
-            statusMessage.style.display = 'block';
+        return { valid: true, session: content };
+      }
+
+      async function readJsonResponse(response) {
+        const text = await response.text();
+        if (!text) {
+          return {
+            ok: false,
+            message: `服务器返回空响应 (${response.status})`,
+          };
         }
-
-        function renderRow(label, value, valueClass = '') {
-            const strongClass = valueClass ? ` class="${valueClass}"` : '';
-            return `<div class="query-row"><span>${label}</span><strong${strongClass}>${value}</strong></div>`;
+        try {
+          return { ok: true, data: JSON.parse(text) };
+        } catch (_) {
+          const snippet = text.replace(/\s+/g, " ").slice(0, 120);
+          if (response.status === 404) {
+            return {
+              ok: false,
+              message: "接口不存在 (404)，请确认服务已重启并更新到最新版本",
+            };
+          }
+          return {
+            ok: false,
+            message: `服务器响应异常 (${response.status})${snippet ? `：${snippet}` : ""}`,
+          };
         }
+      }
 
-        function renderResult(data) {
-            const activeClass = data.hasActiveSubscription ? 'success' : 'pending';
-            activeBadge.textContent = data.hasActiveSubscription ? '订阅有效' : '未订阅 / 已过期';
-            activeBadge.className = `flow-badge ${activeClass}`;
-
-            const rows = [
-                ['账号', data.email || '—'],
-                ['账号 ID', data.accountId || '—'],
-                ['套餐', data.plan || '—'],
-                ['订阅渠道', data.subscriptionChannel || '—'],
-                ['货币', data.currency || '—'],
-                ['到期时间', data.expiresAtDisplay || '—'],
-                ['剩余天数', data.remainingDaysDisplay || '—'],
-                ['自动续费', data.autoRenew || '—'],
-                ['曾付费', data.hasPreviouslyPaid || '—'],
-                ['查询时间', data.queriedAtDisplay || '—']
-            ];
-
-            resultCard.innerHTML = rows.map(([label, value]) => renderRow(label, value)).join('');
-            billingLink.href = data.billingPageUrl || 'https://chatgpt.com/account/manage';
-            resultSection.style.display = 'block';
-            lucide.createIcons();
+      function showStatus(message, type = "info") {
+        statusMessage.textContent = message;
+        if (!message) {
+          statusMessage.style.display = "none";
+          return;
         }
+        const className =
+          type === "success"
+            ? "status-success"
+            : type === "error"
+              ? "status-error"
+              : "status-success";
+        statusMessage.className = `status-message ${className}`;
+        statusMessage.style.display = "block";
+      }
 
-        async function checkSubscription() {
-            const sessionCheck = validateSessionInput(sessionInput.value);
-            if (!sessionCheck.valid) {
-                showStatus(sessionCheck.message, 'error');
-                return;
-            }
+      function renderRow(label, value, valueClass = "") {
+        const strongClass = valueClass ? ` class="${valueClass}"` : "";
+        return `<div class="query-row"><span>${label}</span><strong${strongClass}>${value}</strong></div>`;
+      }
 
-            setLoading(true);
-            showStatus('正在查询订阅状态…', 'info');
-            resultSection.style.display = 'none';
+      function renderResult(data) {
+        const activeClass = data.hasActiveSubscription ? "success" : "pending";
+        activeBadge.textContent = data.hasActiveSubscription
+          ? "订阅有效"
+          : "未订阅 / 已过期";
+        activeBadge.className = `flow-badge ${activeClass}`;
 
-            try {
-                const response = await fetch('/api/public/subscription/check', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        session: sessionCheck.session,
-                        timezone_offset_min: -new Date().getTimezoneOffset()
-                    })
-                });
-                const parsed = await readJsonResponse(response);
-                if (!parsed.ok) {
-                    throw new Error(parsed.message);
-                }
-                const payload = parsed.data;
-                if (!response.ok || !payload.success) {
-                    throw new Error(payload.message || '查询失败');
-                }
-                showStatus('', 'info');
-                renderResult(payload.data);
-            } catch (error) {
-                showStatus(error.message || '查询失败，请稍后重试', 'error');
-            } finally {
-                setLoading(false);
-            }
-        }
+        const rows = [
+          ["账号", data.email || "—"],
+          ["账号 ID", data.accountId || "—"],
+          ["套餐", data.plan || "—"],
+          ["订阅渠道", data.subscriptionChannel || "—"],
+          ["货币", data.currency || "—"],
+          ["到期时间", data.expiresAtDisplay || "—"],
+          ["剩余天数", data.remainingDaysDisplay || "—"],
+          ["自动续费", data.autoRenew || "—"],
+          ["曾付费", data.hasPreviouslyPaid || "—"],
+          ["查询时间", data.queriedAtDisplay || "—"],
+        ];
 
-        checkBtn.addEventListener('click', checkSubscription);
+        resultCard.innerHTML = rows
+          .map(([label, value]) => renderRow(label, value))
+          .join("");
+        billingLink.href =
+          data.billingPageUrl || "https://chatgpt.com/account/manage";
+        resultSection.style.display = "block";
         lucide.createIcons();
-    </script>
-</body>
+      }
 
+      async function checkSubscription() {
+        const sessionCheck = validateSessionInput(sessionInput.value);
+        if (!sessionCheck.valid) {
+          showStatus(sessionCheck.message, "error");
+          return;
+        }
+
+        setLoading(true);
+        showStatus("正在查询订阅状态…", "info");
+        resultSection.style.display = "none";
+
+        try {
+          const response = await fetch("/api/public/subscription/check", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session: sessionCheck.session,
+              timezone_offset_min: -new Date().getTimezoneOffset(),
+            }),
+          });
+          const parsed = await readJsonResponse(response);
+          if (!parsed.ok) {
+            throw new Error(parsed.message);
+          }
+          const payload = parsed.data;
+          if (!response.ok || !payload.success) {
+            throw new Error(payload.message || "查询失败");
+          }
+          showStatus("", "info");
+          renderResult(payload.data);
+        } catch (error) {
+          showStatus(error.message || "查询失败，请稍后重试", "error");
+        } finally {
+          setLoading(false);
+        }
+      }
+
+      checkBtn.addEventListener("click", checkSubscription);
+      lucide.createIcons();
+    </script>
+  </body>
 </html>

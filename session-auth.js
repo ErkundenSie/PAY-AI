@@ -14,26 +14,15 @@ const {
   hasLoggedInSessionApi,
   buildSessionNotLoggedInError,
 } = require("./auth-page-detect");
-
-function decodeJwtPayload(token) {
-  const parts = String(token || "").split(".");
-  if (parts.length !== 3) {
-    return null;
-  }
-  try {
-    const normalized = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(
-      normalized.length + ((4 - (normalized.length % 4)) % 4),
-      "=",
-    );
-    return JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
-  } catch (_) {
-    return null;
-  }
-}
+const { decodeJwtPayload, parseSessionJson } = require("./public/jwt-decode");
 
 function extractProfileFromToken(accessToken) {
-  const payload = decodeJwtPayload(accessToken);
+  let payload = null;
+  try {
+    payload = decodeJwtPayload(accessToken).payload;
+  } catch (_) {
+    payload = null;
+  }
   if (!payload) {
     return { email: "", accountId: "", userId: "" };
   }
@@ -72,22 +61,6 @@ function buildSessionPayload(accessToken, sessionJson = null) {
     accessToken: base.accessToken || base.access_token || token,
     authProvider: base.authProvider || "google-oauth2",
   };
-}
-
-function parseSessionJson(raw) {
-  const content = String(raw || "").trim();
-  if (!content || !content.startsWith("{")) {
-    return null;
-  }
-  try {
-    const data = JSON.parse(content);
-    if (data?.accessToken || data?.access_token || data?.user) {
-      return data;
-    }
-  } catch (_) {
-    return null;
-  }
-  return null;
 }
 
 const CHATGPT_COOKIE_URL = "https://chatgpt.com";
