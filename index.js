@@ -57,6 +57,7 @@ const CONFIG = {
   email: process.env.ACTIVATION_EMAIL || "",
   planType: process.env.CDK_PLAN_TYPE || "",
   planNameOverride: process.env.PLAN_NAME_OVERRIDE || "",
+  creditQuantity: Number(process.env.CREDIT_QUANTITY || 0),
   paymentRegionOverride: process.env.PAYMENT_REGION_OVERRIDE || "",
   proxy: process.env.PROXY || "",
 };
@@ -685,6 +686,7 @@ async function run() {
           country: billingCountry,
           currency: billingCurrency,
           planNameOverride,
+          creditQuantity: Number(CONFIG.creditQuantity || 0),
           verifyPage: !debugOnly,
         });
         checkoutOpened = true;
@@ -742,20 +744,23 @@ async function run() {
 
     if (paymentResult.success) {
       paymentSucceeded = true;
-      console.log(`    [+] 最终校验：支付成功! (stripe_card_payment)`);
-      console.log("[步骤] 正在关闭自动续费...");
-      const cancelResult = await cancelAutoRenewAfterActivation(accessToken, {
-        accountId: checkoutResult?.accountId || loginInfo.accountId,
-        email: email || loginInfo.email,
-      });
-      if (cancelResult.ok) {
-        console.log(
-          `✅ [步骤] ${cancelResult.data?.message || "已关闭自动续费"}`,
-        );
-      } else {
-        console.warn(
-          `⚠️ [步骤] 关闭自动续费失败: ${cancelResult.error || "未知错误"}`,
-        );
+      const isCredits =
+        store.isCreditsPlan(planType) || Number(CONFIG.creditQuantity || 0) > 0;
+      if (!isCredits) {
+        console.log("[步骤] 正在关闭自动续费...");
+        const cancelResult = await cancelAutoRenewAfterActivation(accessToken, {
+          accountId: checkoutResult?.accountId || loginInfo.accountId,
+          email: email || loginInfo.email,
+        });
+        if (cancelResult.ok) {
+          console.log(
+            `✅ [步骤] ${cancelResult.data?.message || "已关闭自动续费"}`,
+          );
+        } else {
+          console.warn(
+            `⚠️ [步骤] 关闭自动续费失败: ${cancelResult.error || "未知错误"}`,
+          );
+        }
       }
       console.log("PAYMENT_SUCCESS");
       for (const screenshotPath of paymentResult.screenshots || []) {

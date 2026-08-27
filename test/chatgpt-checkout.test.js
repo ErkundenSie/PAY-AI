@@ -32,6 +32,30 @@ describe("chatgpt checkout helpers", () => {
     });
   });
 
+  it("builds Codex credit purchase payload", () => {
+    const payload = buildCheckoutPayload(
+      "platformbusiness_usage_based",
+      "PH",
+      "PHP",
+      { accountId: "acct-1", creditQuantity: 1000 },
+    );
+    expect(payload).toEqual({
+      entry_point: "codex_team_start",
+      plan_name: "platformbusiness_usage_based",
+      checkout_ui_mode: "custom",
+      billing_details: { country: "PH", currency: "PHP" },
+      usage_based_workspace_credit_purchase_data: {
+        quantity: 1000,
+        unit: "credit",
+        workspace_name: "Codex Space",
+        plan_type: "team",
+        auto_top_up_enabled: true,
+      },
+      account_id: "acct-1",
+      openai_account_id: "acct-1",
+    });
+  });
+
   it("adds account headers from the access token", () => {
     const header = Buffer.from(
       JSON.stringify({ alg: "RS256", typ: "JWT" }),

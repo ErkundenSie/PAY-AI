@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>自助开通 | AI 自助充值中心</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=3" />
+    <link rel="stylesheet" href="style.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://unpkg.com/lucide@latest"></script>
+  </head>
+
+  <body class="recharge-page checkout-page">
+    <div class="page-shell checkout-shell">
+      <header class="checkout-hero">
+        <a href="/" class="checkout-back"
+          ><i data-lucide="arrow-left"></i> 返回助手</a
+        >
+      </header>
+
+      <section class="checkout-panel checkout-session-panel">
+        <div class="checkout-session-main">
+          <div class="checkout-panel-head">
+            <span class="checkout-icon-badge"
+              ><i data-lucide="code-2"></i
+            ></span>
+            <div>
+              <h2>自助开通</h2>
+              <p>从 ChatGPT 获取的 Session JSON，用于验证并开通服务。</p>
+            </div>
+          </div>
+          <textarea
+            id="sessionInput"
+            placeholder="从 chatgpt.com/api/auth/session 全选复制完整 JSON"
+            rows="5"
+          ></textarea>
+          <div class="checkout-session-footer">
+            <p class="checkout-secure-hint">
+              <i data-lucide="info"></i>
+              填写账单与支付信息以开通服务，开通后即可使用全部功能。
+            </p>
+            <div class="checkout-session-actions">
+              <button
+                type="button"
+                id="cancelRenewBtn"
+                class="checkout-ghost-btn checkout-cancel-btn"
+              >
+                <i data-lucide="ban"></i>
+                <span class="btn-text">取消自动续费</span>
+              </button>
+              <button type="button" id="payBtn" class="checkout-pay-btn">
+                <i data-lucide="zap"></i>
+                <span class="btn-text">开始开通</span>
+                <div class="loader"></div>
+              </button>
+            </div>
+          </div>
+        </div>
+        <aside class="checkout-tips">
+          <h3><i data-lucide="lightbulb"></i> 提示</h3>
+          <ul>
+            <li>前往 chatgpt.com，登录您的账号</li>
+            <li>点击获取 Session 按钮，复制全部代码</li>
+            <li>返回此页面粘贴完整的 Session JSON</li>
+          </ul>
+          <div class="checkout-tips-secure">
+            <i data-lucide="lock"></i>
+            <div>
+              <strong>安全加密</strong>
+              <p>我们使用安全的加密连接保护您的信息安全。</p>
+            </div>
+          </div>
+          <a
+            href="https://chatgpt.com/api/auth/session"
+            target="_blank"
+            rel="noopener"
+            class="checkout-tips-link"
+            >获取 Session <i data-lucide="arrow-right"></i
+          ></a>
+        </aside>
+      </section>
+
+      <section class="checkout-split">
+        <article class="checkout-panel">
+          <div class="checkout-panel-head">
+            <span class="checkout-icon-badge"
+              ><i data-lucide="credit-card"></i
+            ></span>
+            <div>
+              <h2>支付信息</h2>
+            </div>
+          </div>
+          <div class="checkout-grid checkout-plan-row">
+            <div>
+              <label class="field-label" for="planSelect">套餐</label>
+              <select id="planSelect">
+                <option value="plus">ChatGPT Plus</option>
+                <option value="pro_5x">ChatGPT Pro 5x</option>
+                <option value="pro_20x">ChatGPT Pro 20x</option>
+                <option value="credits">Codex 充值点数</option>
+              </select>
+            </div>
+            <div id="creditQuantityWrap" hidden>
+              <label class="field-label" for="creditQuantity">充值点数</label>
+              <select id="creditQuantity">
+                <option value="500">500</option>
+                <option value="1000">1000</option>
+                <option value="2000">2000</option>
+              </select>
+            </div>
+            <div>
+              <label class="field-label" for="regionSelect">账单地区</label>
+              <select id="regionSelect"></select>
+              <p id="regionHint" class="field-hint checkout-inline-hint"></p>
+            </div>
+          </div>
+          <div class="checkout-card-box">
+            <span class="checkout-card-box-title">银行卡信息</span>
+            <div class="checkout-labeled-field">
+              <span>卡号</span>
+              <input
+                id="cardNumber"
+                type="text"
+                inputmode="numeric"
+                autocomplete="cc-number"
+                placeholder="16 位卡号"
+                maxlength="23"
+              />
+            </div>
+            <div class="checkout-grid">
+              <div class="checkout-labeled-field">
+                <span>有效期</span>
+                <input
+                  id="cardExpiry"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="cc-exp"
+                  placeholder="MM/YY"
+                  maxlength="5"
+                />
+              </div>
+              <div class="checkout-labeled-field">
+                <span>CVC</span>
+                <input
+                  id="cardCvc"
+                  type="text"
+                  inputmode="numeric"
+                  autocomplete="cc-csc"
+                  placeholder="3-4 位"
+                  maxlength="4"
+                />
+              </div>
+            </div>
+            <div class="checkout-labeled-field">
+              <span>持卡人</span>
+              <input
+                id="cardHolder"
+                type="text"
+                autocomplete="cc-name"
+                placeholder="持卡人姓名"
+              />
+            </div>
+          </div>
+        </article>
+
+        <article class="checkout-panel">
+          <div class="checkout-panel-head">
+            <span class="checkout-icon-badge"
+              ><i data-lucide="map-pin"></i
+            ></span>
+            <div>
+              <h2>账单地址</h2>
+              <p>可根据卡片信息一键补全账单地址</p>
+            </div>
+            <button
+              type="button"
+              id="fillAddressBtn"
+              class="checkout-ghost-btn"
+            >
+              <i data-lucide="sparkles"></i> 一键填卡
+            </button>
+          </div>
+          <div class="checkout-grid checkout-address-grid">
+            <div class="checkout-span-2">
+              <label class="field-label" for="addrLine1">街道</label>
+              <input
+                id="addrLine1"
+                type="text"
+                autocomplete="address-line1"
+                placeholder="Street address"
+              />
+            </div>
+            <div>
+              <label class="field-label" for="addrCity">城市</label>
+              <input
+                id="addrCity"
+                type="text"
+                autocomplete="address-level2"
+                placeholder="City"
+              />
+            </div>
+            <div>
+              <label class="field-label" for="addrState">州 / 省</label>
+              <input
+                id="addrState"
+                type="text"
+                autocomplete="address-level1"
+                placeholder="State"
+              />
+            </div>
+            <div>
+              <label class="field-label" for="addrPostal">邮编</label>
+              <input
+                id="addrPostal"
+                type="text"
+                autocomplete="postal-code"
+                placeholder="ZIP"
+              />
+            </div>
+            <div>
+              <label class="field-label" for="addrCountry">国家</label>
+              <input
+                id="addrCountry"
+                type="text"
+                autocomplete="country"
+                value="US"
+                maxlength="2"
+              />
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <div id="taskProgress" class="task-progress" style="display: none">
+        <div class="task-progress-header">
+          <span>开通进度</span>
+          <b id="taskProgressPercent">0%</b>
+        </div>
+        <div class="task-progress-track">
+          <div id="taskProgressBar" class="task-progress-bar"></div>
+        </div>
+        <p id="taskProgressText" class="task-progress-text"></p>
+      </div>
+      <div id="statusMessage" class="status-message"></div>
+    </div>
+
+    <script>
+      const sessionInput = document.getElementById("sessionInput");
+      const planSelect = document.getElementById("planSelect");
+      const creditQuantityWrap = document.getElementById("creditQuantityWrap");
+      const creditQuantity = document.getElementById("creditQuantity");
+      const regionSelect = document.getElementById("regionSelect");
+      const regionHint = document.getElementById("regionHint");
+      const cardNumber = document.getElementById("cardNumber");
+      const cardExpiry = document.getElementById("cardExpiry");
+      const cardCvc = document.getElementById("cardCvc");
+      const cardHolder = document.getElementById("cardHolder");
+      const addrLine1 = document.getElementById("addrLine1");
+      const addrCity = document.getElementById("addrCity");
+      const addrState = document.getElementById("addrState");
+      const addrPostal = document.getElementById("addrPostal");
+      const addrCountry = document.getElementById("addrCountry");
+      const payBtn = document.getElementById("payBtn");
+      const cancelRenewBtn = document.getElementById("cancelRenewBtn");
+      const fillAddressBtn = document.getElementById("fillAddressBtn");
+      const statusMsg = document.getElementById("statusMessage");
+      const taskProgress = document.getElementById("taskProgress");
+      const taskProgressBar = document.getElementById("taskProgressBar");
+      const taskProgressPercent = document.getElementById(
+        "taskProgressPercent",
+      );
+      const taskProgressText = document.getElementById("taskProgressText");
+
+      const START_DEFAULT_TEXT = "开始开通";
+      const START_PENDING_TEXT = "开通中...";
+      const START_FAILED_TEXT = "重新尝试";
+      const START_SUCCESS_TEXT = "开通成功";
+
+      let taskProgressValue = 0;
+      let socket = null;
+      let reconnectTimer = null;
+      let socketHeartbeatInterval = null;
+      let socketHeartbeatTimeout = null;
+      let activeJobKey = "";
+      let activeViewerToken = "";
+      let taskCompleted = false;
+      const WS_HEARTBEAT_INTERVAL_MS = 15000;
+      const WS_HEARTBEAT_TIMEOUT_MS = 45000;
+
+      function decodeJwtPart(part) {
+        const normalized = String(part || "")
+          .replace(/-/g, "+")
+          .replace(/_/g, "/");
+        const padded = normalized.padEnd(
+          normalized.length + ((4 - (normalized.length % 4)) % 4),
+          "=",
+        );
+        return JSON.parse(atob(padded));
+      }
+
+      function parseSessionJsonInput(content) {
+        const trimmed = String(content || "")
+          .trim()
+          .replace(/^\uFEFF/, "");
+        if (!trimmed.startsWith("{")) return null;
+        try {
+          const data = JSON.parse(trimmed);
+          if (data?.accessToken || data?.access_token || data?.user)
+            return data;
+        } catch (_) {
+          return null;
+        }
+        return null;
+      }
+
+      function validateAccessToken(token) {
+        const value = String(token || "").trim();
+        if (!value) return { valid: false, message: "请输入 AccessToken" };
+        const parts = value.split(".");
+        if (parts.length !== 3 || parts.some((item) => !item)) {
+          return { valid: false, message: "该 Token 不合法：格式错误" };
+        }
+        let payload;
+        try {
+          payload = decodeJwtPart(parts[1]);
+        } catch (_) {
+          return { valid: false, message: "该 Token 不合法：无法解析" };
+        }
+        const exp = Number(payload.exp || 0);
+        const now = Math.floor(Date.now() / 1000);
+        if (exp && exp <= now)
+          return {
+            valid: false,
+            message: "accessToken 已过期，请重新获取 Session",
+          };
+        return {
+          valid: true,
+          email: payload["https://api.openai.com/profile"]?.email || "",
+        };
+      }
+
+      function validateSessionInput(rawValue) {
+        const content = String(rawValue || "")
+          .trim()
+          .replace(/^\uFEFF/, "");
+        if (!content)
+          return {
+            valid: false,
+            message: "请粘贴完整 Session JSON",
+            session: "",
+          };
+        const session = parseSessionJsonInput(content);
+        if (!session) {
+          return {
+            valid: false,
+            message:
+              "请粘贴完整 Session JSON（从 chatgpt.com/api/auth/session 全选复制）",
+            session: "",
+          };
+        }
+        const token = String(
+          session.accessToken || session.access_token || "",
+        ).trim();
+        if (!token)
+          return {
+            valid: false,
+            message: "Session JSON 中缺少 accessToken 字段",
+            session: content,
+          };
+        const tokenResult = validateAccessToken(token);
+        return {
+          ...tokenResult,
+          session: content,
+          email: session.user?.email || tokenResult.email || "",
+        };
+      }
+
+      function digitsOnly(value) {
+        return String(value || "").replace(/\D/g, "");
+      }
+
+      function formatCardNumber(value) {
+        return digitsOnly(value)
+          .slice(0, 19)
+          .replace(/(\d{4})(?=\d)/g, "$1 ")
+          .trim();
+      }
+
+      function formatExpiry(value) {
+        const digits = digitsOnly(value).slice(0, 4);
+        if (digits.length <= 2) return digits;
+        return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+      }
+
+      function validateCardFields() {
+        const number = digitsOnly(cardNumber.value);
+        const expiry = String(cardExpiry.value || "").trim();
+        const cvc = digitsOnly(cardCvc.value);
+        const holder = String(cardHolder.value || "").trim();
+        if (number.length < 13 || number.length > 19)
+          return "请填写 13-19 位卡号";
+        if (!/^\d{2}\/\d{2}$/.test(expiry)) return "有效期格式必须为 MM/YY";
+        const month = Number(expiry.slice(0, 2));
+        if (month < 1 || month > 12) return "有效期月份必须在 01-12 之间";
+        if (!/^\d{3,4}$/.test(cvc)) return "CVC 必须为 3-4 位数字";
+        return { number, expiry, cvc, holder };
+      }
+
+      function validateAddressFields() {
+        const address = {
+          line1: String(addrLine1.value || "").trim(),
+          city: String(addrCity.value || "").trim(),
+          state: String(addrState.value || "").trim(),
+          postal_code: String(addrPostal.value || "").trim(),
+          country:
+            String(addrCountry.value || "US")
+              .trim()
+              .toUpperCase() || "US",
+        };
+        if (
+          !address.line1 ||
+          !address.city ||
+          !address.state ||
+          !address.postal_code
+        ) {
+          return "请完整填写账单地址：街道、城市、州、邮编";
+        }
+        if (!/^[A-Z]{2}$/.test(address.country))
+          return "账单国家需为 2 位大写字母";
+        return address;
+      }
+
+      function setButtonText(content) {
+        const text = payBtn.querySelector(".btn-text");
+        if (text) text.textContent = content;
+      }
+
+      function setLoading(loading) {
+        const text = payBtn.querySelector(".btn-text");
+        const loader = payBtn.querySelector(".loader");
+        payBtn.disabled = loading;
+        payBtn.classList.toggle("is-loading", loading);
+        if (text) text.style.display = loading ? "none" : "";
+        if (loader) loader.style.display = loading ? "block" : "none";
+      }
+
+      function showStatus(message, type) {
+        statusMsg.textContent = String(message || "");
+        statusMsg.className = `status-message ${type === "success" ? "status-success" : "status-error"}`;
+        statusMsg.style.display = message ? "block" : "none";
+      }
+
+      function resetProgressState() {
+        taskProgressValue = 0;
+        taskProgressBar.style.width = "0%";
+        taskProgressBar.classList.remove("error");
+        taskProgressPercent.textContent = "0%";
+        taskProgressText.textContent = "";
+      }
+
+      function showProgress() {
+        taskProgress.style.display = "block";
+      }
+
+      function setProgress(
+        percent,
+        label = "",
+        type = "running",
+        options = {},
+      ) {
+        const force = Boolean(options.force);
+        const maxAllowed = type === "success" || type === "error" ? 100 : 99;
+        const requested = Math.max(
+          0,
+          Math.min(maxAllowed, Math.round(percent)),
+        );
+        const next =
+          !force && requested < taskProgressValue
+            ? taskProgressValue
+            : requested;
+        taskProgressValue = next;
+        taskProgressBar.style.width = `${next}%`;
+        taskProgressPercent.textContent = `${next}%`;
+        taskProgressText.textContent = label || "";
+        taskProgressBar.classList.toggle("error", type === "error");
+      }
+
+      function clearSocketHeartbeat() {
+        clearInterval(socketHeartbeatInterval);
+        clearTimeout(socketHeartbeatTimeout);
+        socketHeartbeatInterval = null;
+        socketHeartbeatTimeout = null;
+      }
+
+      function scheduleSocketHeartbeatTimeout() {
+        clearTimeout(socketHeartbeatTimeout);
+        socketHeartbeatTimeout = setTimeout(() => {
+          if (socket && activeJobKey && !taskCompleted) {
+            try {
+              socket.close();
+            } catch (_) {}
+          }
+        }, WS_HEARTBEAT_TIMEOUT_MS);
+      }
+
+      function startSocketHeartbeat() {
+        clearSocketHeartbeat();
+        scheduleSocketHeartbeatTimeout();
+        socketHeartbeatInterval = setInterval(() => {
+          if (!socket || socket.readyState !== WebSocket.OPEN) return;
+          try {
+            socket.send(JSON.stringify({ type: "ping", ts: Date.now() }));
+            scheduleSocketHeartbeatTimeout();
+          } catch (_) {}
+        }, WS_HEARTBEAT_INTERVAL_MS);
+      }
+
+      function closeTaskSocket() {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+        clearSocketHeartbeat();
+        if (socket) {
+          try {
+            socket.close();
+          } catch (_) {}
+        }
+        socket = null;
+        activeJobKey = "";
+        activeViewerToken = "";
+      }
+
+      function applyTaskState(data) {
+        const progress = Number(data.progress);
+        const status = String(data.status || "running");
+        const message = String(data.message || "");
+        const forceProgress = data.type === "snapshot";
+
+        if (status === "success") {
+          taskCompleted = true;
+          closeTaskSocket();
+          setProgress(100, message || "开通成功", "success", { force: true });
+          showStatus(message || "开通成功", "success");
+          setButtonText(START_SUCCESS_TEXT);
+          setLoading(false);
+          payBtn.disabled = true;
+          return;
+        }
+
+        if (
+          status === "failed" ||
+          status === "maintenance" ||
+          status === "manual"
+        ) {
+          taskCompleted = true;
+          closeTaskSocket();
+          const failPct =
+            Number.isFinite(progress) && progress > 0
+              ? progress
+              : Math.max(taskProgressValue, 1);
+          setProgress(failPct, message || "开通失败", "error", { force: true });
+          showStatus(message || "开通失败，请检查信息后重试", "error");
+          setButtonText(START_FAILED_TEXT);
+          setLoading(false);
+          payBtn.disabled = false;
+          return;
+        }
+
+        if (Number.isFinite(progress)) {
+          setProgress(progress, message || "正在开通中...", "running", {
+            force: forceProgress,
+          });
+          if (message) showStatus(message, "success");
+        }
+      }
+
+      function initWebSocket(jobKey, viewerToken = activeViewerToken) {
+        if (!jobKey || !viewerToken) {
+          showStatus("任务订阅凭据缺失，请重新提交", "error");
+          return;
+        }
+        activeJobKey = jobKey;
+        activeViewerToken = viewerToken;
+        if (
+          socket &&
+          (socket.readyState === WebSocket.OPEN ||
+            socket.readyState === WebSocket.CONNECTING)
+        ) {
+          socket.send(
+            JSON.stringify({ type: "subscribe", jobKey, viewerToken }),
+          );
+          return;
+        }
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        socket = new WebSocket(`${protocol}//${window.location.host}`);
+        socket.onopen = () => {
+          clearTimeout(reconnectTimer);
+          socket.send(
+            JSON.stringify({ type: "subscribe", jobKey, viewerToken }),
+          );
+          startSocketHeartbeat();
+        };
+        socket.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === "pong") {
+              scheduleSocketHeartbeatTimeout();
+              return;
+            }
+            if (data.jobKey && activeJobKey && data.jobKey !== activeJobKey)
+              return;
+            scheduleSocketHeartbeatTimeout();
+            if (
+              data.type === "snapshot" ||
+              data.type === "progress" ||
+              data.type === "status"
+            ) {
+              applyTaskState(data);
+            }
+          } catch (_) {}
+        };
+        socket.onclose = () => {
+          clearSocketHeartbeat();
+          socket = null;
+          if (activeJobKey && !taskCompleted) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(
+              () => initWebSocket(activeJobKey, activeViewerToken),
+              3000,
+            );
+          }
+        };
+      }
+
+      function isCreditsPlan(planType) {
+        return String(planType || "").startsWith("credits");
+      }
+
+      function syncCreditQuantityUi() {
+        const show = isCreditsPlan(planSelect.value);
+        if (creditQuantityWrap) creditQuantityWrap.hidden = !show;
+      }
+
+      function fillSampleAddress() {
+        const streets = [
+          "182 Highland Ave",
+          "410 Market Street",
+          "88 Cedar Lane",
+          "215 Pine Street",
+        ];
+        const cities = [
+          { city: "Portland", state: "Oregon", zip: "97201" },
+          { city: "Salem", state: "Oregon", zip: "97301" },
+          { city: "Eugene", state: "Oregon", zip: "97401" },
+          { city: "Dover", state: "Delaware", zip: "19901" },
+        ];
+        const place = cities[Math.floor(Math.random() * cities.length)];
+        addrLine1.value = streets[Math.floor(Math.random() * streets.length)];
+        addrCity.value = place.city;
+        addrState.value = place.state;
+        addrPostal.value = place.zip;
+        addrCountry.value = "US";
+        if (!cardHolder.value.trim()) cardHolder.value = "Alex Johnson";
+      }
+
+      function updateRegionHint() {
+        const option = regionSelect.selectedOptions[0];
+        if (!option) {
+          regionHint.textContent = "";
+          return;
+        }
+        const currency = option.dataset.currency || "";
+        regionHint.textContent = currency ? `结算币种：${currency}` : "";
+      }
+
+      async function loadOptions() {
+        try {
+          const response = await fetch("/api/public/checkout/options");
+          const data = await response.json();
+          if (!data.success) throw new Error(data.message || "加载选项失败");
+          regionSelect.innerHTML = "";
+          (data.regions || []).forEach((region) => {
+            const option = document.createElement("option");
+            option.value = region.code;
+            option.dataset.currency = region.currency || "";
+            option.textContent = `${region.label} (${region.code} / ${region.currency})`;
+            regionSelect.appendChild(option);
+          });
+          const defaultRegion = String(
+            data.default_region || "PH",
+          ).toUpperCase();
+          if (
+            [...regionSelect.options].some(
+              (item) => item.value === defaultRegion,
+            )
+          ) {
+            regionSelect.value = defaultRegion;
+          }
+          if (Array.isArray(data.plans) && data.plans.length) {
+            planSelect.innerHTML = "";
+            data.plans.forEach((plan) => {
+              const option = document.createElement("option");
+              option.value = plan.id;
+              option.textContent = plan.label;
+              planSelect.appendChild(option);
+            });
+          }
+          if (
+            Array.isArray(data.credit_presets) &&
+            data.credit_presets.length
+          ) {
+            creditQuantity.innerHTML = "";
+            data.credit_presets.forEach((qty) => {
+              const option = document.createElement("option");
+              option.value = String(qty);
+              option.textContent = String(qty);
+              creditQuantity.appendChild(option);
+            });
+          }
+          syncCreditQuantityUi();
+          updateRegionHint();
+        } catch (error) {
+          showStatus(error.message || "加载账单地区失败", "error");
+        }
+      }
+
+      async function startCheckout() {
+        const sessionCheck = validateSessionInput(sessionInput.value);
+        if (!sessionCheck.valid)
+          return showStatus(sessionCheck.message, "error");
+        const card = validateCardFields();
+        if (typeof card === "string") return showStatus(card, "error");
+        const address = validateAddressFields();
+        if (typeof address === "string") return showStatus(address, "error");
+
+        taskCompleted = false;
+        closeTaskSocket();
+        setButtonText(START_PENDING_TEXT);
+        setLoading(true);
+        payBtn.disabled = true;
+        resetProgressState();
+        showProgress();
+        setProgress(3, "正在启动开通任务...", "running", { force: true });
+        showStatus("任务启动中...", "success");
+
+        try {
+          const response = await fetch("/api/public/checkout/pay", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session: sessionCheck.session,
+              plan_type: planSelect.value || "plus",
+              credit_quantity: isCreditsPlan(planSelect.value)
+                ? Number(creditQuantity.value || 0)
+                : undefined,
+              region: regionSelect.value,
+              card: {
+                number: card.number,
+                expiry: card.expiry,
+                cvc: card.cvc,
+                holder: card.holder,
+              },
+              address,
+            }),
+          });
+          const data = await response.json();
+          if (data.success && data.jobKey) {
+            setProgress(8, data.message || "任务已启动，正在开通中...");
+            showStatus(data.message || "任务已启动，正在开通中...", "success");
+            initWebSocket(data.jobKey, data.viewerToken || "");
+            return;
+          }
+          setProgress(
+            Math.max(taskProgressValue, 1),
+            data.error || data.message || "启动失败",
+            "error",
+            { force: true },
+          );
+          showStatus(data.error || data.message || "启动失败", "error");
+          setButtonText(START_FAILED_TEXT);
+          setLoading(false);
+          payBtn.disabled = false;
+        } catch (_) {
+          setProgress(
+            Math.max(taskProgressValue, 1),
+            "网络连接失败，请重试",
+            "error",
+            { force: true },
+          );
+          showStatus("网络连接失败，请重试", "error");
+          setButtonText(START_FAILED_TEXT);
+          setLoading(false);
+          payBtn.disabled = false;
+        }
+      }
+
+      cardNumber.addEventListener("input", () => {
+        cardNumber.value = formatCardNumber(cardNumber.value);
+      });
+      cardExpiry.addEventListener("input", () => {
+        cardExpiry.value = formatExpiry(cardExpiry.value);
+      });
+      cardCvc.addEventListener("input", () => {
+        cardCvc.value = digitsOnly(cardCvc.value).slice(0, 4);
+      });
+      addrCountry.addEventListener("input", () => {
+        addrCountry.value = String(addrCountry.value || "")
+          .replace(/[^a-zA-Z]/g, "")
+          .slice(0, 2)
+          .toUpperCase();
+      });
+      regionSelect.addEventListener("change", updateRegionHint);
+      planSelect.addEventListener("change", syncCreditQuantityUi);
+
+      async function cancelAutoRenew() {
+        const sessionCheck = validateSessionInput(sessionInput.value);
+        if (!sessionCheck.valid)
+          return showStatus(sessionCheck.message, "error");
+        const label = cancelRenewBtn.querySelector(".btn-text");
+        cancelRenewBtn.disabled = true;
+        if (label) label.textContent = "取消中...";
+        showStatus("正在取消自动续费...", "success");
+        try {
+          const response = await fetch(
+            "/api/public/subscription/cancel-auto-renew",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                session: sessionCheck.session,
+                timezone_offset_min: -new Date().getTimezoneOffset(),
+              }),
+            },
+          );
+          const data = await response.json();
+          if (data.success) {
+            showStatus(
+              data.message || data.data?.message || "已提交取消自动续费",
+              "success",
+            );
+            return;
+          }
+          showStatus(data.message || data.error || "取消自动续费失败", "error");
+        } catch (_) {
+          showStatus("网络连接失败，请重试", "error");
+        } finally {
+          cancelRenewBtn.disabled = false;
+          if (label) label.textContent = "取消自动续费";
+        }
+      }
+
+      fillAddressBtn.addEventListener("click", fillSampleAddress);
+      cancelRenewBtn.addEventListener("click", cancelAutoRenew);
+      payBtn.addEventListener("click", startCheckout);
+
+      loadOptions();
+      if (window.lucide) lucide.createIcons();
+    </script>
+  </body>
+</html>

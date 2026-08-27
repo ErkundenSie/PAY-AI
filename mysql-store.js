@@ -71,21 +71,61 @@ const ASSET_LOCK_STALE_MS = Number(
   process.env.ASSET_LOCK_STALE_MS || 15 * 60 * 1000,
 );
 
-// CDK 套餐类型 → OpenAI plan_name 映射（custom checkout API）
+// CDK / 自助开通套餐类型 → OpenAI plan_name 映射（custom checkout API）
 const PLAN_NAME_MAP = {
   plus: "chatgptplusplan",
   pro_5x: "chatgptprolite",
   pro_20x: "chatgptpro",
+  credits: "platformbusiness_usage_based",
+  credits_500: "platformbusiness_usage_based",
+  credits_1000: "platformbusiness_usage_based",
+  credits_2000: "platformbusiness_usage_based",
 };
 
 const VALID_PLAN_TYPES = new Set(Object.keys(PLAN_NAME_MAP));
+const CREDIT_QUANTITY_MIN = 250;
+const CREDIT_QUANTITY_STEP = 250;
+const CREDIT_QUANTITY_PRESETS = [500, 1000, 2000];
+
+function isCreditsPlan(planType) {
+  const raw = String(planType || "")
+    .trim()
+    .toLowerCase();
+  return raw === "credits" || raw.startsWith("credits_");
+}
+
+function normalizeCreditQuantity(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < CREDIT_QUANTITY_MIN) return 0;
+  return Math.round(n / CREDIT_QUANTITY_STEP) * CREDIT_QUANTITY_STEP;
+}
+
+function resolveCreditQuantity(planType, quantity) {
+  const raw = String(planType || "")
+    .trim()
+    .toLowerCase();
+  const fromPlan = Number((raw.match(/^credits_(\d+)$/) || [])[1] || 0);
+  return normalizeCreditQuantity(quantity || fromPlan || 0);
+}
+
+function listCheckoutPlans() {
+  return [
+    { id: "plus", label: "ChatGPT Plus" },
+    { id: "pro_5x", label: "ChatGPT Pro 5x" },
+    { id: "pro_20x", label: "ChatGPT Pro 20x" },
+    { id: "credits", label: "Codex 充值点数" },
+  ];
+}
 
 /**
  * 将 plan_type 解析为 OpenAI plan_name
- * @param {string} planType - 'plus' | 'pro_5x' | 'pro_20x'
+ * @param {string} planType - 'plus' | 'pro_5x' | 'pro_20x' | 'credits'
  * @returns {string} 对应的 plan_name，未知值默认返回 'chatgptplusplan'
  */
 function resolvePlanName(planType) {
+  if (isCreditsPlan(planType)) {
+    return PLAN_NAME_MAP.credits;
+  }
   return PLAN_NAME_MAP[planType] || PLAN_NAME_MAP.plus;
 }
 
@@ -3917,6 +3957,76 @@ async function hasAvailableCard() {
   return rows.length > 0;
 }
 
+async function getCardById(cardId) {
+  const id = Number(cardId);
+  if (!id) return null;
+  const rows = await runQuery(
+    `SELECT id, card_number, card_expiry, card_cvc, card_holder,
+            payment_holder_name, payment_address_line1, payment_address_city,
+            payment_address_state, payment_address_postal, payment_address_id,
+            is_active, usage_count, last_used_at, status, cooldown_until
+     FROM card_assets
+     WHERE id = ?
+     LIMIT 1`,
+    [id],
+  );
+  return rows[0] || null;
+}
+
+async function getCardByLast4(last4) {
+  const suffix = String(last4 || "")
+    .replace(/\D/g, "")
+    .slice(-4);
+  if (!/^\d{4}$/.test(suffix)) return null;
+  const rows = await runQuery(
+    `SELECT id, card_number, card_expiry, card_cvc, card_holder,
+            payment_holder_name, payment_address_line1, payment_address_city,
+            payment_address_state, payment_address_postal
+     FROM card_assets
+     WHERE RIGHT(card_number, 4) = ?
+     ORDER BY last_used_at DESC, id DESC
+     LIMIT 1`,
+    [suffix],
+  );
+  return rows[0] || null;
+}
+
+async function reserveCardById(cardId, ownerKey) {
+  const id = Number(cardId);
+  if (!id) return null;
+  return withTransaction(async (connection) => {
+    const [rows] = await connection.query(
+      `SELECT id, card_number, card_expiry, card_cvc, card_holder, usage_count, status, is_active
+             FROM card_assets
+             WHERE id = ?
+             LIMIT 1
+             FOR UPDATE`,
+      [id],
+    );
+    if (!rows.length) return null;
+    const row = rows[0];
+    if (!Number(row.is_active) || row.status !== "正常") {
+      throw new Error("指定卡片当前不可用");
+    }
+    await connection.query(
+      `UPDATE card_assets
+             SET in_use = 1,
+                 locked_at = CURRENT_TIMESTAMP,
+                 locked_by = ?
+             WHERE id = ?`,
+      [String(ownerKey || "").slice(0, 64) || null, row.id],
+    );
+    return {
+      id: row.id,
+      card_number: row.card_number,
+      card_expiry: row.card_expiry,
+      card_cvc: row.card_cvc,
+      card_holder: row.card_holder,
+      usage_count: Number(row.usage_count || 0),
+    };
+  });
+}
+
 async function reserveCard(ownerKey) {
   return withTransaction(async (connection) => {
     const [rows] = await connection.query(
@@ -4560,6 +4670,9 @@ module.exports = {
   claimProductAccount,
   getClaimedProductDownloadInfo,
   reserveCard,
+  reserveCardById,
+  getCardById,
+  getCardByLast4,
   hasAvailableCard,
   releaseCard,
   markCardExhausted,
@@ -4577,6 +4690,13 @@ module.exports = {
   getSessionByJobKey,
   PLAN_NAME_MAP,
   resolvePlanName,
+  isCreditsPlan,
+  resolveCreditQuantity,
+  normalizeCreditQuantity,
+  listCheckoutPlans,
+  CREDIT_QUANTITY_MIN,
+  CREDIT_QUANTITY_STEP,
+  CREDIT_QUANTITY_PRESETS,
   connectionInfo: {
     host: DB_HOST,
     port: DB_PORT,

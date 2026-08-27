@@ -127,6 +127,7 @@ async function attemptCardPayment(
           currency,
           name: holderName,
           email,
+          planName: checkout?.data?.plan_name || checkout?.planName || "",
         },
         accountId,
         email,
@@ -167,6 +168,30 @@ async function executePaymentWithRetry(page, options) {
     checkout,
     accountId,
   } = options || {};
+  const preferredCardId = Number(process.env.PAYMENT_CARD_ID || 0);
+  const manualCardRaw = String(process.env.PAYMENT_CARD_MANUAL || "").trim();
+  let manualCard = null;
+  if (manualCardRaw) {
+    try {
+      const parsed = JSON.parse(manualCardRaw);
+      if (
+        parsed &&
+        parsed.card_number &&
+        parsed.card_expiry &&
+        parsed.card_cvc
+      ) {
+        manualCard = {
+          id: 0,
+          card_number: String(parsed.card_number).replace(/\s+/g, ""),
+          card_expiry: String(parsed.card_expiry).trim(),
+          card_cvc: String(parsed.card_cvc).trim(),
+          card_holder: String(parsed.card_holder || "").trim(),
+        };
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
   const checkoutContext = hydrateCheckoutFromUrl(
     checkout,
     page && typeof page.url === "function" ? page.url() : "",
@@ -201,10 +226,45 @@ async function executePaymentWithRetry(page, options) {
   );
   const lastUsedId = lastUsedIdRaw ? Number(lastUsedIdRaw) : null;
 
-  const address = await pickBillingAddressForCheckout(lastUsedId);
-  const addressSource = address.generated
-    ? "随机生成"
-    : `地址池 #${address.id}`;
+  let address;
+  const manualAddressRaw = String(
+    process.env.PAYMENT_ADDRESS_MANUAL || "",
+  ).trim();
+  if (manualAddressRaw) {
+    try {
+      const parsed = JSON.parse(manualAddressRaw);
+      address = {
+        line1: String(parsed.line1 || "").trim(),
+        city: String(parsed.city || "").trim(),
+        state: String(parsed.state || "").trim(),
+        postal_code: String(parsed.postal_code || parsed.postal || "").trim(),
+        country:
+          String(parsed.country || "US")
+            .trim()
+            .toUpperCase() || "US",
+        generated: false,
+      };
+      if (
+        !address.line1 ||
+        !address.city ||
+        !address.state ||
+        !address.postal_code
+      ) {
+        address = null;
+      }
+    } catch (_) {
+      address = null;
+    }
+  }
+  if (!address) {
+    address = await pickBillingAddressForCheckout(lastUsedId);
+  }
+  const addressSource =
+    manualAddressRaw && address && !address.id
+      ? "手动输入"
+      : address.generated
+        ? "随机生成"
+        : `地址池 #${address.id}`;
   progress(
     `已选取美国免税账单地址 (${addressSource}): ${address.line1}, ${address.city}, ${address.state}`,
   );
@@ -234,14 +294,31 @@ async function executePaymentWithRetry(page, options) {
     }
   }
 
-  progress(`开始支付（最多尝试 ${MAX_CARD_ATTEMPTS} 张卡）...`);
+  progress(
+    `开始支付（最多尝试 ${manualCard || preferredCardId ? 1 : MAX_CARD_ATTEMPTS} 张卡）...`,
+  );
 
-  for (
-    let cardAttempt = 1;
-    cardAttempt <= MAX_CARD_ATTEMPTS;
-    cardAttempt += 1
-  ) {
-    const card = await store.reserveCard(ownerKey);
+  const maxAttempts = manualCard || preferredCardId ? 1 : MAX_CARD_ATTEMPTS;
+  for (let cardAttempt = 1; cardAttempt <= maxAttempts; cardAttempt += 1) {
+    let card = null;
+    if (manualCard) {
+      card = { ...manualCard };
+      progress(`使用手动卡片: ...${String(card.card_number || "").slice(-4)}`);
+    } else if (preferredCardId) {
+      try {
+        card = await store.reserveCardById(preferredCardId, ownerKey);
+      } catch (err) {
+        return { success: false, error: err.message || "指定卡片不可用" };
+      }
+      if (!card) {
+        return { success: false, error: "指定卡片不存在" };
+      }
+      progress(
+        `已指定卡片 #${cardAttempt}: ...${String(card.card_number || "").slice(-4)}`,
+      );
+    } else {
+      card = await store.reserveCard(ownerKey);
+    }
     if (!card) {
       progress(
         cardAttempt === 1
@@ -312,7 +389,7 @@ async function executePaymentWithRetry(page, options) {
         ) {
           lastError = `应付金额异常: ${billedCurrency} ${billedAmount}`;
           progress(lastError);
-          await store.releaseCard(card.id).catch(() => {});
+          if (card.id) await store.releaseCard(card.id).catch(() => {});
           cardHandled = true;
           return {
             success: false,
@@ -329,12 +406,14 @@ async function executePaymentWithRetry(page, options) {
           card.card_holder ||
           billingHolderName ||
           "";
-        await store.bindCardPaymentProfile(card.id, { holderName, address });
-        if (address.id) {
-          await markAddressBound(address.id, card.id);
+        if (card.id) {
+          await store.bindCardPaymentProfile(card.id, { holderName, address });
+          if (address.id) {
+            await markAddressBound(address.id, card.id);
+          }
+          await store.recordCardUsage(card.id);
+          await store.releaseCard(card.id);
         }
-        await store.recordCardUsage(card.id);
-        await store.releaseCard(card.id);
         cardHandled = true;
         await store.createBillingRecord({
           card_number: card.card_number,
@@ -379,13 +458,17 @@ async function executePaymentWithRetry(page, options) {
           error_message: lastError,
         });
         progress(
-          `Stripe 拒绝支付，标记卡片已报废 (ID: ${card.id}, ...${cardLast4})`,
+          `Stripe 拒绝支付，标记卡片已报废 (ID: ${card.id || "-"}, ...${cardLast4})`,
         );
-        await store.markCardExhausted(card.id);
+        if (card.id) {
+          await store.markCardExhausted(card.id);
+        }
         cardHandled = true;
         declinedLast4s.push(cardLast4);
 
         if (
+          !manualCard &&
+          !preferredCardId &&
           cardAttempt < MAX_CARD_ATTEMPTS &&
           paymentResult.canRetryCard !== false
         ) {

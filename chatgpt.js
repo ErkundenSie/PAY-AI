@@ -21,12 +21,36 @@ function buildCheckoutPayload(planName, country, currency, options = {}) {
   const uiMode =
     String(options.uiMode || process.env.CHECKOUT_UI_MODE || "custom").trim() ||
     "custom";
-  const payload = {
-    entry_point: "all_plans_pricing_modal",
-    plan_name: planName,
-    checkout_ui_mode: uiMode,
-    billing_details: { country, currency },
-  };
+  const creditQuantity = Number(options.creditQuantity || 0);
+  const isCredits =
+    Boolean(options.credits) ||
+    creditQuantity > 0 ||
+    /usage_based|platformbusiness/i.test(String(planName || ""));
+  const payload = isCredits
+    ? {
+        entry_point: "codex_team_start",
+        plan_name: planName || "platformbusiness_usage_based",
+        checkout_ui_mode: uiMode,
+        billing_details: { country, currency },
+        usage_based_workspace_credit_purchase_data: {
+          quantity:
+            creditQuantity >= 250
+              ? Math.round(creditQuantity / 250) * 250
+              : 500,
+          unit: "credit",
+          workspace_name:
+            String(options.workspaceName || "Codex Space").trim() ||
+            "Codex Space",
+          plan_type: "team",
+          auto_top_up_enabled: true,
+        },
+      }
+    : {
+        entry_point: "all_plans_pricing_modal",
+        plan_name: planName,
+        checkout_ui_mode: uiMode,
+        billing_details: { country, currency },
+      };
   const accountId = String(options.accountId || "").trim();
   if (accountId) {
     payload.account_id = accountId;
@@ -1315,6 +1339,10 @@ class ChatGPTService {
         billing_details: payload.billing_details,
         checkout_ui_mode: payload.checkout_ui_mode || "custom",
       };
+      if (payload.usage_based_workspace_credit_purchase_data) {
+        officialPayload.usage_based_workspace_credit_purchase_data =
+          payload.usage_based_workspace_credit_purchase_data;
+      }
       const result = await page.evaluate(
         async ({ path, payload, headers }) => {
           const controller = new AbortController();
@@ -1577,7 +1605,7 @@ class ChatGPTService {
 
   /**
    * 创建 Stripe Checkout Session，根据 plan_type 选择对应 plan_name
-   * @param {string} planType - 'plus' | 'pro_5x' | 'pro_20x'
+   * @param {string} planType - 'plus' | 'pro_5x' | 'pro_20x' | 'credits'
    * @param {string} country - ISO 3166-1 alpha-2 国家代码
    * @param {string} currency - 币种代码 (USD/SGD/MYR)
    * @param {string} [planNameOverride] - 可选，覆盖默认 plan_name
@@ -1594,6 +1622,9 @@ class ChatGPTService {
       const planName = String(
         planNameOverride || store.resolvePlanName(planType),
       ).trim();
+      const creditQuantity = Number(
+        options.creditQuantity || store.resolveCreditQuantity(planType, 0) || 0,
+      );
       const profile = extractProfileFromToken(this.token);
       let accountId = String(profile.accountId || "").trim();
       let warmupPlan = "";
@@ -1606,7 +1637,7 @@ class ChatGPTService {
         ? ["custom"]
         : resolveCheckoutModes(warmupPlan);
       console.log(
-        `[ChatGPT] 创建 Checkout Session: plan_name=${planName}, country=${country}, currency=${currency}, account_id=${accountId || "none"}, current_plan=${warmupPlan || "none"}, modes=${modes.join("->")}${pageCheckoutFirst ? ", via=php-protocol" : ""}`,
+        `[ChatGPT] 创建 Checkout Session: plan_name=${planName}, country=${country}, currency=${currency}, account_id=${accountId || "none"}, current_plan=${warmupPlan || "none"}, modes=${modes.join("->")}${creditQuantity ? `, credits=${creditQuantity}` : ""}${pageCheckoutFirst ? ", via=php-protocol" : ""}`,
       );
 
       let lastParsed = null;
@@ -1614,6 +1645,7 @@ class ChatGPTService {
         const payload = buildCheckoutPayload(planName, country, currency, {
           uiMode,
           accountId,
+          creditQuantity,
         });
         console.log(`[ChatGPT] 尝试 checkout 模式: ${planType}-${uiMode}`);
         let parsed;
@@ -1944,6 +1976,7 @@ async function openApiCheckout(
     country,
     currency,
     planNameOverride,
+    creditQuantity = 0,
     verifyPage = true,
   },
 ) {
@@ -1967,7 +2000,7 @@ async function openApiCheckout(
     region,
     billingCurrency,
     planNameOverride,
-    { page },
+    { page, creditQuantity: Number(creditQuantity || 0) },
   );
   if (!checkout.checkoutUrl) {
     throw new Error(

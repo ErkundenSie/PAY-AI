@@ -1,8 +1,6 @@
-# OAI充值系统
+# KC-PAY-GPT
 
-> **OAI充值系统**  
-> 使用者貼上 Session 與兌換 CDK 後，可使用本地 Stripe 自動化流程，或啟用第三方代充 API 建立並輪詢代充訂單。  
-> 配套管理後台：卡池管理、CDK 管理、任務監控、帳單稽核、第三方代充積分與套餐狀態、並發控制。
+Node.js + Playwright + MySQL 的 ChatGPT 开通服务。用户可走卡密兑换或独立自助开通页，后台管理卡池、CDK、任务和账单。支付默认协议优先，支持会员套餐和 Codex 充值点数。
 
 | 开发者 | TG     |
 | ------ | ------ |
@@ -18,14 +16,14 @@
 
 ## 这是什么
 
-`KC-GPT-PAY`（OAI充值系统）是一套 **Node.js + Playwright + MySQL** 服务端方案，包含：
+本地开通服务，包含：
 
-- **用户前台**（`/public/index.html`）：卡密兑换、Session 提交、订阅自动开通、状态查询
-- **管理后台**（`/admin`）：卡池 / CDK / 任务 / 账单 / 系统配置 / 运行日志
-- **本地自動化引擎**：Stripe Checkout 填表、信用卡輪換、hCaptcha 求解、反指紋瀏覽器與失敗重試
-- **第三方代充 API**：支援套餐／積分查詢、Session 預檢、代充建單、訂單輪詢，以及失敗訂單的供應商卡密前綴顯示
+- 卡密兑换：`/`
+- 自助开通：`/checkout`（不走兑换码，可选手动卡和地址）
+- Codex 充值点数：最低 250，步长 250
+- 协议优先支付与后台卡池 / CDK / 任务 / 账单
 
-啟用第三方代充 API 後，前台兌換會完全改走供應商代充流程，不再使用本地開通。
+第三方代充 API 只影响会员兑换；点数始终走本地协议。
 
 > ⚠️ **仅供学习与研究**。使用前请确保符合目标平台 ToS 与所在地法律法规。**开发者不对任何滥用导致的封号、扣款、法律纠纷负责。**
 
@@ -87,10 +85,12 @@ docker compose up -d
 
 首次构建镜像需数分钟（含 Playwright Chromium + hCaptcha Python 依赖）。启动成功后：
 
-| 地址                               | 说明                             |
-| ---------------------------------- | -------------------------------- |
-| `http://服务器IP:3000/`            | 用户前台（卡密兑换）             |
-| `http://服务器IP:3000/admin-login` | 后台登录（默认路径可在后台修改） |
+| 地址                                | 说明                          |
+| ----------------------------------- | ----------------------------- |
+| `http://服务器IP:3000/`             | 卡密兑换                      |
+| `http://服务器IP:3000/checkout`     | 自助开通（会员 / Codex 点数） |
+| `http://服务器IP:3000/subscription` | 发票助手                      |
+| `http://服务器IP:3000/admin-login`  | 后台登录                      |
 
 #### 4. Docker 常用命令
 
@@ -302,30 +302,27 @@ sudo certbot --nginx -d your-domain.com
 
 ---
 
-## 首次使用
+## 后台导入银行卡，确认支付地区（默认菲律宾 PHP）
 
-1. 打开后台 → **系统配置**：填写代理、支付地区（默认菲律宾 PHP）、邮箱通道、hCaptcha 等
-2. **卡池管理** → 批量导入信用卡（格式：`卡号|有效期|CVC|持卡人姓名`）
-3. **免税地址** → 确认当前地区有足够地址模板（默认已预置）
-4. **CDK 管理** → 生成 Plus / Pro 5x / Pro 20x 激活码
-5. 用户访问前台 → 输入 CDK → 粘贴 Session JSON → 提交，约 3–5 分钟自动开通
-6. 在 **任务管理** / **运行日志** 查看进度与结果
+2. CDK 管理生成 Plus / Pro / Codex 点数激活码
+3. 用户访问 `/` 兑换，或访问 `/checkout` 手动开通
+4. 任务记录查看进度、截图、录像；已结束且无媒体时显示「暂无截图/录像」
+5. 点数开通不关闭自动续费，也不走第三方代充
 
 ---
 
 ## 主要功能
 
-| 模块                | 说明                                                            |
-| ------------------- | --------------------------------------------------------------- |
-| **CDK 兑换**        | Plus / Pro 5x / Pro 20x 三档套餐，一卡一充                      |
-| **信用卡卡池**      | 批量导入、智能选卡、冷却机制、Stripe 拒卡自动报废、失败换卡重试 |
-| **支付地区**        | PH / US / SG / MY 可切换，配套免税地址池                        |
-| **账单审计**        | 自动记录每笔支付，支持筛选与 CSV 导出                           |
-| **瀏覽器池**        | 本地自動化的可選多槽位模式；目前預設關閉（`BROWSER_POOL=0`）    |
-| **hCaptcha**        | VLM / 打码平台 / Python solver 多通道                           |
-| **反指纹**          | Stealth + 30+ 指纹点修正，支持真 Chrome / Edge                  |
-| **Telegram 通知**   | 任务成功 / 失败推送（后台配置）                                 |
-| **并发 & 维护模式** | 前台并发上限、维护开关，保存即生效                              |
+| 模块                | 说明                                    |
+| ------------------- | --------------------------------------- |
+| **CDK 兑换**        | Plus / Pro / Codex 点数                 |
+| **自助开通**        | `/checkout` 独立页，手动卡和地址        |
+| **信用卡卡池**      | 导入、选卡、拒卡换卡                    |
+| **协议支付**        | taxes → token → confirm → PaymentIntent |
+| **账单审计**        | 筛选、CSV 导出                          |
+| **任务媒体**        | 进行中提示等待；结束后无文件显示暂无    |
+| **Telegram 通知**   | 任务成功 / 失败推送（后台配置）         |
+| **并发 & 维护模式** | 前台并发上限、维护开关，保存即生效      |
 
 ---
 
@@ -336,23 +333,14 @@ sudo certbot --nginx -d your-domain.com
 │                     server.js (Express)                      │
 │   /api/redeem/*   /api/cdk/*   /api/admin/*   /api/public/* │
 └─────────────────────────────────────────────────────────────┘
-         │                                    │
-         ▼                                    ▼
-┌─────────────────────┐            ┌─────────────────────┐
-│  product_activator  │            │  public/admin.html  │
-│  任务调度 / 重试     │            │  OAI充值系统管理后台 │
-└─────────────────────┘            └─────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│  index.js / stripe-payment.js / session-auth.js / browser-pool │
-│  Stripe Checkout 自动化 · Session 鉴权 · 卡池支付 · 重试      │
-└─────────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────┐
-│  MySQL — 卡池 / CDK / 任务 / 账单 / 配置 / Session 记录       │
-└─────────────────────────────────────────────────────────────┘
+server.js            Express、公开接口、后台接口、任务调度
+index.js             Playwright 子进程：登录 → Checkout → 协议支付
+chatgpt.js           Checkout payload、Sentinel、PHP 协议提链
+checkout-protocol.js Stripe taxes / token / confirm
+mysql-store.js       CDK、卡池、任务、账单
+public/index.html    卡密兑换
+public/checkout.html 独立自助开通
+public/admin.html    管理后台
 ```
 
 ---
@@ -361,69 +349,60 @@ sudo certbot --nginx -d your-domain.com
 
 ```
 .
-├── server.js              # Express 入口、REST API
-├── product_activator.js   # 任务调度核心
-├── index.js               # Stripe 支付主流程（子进程）
-├── stripe-payment.js      # Checkout 表单自动化
-├── session-auth.js        # Session 解析与鉴权
-├── browser-pool.js        # 浏览器池管理
-├── mysql-store.js         # MySQL 全部 CRUD
-├── payment-retry.js       # 支付重试与换卡逻辑
-├── region-config.js       # 支付地区配置
-├── hcaptcha/              # Python hCaptcha solver
+├── server.js
+├── index.js
+├── chatgpt.js
+├── checkout-protocol.js
+├── payment-retry.js
+├── session-auth.js
+├── mysql-store.js
+├── region-config.js
 ├── public/
-│   ├── index.html         # 用户前台
-│   ├── admin.html         # 管理后台
-│   └── admin-login.html   # 后台登录
-├── scripts/
-│   ├── install.sh         # macOS / Linux 一键安装
-│   └── install-windows.ps1
-├── docker-compose.yml     # Docker 一键部署
+│   ├── index.html
+│   ├── checkout.html
+│   ├── admin.html
+│   └── admin-login.html
+├── docker-compose.yml
 ├── Dockerfile
-├── mysql-schema.sql
-├── .env.example
-└── 对接api.md             # 第三方代充 API 對接文件
-```
-
----
+└── mysql-schema.sql
 
 ## 接口文档
 
-本系統 REST API 請依 `server.js` 路由使用；第三方代充接口見 [對接 API 文件](对接api.md)。常用接口：
+常用接口：
 
-| 用途          | Method + Path                   | 鉴权      |
-| ------------- | ------------------------------- | --------- |
-| 用户兑换开通  | `POST /api/redeem-product`      | 无        |
-| 查询 CDK 状态 | `GET /api/cdk/query?cdk=...`    | 无        |
-| 后台登录      | `POST /api/admin/login`         | 密码      |
-| 卡池批量导入  | `POST /api/admin/cards/import`  | Bearer    |
-| 外部卡池推送  | `POST /api/external/cards/push` | X-API-Key |
-| 账单 CSV 导出 | `GET /api/admin/billing/export` | Bearer    |
-| 实时运行日志  | `GET /api/admin/runtime-logs`   | Bearer    |
+| 用途 | Method + Path | 鉴权 |
+| --- | --- | --- |
+| 卡密兑换 | `POST /api/redeem-product` | 无 |
+| 自助开通 | `POST /api/public/checkout/pay` | 无 |
+| 开通选项 | `GET /api/public/checkout/options` | 无 |
+| 查询 CDK | `GET /api/cdk/query?cdk=...` | 无 |
+| 后台登录 | `POST /api/admin/login` | 密码 |
+| 卡池导入 | `POST /api/admin/cards/import` | Bearer |
+| 外部卡池 | `POST /api/external/cards/push` | X-API-Key |
 
 ---
 
 ## 常见问题
 
-**Q: Docker 里浏览器崩溃？**  
+**Q: Docker 里浏览器崩溃？**
 A: `docker-compose.yml` 已配置 `shm_size: 2gb`。仍崩溃可改为 `4gb`，并确保宿主机内存 ≥ 4 GB。
 
-**Q: Linux 上 Chromium 启动失败？**  
+**Q: Linux 上 Chromium 启动失败？**
 A: 执行 `npx playwright install-deps chromium`，确认 `HEADFUL=0`（无头模式）。
 
-**Q: MySQL 连接被拒绝？**  
+**Q: MySQL 连接被拒绝？**
 A: Docker 模式下 `DB_HOST=mysql`（compose 服务名）；裸机模式下 `DB_HOST=127.0.0.1`。确认 MySQL 服务已启动。
 
-**Q: Stripe 一直 `redirect_status=failed`？**  
+**Q: Stripe 一直 `redirect_status=failed`？**
 A: 多为卡 BIN 被风控、余额不足或代理 IP 不干净。换卡、换代理、确认支付地区设置。
 
-**Q: 卡池枯竭怎么办？**  
+**Q: 卡池枯竭怎么办？**
 A: 后台批量导入，或配置 Webhook `POST /api/external/cards/push` 自动补货。
 
-**Q: 修改哪些文件需要重启？**  
-A: `server.js`、`mysql-store.js`、`product_activator.js` 等主进程文件需重启；`index.js`、`stripe-payment.js` 等子进程文件下次任务自动加载。
+**Q: 修改哪些文件需要重启？**
+A: `server.js`、`mysql-store.js` 需重启；`index.js`、`chatgpt.js`、`checkout-protocol.js` 下次任务自动加载。
 
-**Q: Windows 上 Playwright 安装失败？**  
+**Q: Windows 上 Playwright 安装失败？**
 A: 管理员 PowerShell 执行：`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`，再 `npx playwright install chromium`。
 
 ---
@@ -462,3 +441,4 @@ A: 管理员 PowerShell 执行：`Set-ExecutionPolicy -Scope CurrentUser RemoteS
 ## 许可
 
 [MIT License](LICENSE) © KC
+```

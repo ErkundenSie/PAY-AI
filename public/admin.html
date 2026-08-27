@@ -788,7 +788,8 @@
       }
 
       .task-log-table .col-media {
-        width: 132px;
+        width: 168px;
+        text-align: left;
       }
 
       .task-log-table .col-action {
@@ -814,10 +815,9 @@
 
       .task-filter-bar {
         display: grid;
-        grid-template-columns: 150px minmax(160px, 1fr) minmax(
-            180px,
-            1fr
-          ) 150px auto;
+        grid-template-columns:
+          150px minmax(160px, 1fr) minmax(180px, 1fr)
+          150px auto;
         gap: 10px;
         align-items: end;
         margin: 14px 0;
@@ -850,7 +850,7 @@
       .task-action-buttons {
         display: inline-flex;
         align-items: center;
-        justify-content: center;
+        justify-content: flex-start;
         gap: 6px;
         min-height: 32px;
       }
@@ -2243,12 +2243,30 @@
 
       .admin-confirm-dialog {
         width: 100%;
-        max-width: 440px;
+        max-width: 520px;
         background: var(--surface);
         border: 1px solid var(--glass-border);
         border-radius: 14px;
         padding: 22px 22px 18px;
         box-shadow: var(--shadow-lg);
+      }
+
+      .admin-confirm-extra {
+        display: grid;
+        gap: 10px;
+        margin: 0 0 18px;
+      }
+
+      .admin-confirm-extra .asset-input,
+      .admin-confirm-extra select {
+        width: 100%;
+      }
+
+      .admin-confirm-extra label {
+        display: block;
+        font-size: 12px;
+        color: var(--text-dim);
+        margin-bottom: 6px;
       }
 
       .admin-confirm-title {
@@ -2295,6 +2313,7 @@
       >
         <div id="admin_confirm_title" class="admin-confirm-title">请确认</div>
         <p id="admin_confirm_text" class="admin-confirm-text"></p>
+        <div id="admin_confirm_extra" class="admin-confirm-extra" hidden></div>
         <div class="admin-confirm-actions">
           <button
             type="button"
@@ -4241,6 +4260,15 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 <option value="plus">Plus — chatgptplusplan</option>
                 <option value="pro_5x">Pro 5x — chatgptprolite</option>
                 <option value="pro_20x">Pro 20x — chatgptpro</option>
+                <option value="credits">Codex 点数 — platformbusiness_usage_based</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom: 0" id="checkout_credit_quantity_wrap" hidden>
+              <label style="margin-bottom: 6px">充值点数</label>
+              <select id="checkout_credit_quantity" class="asset-input">
+                <option value="500">500</option>
+                <option value="1000">1000</option>
+                <option value="2000">2000</option>
               </select>
             </div>
             <div class="form-group" style="margin-bottom: 0">
@@ -4519,6 +4547,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 <option value="plus" selected>Plus</option>
                 <option value="pro_5x">Pro 5x</option>
                 <option value="pro_20x">Pro 20x</option>
+                <option value="credits_500">Codex 500</option>
+                <option value="credits_1000">Codex 1000</option>
+                <option value="credits_2000">Codex 2000</option>
               </select>
               <input
                 type="number"
@@ -4627,6 +4658,24 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                   onclick="selectCdkPlanTypeFilter('pro_20x', 'Pro 20x')"
                 >
                   Pro 20x
+                </button>
+                <button
+                  class="filter-option"
+                  onclick="selectCdkPlanTypeFilter('credits_500', 'Codex 500')"
+                >
+                  Codex 500
+                </button>
+                <button
+                  class="filter-option"
+                  onclick="selectCdkPlanTypeFilter('credits_1000', 'Codex 1000')"
+                >
+                  Codex 1000
+                </button>
+                <button
+                  class="filter-option"
+                  onclick="selectCdkPlanTypeFilter('credits_2000', 'Codex 2000')"
+                >
+                  Codex 2000
                 </button>
               </div>
             </div>
@@ -4754,7 +4803,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       <div id="logs" class="page-view">
         <div class="page-header">
           <h1>任务</h1>
-          <p>每次 CDK 开通、链接调试或支付调试均保留一条独立记录</p>
+          <p>每次 CDK 开通、自助开通、链接调试或支付调试均保留一条独立记录</p>
         </div>
         <div class="panel">
           <div class="runtime-log-toolbar log-page-toolbar">
@@ -4790,6 +4839,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               >
                 <option value="all">全部类型</option>
                 <option value="CDK 开通">CDK 开通</option>
+                <option value="自助开通">自助开通</option>
                 <option value="链接调试">链接调试</option>
                 <option value="支付调试">支付调试</option>
               </select>
@@ -4846,9 +4896,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                   <th class="col-progress">进度</th>
                   <th class="col-duration">用时</th>
                   <th class="col-status">状态</th>
-                  <th class="col-media" style="text-align: center">
-                    截图/录像
-                  </th>
+                  <th class="col-media">截图/录像</th>
                   <th class="col-action" style="text-align: center">操作</th>
                 </tr>
               </thead>
@@ -4921,7 +4969,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 <option value="pro_5x">Pro 5x</option>
                 <option value="pro_20x">Pro 20x</option>
               </select>
-            </div>
+            </  <option value="credits">Codex 点数</option>
+              div>
             <div class="form-group" style="margin-bottom: 0">
               <label>支付状态</label>
               <select id="billing_status" class="asset-input">
@@ -6465,7 +6514,15 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         if (shotBtn || videoBtn) {
           return `<div class="task-media-actions">${shotBtn}${videoBtn}</div>`;
         }
-        return '<span style="color:var(--text-dim); font-size:12px;">任务结束后可刷新查看</span>';
+        const status = String(task?.status || "").toLowerCase();
+        if (
+          status === "running" ||
+          status === "retry" ||
+          status === "processing"
+        ) {
+          return '<span style="color:var(--text-dim); font-size:12px;">任务进行中，结束后可查看</span>';
+        }
+        return '<span style="color:var(--text-dim); font-size:12px;">暂无截图/录像</span>';
       }
 
       function closeTaskDetailModal() {
@@ -6502,6 +6559,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           const task = data.task || {};
           const currentPhase =
             listTask?.automation?.phase || task.message || "-";
+          const bound = task.boundCard || {};
+          const cardLast4 = task.cardLast4 || bound.last4 || "";
+          const isPaymentTask =
+            String(listTask?.cdk || task.cdk || "").includes("payment-debug") ||
+            getTaskType(listTask) === "支付调试" ||
+            Boolean(cardLast4);
           const entries = [
             ["任务 ID", key],
             ["任务类型", getTaskType(listTask)],
@@ -6520,8 +6583,13 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               ),
             ],
             ["当前阶段", currentPhase],
-            ["支付卡尾号", task.cardLast4 ? `**** ${task.cardLast4}` : "-"],
           ];
+          if (isPaymentTask) {
+            entries.push(["绑定卡片", cardLast4 ? `**** ${cardLast4}` : "-"]);
+            if (bound.holder) entries.push(["持卡人", bound.holder]);
+            if (bound.expiry) entries.push(["有效期", bound.expiry]);
+            if (bound.address) entries.push(["账单地址", bound.address]);
+          }
           meta.innerHTML = entries
             .map(
               ([label, value]) =>
@@ -6634,8 +6702,10 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           success: "check-circle-2",
           error: "x-circle",
           warning: "alert-triangle",
+          info: "info",
         };
-        item.innerHTML = `<i data-lucide="${iconMap[type] || "info"}"></i><span>${content}</span>`;
+        const icon = iconMap[type] || "info";
+        item.innerHTML = `<i data-lucide="${icon}"></i><span>${escapeHtml(String(content || ""))}</span>`;
         container.appendChild(item);
         lucide.createIcons();
         setTimeout(() => {
@@ -6648,11 +6718,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
 
       let adminConfirmResolver = null;
 
-      function showAdminConfirm(message, title) {
+      function showAdminConfirm(message, title, extraHtml) {
         return new Promise((resolve) => {
           const overlay = document.getElementById("admin_confirm_overlay");
           const textEl = document.getElementById("admin_confirm_text");
           const titleEl = document.getElementById("admin_confirm_title");
+          const extraEl = document.getElementById("admin_confirm_extra");
           if (!overlay || !textEl) {
             resolve(false);
             return;
@@ -6662,6 +6733,10 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               title && String(title).trim() ? String(title).trim() : "请确认";
           }
           textEl.textContent = message;
+          if (extraEl) {
+            extraEl.innerHTML = extraHtml || "";
+            extraEl.hidden = !extraHtml;
+          }
           overlay.classList.add("is-open");
           overlay.setAttribute("aria-hidden", "false");
           adminConfirmResolver = resolve;
@@ -6675,14 +6750,26 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
 
       function closeAdminConfirm(result) {
         const overlay = document.getElementById("admin_confirm_overlay");
+        const extraEl = document.getElementById("admin_confirm_extra");
         if (overlay) {
           overlay.classList.remove("is-open");
           overlay.setAttribute("aria-hidden", "true");
         }
+        const extraValue =
+          extraEl && extraEl.querySelector("[data-confirm-value]");
+        const extraPayload =
+          extraEl && extraEl.querySelector("[data-confirm-extra]");
+        const payload = extraValue
+          ? {
+              source: extraValue.value || "pool",
+              extra: extraPayload ? extraPayload.value : "",
+            }
+          : true;
+        if (extraEl) extraEl.innerHTML = "";
         const r = adminConfirmResolver;
         adminConfirmResolver = null;
         if (r) {
-          r(Boolean(result));
+          r(result ? payload : false);
         }
       }
 
@@ -8561,6 +8648,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         const cdk = String(task?.cdk || "");
         if (cdk === "[checkout-debug]") return "链接调试";
         if (cdk === "[payment-debug]") return "支付调试";
+        if (cdk === "[self-pay]") return "自助开通";
         return "CDK 开通";
       }
 
@@ -8605,19 +8693,40 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               typeof cdk === "string" ? null : cdk.session_preview || null;
 
             const planTypeLabel =
-              { plus: "Plus", pro_5x: "Pro 5x", pro_20x: "Pro 20x" }[
-                planType
-              ] || "Plus";
+              {
+                plus: "Plus",
+                pro_5x: "Pro 5x",
+                pro_20x: "Pro 20x",
+                credits: "Codex",
+                credits_500: "Codex 500",
+                credits_1000: "Codex 1000",
+                credits_2000: "Codex 2000",
+              }[planType] ||
+              (String(planType).startsWith("credits") ? "Codex" : "Plus");
             const planTypeColor =
-              { plus: "#2563eb", pro_5x: "#8b5cf6", pro_20x: "#ec4899" }[
-                planType
-              ] || "#2563eb";
+              {
+                plus: "#2563eb",
+                pro_5x: "#8b5cf6",
+                pro_20x: "#ec4899",
+                credits: "#0f766e",
+                credits_500: "#0f766e",
+                credits_1000: "#0f766e",
+                credits_2000: "#0f766e",
+              }[planType] ||
+              (String(planType).startsWith("credits") ? "#0f766e" : "#2563eb");
             const planTypeBg =
               {
                 plus: "rgba(37, 99, 235, 0.12)",
                 pro_5x: "rgba(139, 92, 246, 0.12)",
                 pro_20x: "rgba(236, 72, 153, 0.12)",
-              }[planType] || "rgba(37, 99, 235, 0.12)";
+                credits: "rgba(15, 118, 110, 0.12)",
+                credits_500: "rgba(15, 118, 110, 0.12)",
+                credits_1000: "rgba(15, 118, 110, 0.12)",
+                credits_2000: "rgba(15, 118, 110, 0.12)",
+              }[planType] ||
+              (String(planType).startsWith("credits")
+                ? "rgba(15, 118, 110, 0.12)"
+                : "rgba(37, 99, 235, 0.12)");
 
             return `
                 <tr>
@@ -9016,7 +9125,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                     </td>
                     <td class="col-duration">${escapeHtml(formatDurationText(l.durationSeconds))}</td>
                     <td class="col-status">${renderStatus(l.status)}</td>
-                    <td class="col-media" style="text-align:center">${mediaCell}</td>
+                    <td class="col-media">${mediaCell}</td>
                     <td class="col-action" style="text-align:center">
                       <div class="table-action-group task-action-buttons">
                         <button type="button" class="btn btn-primary" data-view-task-detail="${escapeHtml(l.id)}">详情</button>
@@ -10330,6 +10439,10 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           plus: "Plus",
           pro_5x: "Pro 5x",
           pro_20x: "Pro 20x",
+          credits: "Codex 点数",
+          credits_500: "Codex 500",
+          credits_1000: "Codex 1000",
+          credits_2000: "Codex 2000",
         };
         tbody.innerHTML = records
           .map((r) => {
@@ -10908,16 +11021,54 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       }
 
       async function startCheckoutPayment() {
-        const confirmed = await showAdminConfirm(
-          "将从银行卡池选择可用卡并发起真实付款请求，继续？",
-          "确认支付调试",
-        );
-        if (confirmed) {
-          await startCheckoutTask("payment");
+        let cardOptions =
+          '<option value="pool">跟随系统（卡池自动选卡）</option>';
+        try {
+          const res = await authFetch("/api/admin/cards");
+          const data = await res.json();
+          const cards = Array.isArray(data.cards) ? data.cards : [];
+          const usable = cards.filter(
+            (card) =>
+              Number(card.is_active) &&
+              String(card.status || "正常") === "正常" &&
+              !(
+                card.cooldown_until &&
+                new Date(card.cooldown_until) > new Date()
+              ),
+          );
+          cardOptions += usable
+            .map((card) => {
+              const last4 = String(card.last4 || card.card_number || "").slice(
+                -4,
+              );
+              const holder = card.payment_holder_name || card.card_holder || "";
+              const label = `#${card.id} **** ${last4}${holder ? ` / ${holder}` : ""}`;
+              return `<option value="id:${card.id}">${escapeHtml(label)}</option>`;
+            })
+            .join("");
+        } catch (_) {
+          /* keep pool option */
         }
+        cardOptions += '<option value="manual">手动输入新卡片</option>';
+        const extraHtml = `
+          <label>用卡方式</label>
+          <select class="asset-input" data-confirm-value onchange="document.getElementById('checkout_manual_card_input').hidden = this.value !== 'manual'">
+            ${cardOptions}
+          </select>
+          <input id="checkout_manual_card_input" class="asset-input" data-confirm-extra hidden placeholder="卡号|月/年|CVC|持卡人（可选）">
+        `;
+        const confirmed = await showAdminConfirm(
+          "默认跟随系统从卡池选卡。也可指定一张卡，或手动输入新卡片。",
+          "确认支付调试",
+          extraHtml,
+        );
+        if (!confirmed) return;
+        const payload =
+          confirmed === true ? { source: "pool", extra: "" } : confirmed;
+        await startCheckoutTask("payment", payload);
       }
 
-      async function startCheckoutTask(mode) {
+      async function startCheckoutTask(mode, cardChoice) {
         const sessionRaw = document
           .getElementById("checkout_session_input")
           ?.value?.trim();
@@ -10954,6 +11105,17 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         const pre = document.getElementById("checkout_debug_log_pre");
         if (pre) pre.textContent = "";
 
+        if (
+          isPayment &&
+          cardChoice &&
+          cardChoice.source === "manual" &&
+          !String(cardChoice.extra || "").trim()
+        ) {
+          resetCheckoutDebugButton();
+          showMessage("请填写手动卡片：卡号|月/年|CVC", "warning");
+          return;
+        }
+
         try {
           const res = await authFetch(
             isPayment
@@ -10962,12 +11124,34 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                session: sessionRaw,
-                plan_type: planType,
-                plan_name: planName || undefined,
-                country: region,
-              }),
+              body: JSON.stringify(
+                (() => {
+                  const requestBody = {
+                    session: sessionRaw,
+                    plan_type: planType,
+                    plan_name: planName || undefined,
+                    country: region,
+                    credit_quantity: String(planType).startsWith("credits")
+                      ? Number(
+                          document.getElementById("checkout_credit_quantity")
+                            ?.value || 500,
+                        )
+                      : undefined,
+                  };
+                  if (isPayment && cardChoice && cardChoice.source) {
+                    if (String(cardChoice.source).startsWith("id:")) {
+                      requestBody.card_id = Number(
+                        String(cardChoice.source).slice(3),
+                      );
+                    } else if (cardChoice.source === "manual") {
+                      requestBody.card_manual = String(
+                        cardChoice.extra || "",
+                      ).trim();
+                    }
+                  }
+                  return requestBody;
+                })(),
+              ),
             },
           );
           const data = await res.json();
@@ -11020,7 +11204,15 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
       function renderCheckoutPlanTypeOptions() {
         const sel = document.getElementById("checkout_plan_type");
         if (!sel) return;
-        const labels = { plus: "Plus", pro_5x: "Pro 5x", pro_20x: "Pro 20x" };
+        const labels = {
+          plus: "Plus",
+          pro_5x: "Pro 5x",
+          pro_20x: "Pro 20x",
+          credits: "Codex 点数",
+          credits_500: "Codex 500",
+          credits_1000: "Codex 1000",
+          credits_2000: "Codex 2000",
+        };
         const current = sel.value || "plus";
         sel.innerHTML = Object.keys(checkoutPlanMap)
           .map((key) => {
@@ -11036,8 +11228,11 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         const planType =
           document.getElementById("checkout_plan_type")?.value || "plus";
         const input = document.getElementById("checkout_plan_name");
+        const wrap = document.getElementById("checkout_credit_quantity_wrap");
+        if (wrap) wrap.hidden = !String(planType).startsWith("credits");
         const mapped =
           checkoutPlanMap[planType] ||
+          checkoutPlanMap.credits ||
           checkoutPlanMap.plus ||
           "chatgptplusplan";
         if (input) {

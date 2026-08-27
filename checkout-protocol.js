@@ -511,6 +511,9 @@ function amountFromMinorUnits(amountTotal, currency) {
 function expectedProtocolDueRange(currency, planName = "") {
   const cur = String(currency || "").toUpperCase();
   const plan = String(planName || "").toLowerCase();
+  if (/credit|usage_based|platformbusiness/.test(plan)) {
+    return null;
+  }
   if (cur === "PHP" && (!plan || /plus/.test(plan))) {
     return { min: 900, max: 1050 };
   }

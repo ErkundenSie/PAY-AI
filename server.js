@@ -56,6 +56,7 @@ const {
   resumeAutoRenew,
 } = require("./subscription-check");
 const gptApi = require("./gpt-api-client");
+const cardValidator = require("./card-validator");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -871,15 +872,284 @@ function analyzeCheckoutDebugOutput(output, timedOut) {
 
 function extractCardLast4FromOutput(output) {
   const text = String(output || "");
-  const reserved = text.match(/已预留卡片:\s*\.\.\.(\d{4})/);
+  const reserved = text.match(/已预留卡片(?:\s*#\d+)?:\s*\.\.\.(\d{4})/);
   if (reserved) {
     return reserved[1];
+  }
+  const success = text.match(/支付成功！卡片:\s*\.\.\.(\d{4})/);
+  if (success) {
+    return success[1];
   }
   const attempt = text.match(/ATTEMPT \d+ \| CARD (\d{4})/);
   if (attempt) {
     return attempt[1];
   }
   return null;
+}
+
+function extractBoundCardFromOutput(output) {
+  const text = String(output || "");
+  const last4 = extractCardLast4FromOutput(text);
+  const holder =
+    (text.match(/支付成功！卡片:.*?姓名:\s*([^，,\n]+)/) || [])[1] || "";
+  const address =
+    (text.match(/支付成功！卡片:.*?地址:\s*([^\n]+)/) || [])[1] || "";
+  if (!last4 && !holder && !address) return null;
+  return {
+    last4: last4 || "",
+    holder: String(holder).trim(),
+    address: String(address)
+      .trim()
+      .replace(/[，,]\s*$/, ""),
+  };
+}
+
+function parseManualDebugCard(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  const parts = text
+    .split(/[|\t,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (parts.length < 3) {
+    throw new Error("手动卡片格式：卡号|月/年|CVC，可再加持卡人姓名");
+  }
+  const card = {
+    card_number: parts[0].replace(/\s+/g, ""),
+    card_expiry: parts[1],
+    card_cvc: parts[2],
+    card_holder: parts[3] || "",
+  };
+  const numberCheck = cardValidator.validateCardNumber(card.card_number);
+  if (!numberCheck.valid) throw new Error(numberCheck.error || "卡号无效");
+  const expiryCheck = cardValidator.validateExpiry(card.card_expiry);
+  if (!expiryCheck.valid) throw new Error(expiryCheck.error || "有效期无效");
+  const cvcCheck = cardValidator.validateCVC(card.card_cvc);
+  if (!cvcCheck.valid) throw new Error(cvcCheck.error || "CVC 无效");
+  return card;
+}
+
+function parseManualBillingAddress(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const address = {
+    line1: String(raw.line1 || raw.address || "").trim(),
+    city: String(raw.city || "").trim(),
+    state: String(raw.state || "").trim(),
+    postal_code: String(raw.postal_code || raw.postal || raw.zip || "").trim(),
+    country:
+      String(raw.country || "US")
+        .trim()
+        .toUpperCase() || "US",
+  };
+  if (
+    !address.line1 ||
+    !address.city ||
+    !address.state ||
+    !address.postal_code
+  ) {
+    throw new Error("请完整填写账单地址：街道、城市、州、邮编");
+  }
+  if (!/^[A-Z]{2}$/.test(address.country)) {
+    throw new Error("账单国家需为 2 位大写字母");
+  }
+  return address;
+}
+
+async function startPublicCheckoutPay(body = {}, options = {}) {
+  const requireManualPayment = Boolean(options.requireManualPayment);
+  const isAdminDebug = String(body.cdk_code || "") === "[payment-debug]";
+  const rawSession = String(body.session || "").trim();
+  if (!rawSession) {
+    return {
+      status: 400,
+      payload: { success: false, error: "请提供 Session JSON" },
+    };
+  }
+
+  const sessionJson = parseSessionJson(rawSession);
+  const token = normalizeSessionToken(rawSession);
+  if (!token) {
+    return {
+      status: 400,
+      payload: { success: false, error: "Session 无效，无法提取 accessToken" },
+    };
+  }
+  const tokenCheck = validateAccessToken(token);
+  if (!tokenCheck.valid) {
+    return {
+      status: 400,
+      payload: { success: false, error: tokenCheck.message },
+    };
+  }
+
+  const planType = String(body.plan_type || "plus").trim() || "plus";
+  const planNameOverride = body.plan_name ? String(body.plan_name).trim() : "";
+  const resolvedPlanName = planNameOverride || store.resolvePlanName(planType);
+  const creditQuantity = store.isCreditsPlan(planType)
+    ? store.resolveCreditQuantity(
+        planType,
+        body.credit_quantity || body.credits || 0,
+      )
+    : 0;
+  if (store.isCreditsPlan(planType) && creditQuantity < 250) {
+    return {
+      status: 400,
+      payload: {
+        success: false,
+        error: "充值点数至少 250，且需为 250 的倍数",
+      },
+    };
+  }
+  const regionCode = String(
+    body.country || body.region || (await store.getPaymentRegion()),
+  ).toUpperCase();
+  if (!isSupportedRegion(regionCode)) {
+    return {
+      status: 400,
+      payload: { success: false, error: `不支持的地区: ${regionCode}` },
+    };
+  }
+
+  if (VERIFY_OPENAI_TOKEN_ON_ACTIVATION) {
+    const verification = await querySubscriptionBySession(token, {
+      email: extractEmailFromSession(rawSession) || tokenCheck.email || "",
+    });
+    if (!verification.ok) {
+      return {
+        status: 401,
+        payload: {
+          success: false,
+          error: "Session 无法通过 OpenAI 服务验证，请确认有效后重试",
+        },
+      };
+    }
+  }
+
+  const maintenanceModeState = await store.getMaintenanceModeState();
+  if (maintenanceModeState.enabled) {
+    return {
+      status: 503,
+      payload: { success: false, error: "系统维护中，请稍后再试" },
+    };
+  }
+  const maxConcurrentActivations = await store.getMaxConcurrentActivations();
+  if (activeForegroundJobs.size >= maxConcurrentActivations) {
+    return {
+      status: 429,
+      payload: { success: false, error: "当前任务过多，请稍后再试" },
+    };
+  }
+
+  let preferredCardId = requireManualPayment ? 0 : Number(body.card_id || 0);
+  let manualCard = null;
+  let manualAddress = null;
+  try {
+    if (String(body.card_manual || "").trim()) {
+      manualCard = parseManualDebugCard(body.card_manual);
+      preferredCardId = 0;
+    } else if (body.card && typeof body.card === "object") {
+      manualCard = parseManualDebugCard(
+        [
+          body.card.number || body.card.card_number,
+          body.card.expiry || body.card.card_expiry,
+          body.card.cvc || body.card.card_cvc,
+          body.card.holder || body.card.card_holder || "",
+        ].join("|"),
+      );
+      preferredCardId = 0;
+    } else if (preferredCardId) {
+      const selected = await store.getCardById(preferredCardId);
+      if (!selected) {
+        return {
+          status: 400,
+          payload: { success: false, error: "指定卡片不存在" },
+        };
+      }
+      if (!Number(selected.is_active) || selected.status !== "正常") {
+        return {
+          status: 400,
+          payload: { success: false, error: "指定卡片当前不可用" },
+        };
+      }
+    }
+    if (requireManualPayment || body.address) {
+      manualAddress = parseManualBillingAddress(body.address);
+    }
+  } catch (err) {
+    return { status: 400, payload: { success: false, error: err.message } };
+  }
+
+  if (requireManualPayment && !manualCard) {
+    return {
+      status: 400,
+      payload: { success: false, error: "请填写银行卡信息" },
+    };
+  }
+
+  if (!manualCard && !preferredCardId && !(await store.hasAvailableCard())) {
+    return {
+      status: 503,
+      payload: {
+        success: false,
+        error: isAdminDebug
+          ? "银行卡池暂无可用卡片，请先在后台「银行卡池」导入银行卡后再试"
+          : "请先填写银行卡信息后再试",
+      },
+    };
+  }
+
+  const storedSession = buildStoredSessionPayload(
+    rawSession,
+    sessionJson,
+    token,
+  );
+  const email = extractEmailFromSession(sessionJson);
+  const task = await store.createTaskLog({
+    tokenPreview: extractSessionPreview(storedSession),
+    sessionPayload: storedSession,
+    cdkCode: String(body.cdk_code || "[self-pay]"),
+    phone: null,
+    cardLast4: manualCard ? String(manualCard.card_number).slice(-4) : null,
+    status: "running",
+    progress: 5,
+  });
+  const taskLabel = isAdminDebug ? "付款调试" : "自助开通";
+  await store.updateTaskLog(task.jobKey, {
+    status: "running",
+    message: `${taskLabel}：${planType}${creditQuantity ? ` x${creditQuantity}` : ""} / ${regionCode}`,
+    progress: 5,
+  });
+  logTask(
+    task.jobKey,
+    `${taskLabel}任务已创建 plan=${planType} plan_name=${resolvedPlanName}${creditQuantity ? ` credits=${creditQuantity}` : ""} region=${regionCode} email=${email || "-"}`,
+  );
+  reserveForegroundSlot(task.jobKey);
+  spawnCheckoutPaymentWorker({
+    task,
+    token,
+    sessionRaw: storedSession,
+    planType,
+    region: regionCode,
+    planNameOverride: resolvedPlanName,
+    creditQuantity,
+    email,
+    preferredCardId,
+    manualCard,
+    manualAddress,
+  });
+
+  return {
+    status: 200,
+    payload: {
+      success: true,
+      jobKey: task.jobKey,
+      email: email || null,
+      viewerToken: adminAuth.issueTaskViewerToken(task.jobKey).token,
+      message: isAdminDebug
+        ? "付款调试任务已启动，请查看下方运行日志"
+        : "开通任务已启动",
+    },
+  };
 }
 
 function buildRuntimeFailure(message, code, status = "failed", extra = {}) {
@@ -2011,6 +2281,106 @@ app.post(
   },
 );
 
+app.post(
+  "/api/public/subscription/cancel-auto-renew",
+  limitPublicRequests("subscription-cancel-renew", 6, 60 * 1000),
+  async (req, res) => {
+    try {
+      const rawSession = String(req.body?.session || req.body?.token || "")
+        .trim()
+        .replace(/^\uFEFF/, "");
+      if (!rawSession) {
+        return res.status(400).json({
+          success: false,
+          message: "请粘贴 Session JSON 或 AccessToken",
+        });
+      }
+
+      const token = normalizeSessionToken(rawSession);
+      const tokenCheck = validateSessionTokenForQuery(token);
+      if (!tokenCheck.valid) {
+        return res
+          .status(400)
+          .json({ success: false, message: tokenCheck.message });
+      }
+
+      const timezoneOffsetMin = Number(req.body?.timezone_offset_min);
+      const result = await cancelAutoRenew(token, {
+        timezoneOffsetMin: Number.isFinite(timezoneOffsetMin)
+          ? timezoneOffsetMin
+          : -new Date().getTimezoneOffset(),
+        email: extractEmailFromSession(rawSession) || tokenCheck.email || "",
+      });
+
+      if (!result.ok) {
+        return res.status(result.statusCode || 502).json({
+          success: false,
+          message: result.error || "取消自动续费失败",
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: result.data,
+        message: result.data?.message || "已提交取消自动续费",
+      });
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  },
+);
+
+app.get("/api/public/checkout/options", async (req, res) => {
+  try {
+    await ensureStoreReady();
+    const regionCode = await store.getPaymentRegion();
+    const current = REGION_CONFIG[regionCode] || REGION_CONFIG.PH;
+    return res.json({
+      success: true,
+      plans: store.listCheckoutPlans(),
+      credit_presets: store.CREDIT_QUANTITY_PRESETS,
+      credit_min: store.CREDIT_QUANTITY_MIN,
+      credit_step: store.CREDIT_QUANTITY_STEP,
+      regions: Object.entries(REGION_CONFIG).map(([code, cfg]) => ({
+        code,
+        label: cfg.label,
+        currency: cfg.currency,
+      })),
+      default_region: regionCode,
+      default_currency: current.currency,
+      default_label: current.label,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.post(
+  "/api/public/checkout/pay",
+  limitPublicRequests("public-checkout-pay", 8, 60 * 1000),
+  async (req, res) => {
+    try {
+      await ensureStoreReady();
+      const body = { ...(req.body || {}) };
+      delete body.card_id;
+      const result = await startPublicCheckoutPay(
+        {
+          ...body,
+          cdk_code: "[self-pay]",
+        },
+        { requireManualPayment: true },
+      );
+      return res.status(result.status).json(result.payload);
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  },
+);
+
+app.get("/checkout", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "checkout.html"));
+});
+
 app.use("/api/admin", authenticateAdmin);
 
 app.get("/subscription", (req, res) => {
@@ -2349,6 +2719,36 @@ app.get("/api/admin/task-logs/:jobKey", async (req, res) => {
         .status(404)
         .json({ success: false, message: "未找到任务记录" });
     }
+    const boundFromLog = extractBoundCardFromOutput(task.raw_output);
+    const last4 = String(task.card_last4 || boundFromLog?.last4 || "").trim();
+    let boundCard = boundFromLog;
+    if (last4) {
+      const stored = await store.getCardByLast4(last4).catch(() => null);
+      if (stored) {
+        boundCard = {
+          last4,
+          holder:
+            stored.payment_holder_name ||
+            boundFromLog?.holder ||
+            stored.card_holder ||
+            "",
+          address:
+            [
+              stored.payment_address_line1,
+              stored.payment_address_city,
+              stored.payment_address_state,
+              stored.payment_address_postal,
+            ]
+              .filter(Boolean)
+              .join(", ") ||
+            boundFromLog?.address ||
+            "",
+          expiry: stored.card_expiry || "",
+        };
+      } else if (!boundCard) {
+        boundCard = { last4, holder: "", address: "" };
+      }
+    }
     return res.json({
       success: true,
       task: {
@@ -2358,7 +2758,8 @@ app.get("/api/admin/task-logs/:jobKey", async (req, res) => {
         durationSeconds: Math.max(0, Number(task.duration_seconds || 0)),
         cdk: task.cdk_code || "",
         phone: task.phone || "",
-        cardLast4: task.card_last4 || "",
+        cardLast4: last4,
+        boundCard,
         output: redactTaskDetailOutput(task.raw_output),
       },
     });
@@ -3138,6 +3539,7 @@ app.get("/api/admin/checkout/plans", async (req, res) => {
         plus: store.resolvePlanName("plus"),
         pro_5x: store.resolvePlanName("pro_5x"),
         pro_20x: store.resolvePlanName("pro_20x"),
+        credits: store.resolvePlanName("credits"),
       },
       region: regionCode,
       currency: config.currency,
@@ -3179,6 +3581,18 @@ app.post("/api/admin/checkout/generate", async (req, res) => {
       : "";
     const resolvedPlanName =
       planNameOverride || store.resolvePlanName(planType);
+    const creditQuantity = store.isCreditsPlan(planType)
+      ? store.resolveCreditQuantity(
+          planType,
+          body.credit_quantity || body.credits || 0,
+        )
+      : 0;
+    if (store.isCreditsPlan(planType) && creditQuantity < 250) {
+      return res.status(400).json({
+        success: false,
+        error: "充值点数至少 250，且需为 250 的倍数",
+      });
+    }
     const regionCode = String(
       body.country || body.region || (await store.getPaymentRegion()),
     ).toUpperCase();
@@ -3221,6 +3635,7 @@ app.post("/api/admin/checkout/generate", async (req, res) => {
       planType,
       region: regionCode,
       planNameOverride: resolvedPlanName,
+      creditQuantity,
       email,
     });
 
@@ -3238,115 +3653,11 @@ app.post("/api/admin/checkout/generate", async (req, res) => {
 app.post("/api/admin/checkout/pay", async (req, res) => {
   try {
     await ensureStoreReady();
-    const body = req.body || {};
-    const rawSession = String(body.session || "").trim();
-    if (!rawSession) {
-      return res
-        .status(400)
-        .json({ success: false, error: "请提供 Session JSON" });
-    }
-
-    const sessionJson = parseSessionJson(rawSession);
-    const token = normalizeSessionToken(rawSession);
-    if (!token) {
-      return res
-        .status(400)
-        .json({ success: false, error: "Session 无效，无法提取 accessToken" });
-    }
-    const tokenCheck = validateAccessToken(token);
-    if (!tokenCheck.valid) {
-      return res
-        .status(400)
-        .json({ success: false, error: tokenCheck.message });
-    }
-
-    const planType = String(body.plan_type || "plus").trim();
-    const planNameOverride = body.plan_name
-      ? String(body.plan_name).trim()
-      : "";
-    const resolvedPlanName =
-      planNameOverride || store.resolvePlanName(planType);
-    const regionCode = String(
-      body.country || body.region || (await store.getPaymentRegion()),
-    ).toUpperCase();
-    if (!isSupportedRegion(regionCode)) {
-      return res
-        .status(400)
-        .json({ success: false, error: `不支持的地区: ${regionCode}` });
-    }
-
-    if (VERIFY_OPENAI_TOKEN_ON_ACTIVATION) {
-      const verification = await querySubscriptionBySession(token, {
-        email: extractEmailFromSession(rawSession) || tokenCheck.email || "",
-      });
-      if (!verification.ok) {
-        return res.status(401).json({
-          success: false,
-          error: "Session 无法通过 OpenAI 服务验证，请确认有效后重试",
-        });
-      }
-    }
-
-    const maintenanceModeState = await store.getMaintenanceModeState();
-    if (maintenanceModeState.enabled) {
-      return res
-        .status(503)
-        .json({ success: false, error: "系统维护中，请稍后再试" });
-    }
-    const maxConcurrentActivations = await store.getMaxConcurrentActivations();
-    if (activeForegroundJobs.size >= maxConcurrentActivations) {
-      return res
-        .status(429)
-        .json({ success: false, error: "当前任务过多，请稍后再试" });
-    }
-    if (!(await store.hasAvailableCard())) {
-      return res.status(503).json({
-        success: false,
-        error: "银行卡池暂无可用卡片，请先在后台「银行卡池」导入银行卡后再试",
-      });
-    }
-
-    const storedSession = buildStoredSessionPayload(
-      rawSession,
-      sessionJson,
-      token,
-    );
-    const email = extractEmailFromSession(sessionJson);
-    const task = await store.createTaskLog({
-      tokenPreview: extractSessionPreview(storedSession),
-      sessionPayload: storedSession,
-      cdkCode: "[payment-debug]",
-      phone: null,
-      cardLast4: null,
-      status: "running",
-      progress: 5,
+    const result = await startPublicCheckoutPay({
+      ...(req.body || {}),
+      cdk_code: "[payment-debug]",
     });
-    await store.updateTaskLog(task.jobKey, {
-      status: "running",
-      message: `付款调试：${planType} / ${regionCode}`,
-      progress: 5,
-    });
-    logTask(
-      task.jobKey,
-      `付款调试任务已创建 plan=${planType} plan_name=${resolvedPlanName} region=${regionCode} email=${email || "-"}`,
-    );
-    reserveForegroundSlot(task.jobKey);
-    spawnCheckoutPaymentWorker({
-      task,
-      token,
-      sessionRaw: storedSession,
-      planType,
-      region: regionCode,
-      planNameOverride: resolvedPlanName,
-      email,
-    });
-
-    return res.json({
-      success: true,
-      jobKey: task.jobKey,
-      email: email || null,
-      message: "付款调试任务已启动，请查看下方运行日志",
-    });
+    return res.status(result.status).json(result.payload);
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
@@ -3882,6 +4193,7 @@ function spawnCheckoutDebugWorker({
   sessionRaw,
   planType,
   region,
+  creditQuantity = 0,
   planNameOverride,
   email,
 }) {
@@ -3903,6 +4215,7 @@ function spawnCheckoutDebugWorker({
         CDK_PLAN_TYPE: planType,
         PAYMENT_REGION_OVERRIDE: region,
         PLAN_NAME_OVERRIDE: planNameOverride || "",
+        CREDIT_QUANTITY: creditQuantity ? String(creditQuantity) : "",
         CDK_CODE: "",
         ACTIVATION_EMAIL: email || "",
         PROXY: proxy,
@@ -3977,8 +4290,12 @@ function spawnCheckoutPaymentWorker({
   sessionRaw,
   planType,
   region,
+  creditQuantity = 0,
   planNameOverride,
   email,
+  preferredCardId = 0,
+  manualCard = null,
+  manualAddress = null,
 }) {
   (async () => {
     const checkoutScript = path.join(__dirname, "index.js");
@@ -3998,8 +4315,14 @@ function spawnCheckoutPaymentWorker({
         CDK_PLAN_TYPE: planType,
         PAYMENT_REGION_OVERRIDE: region,
         PLAN_NAME_OVERRIDE: planNameOverride || "",
+        CREDIT_QUANTITY: creditQuantity ? String(creditQuantity) : "",
         ACTIVATION_EMAIL: email || "",
         PROXY: proxy,
+        PAYMENT_CARD_ID: preferredCardId ? String(preferredCardId) : "",
+        PAYMENT_CARD_MANUAL: manualCard ? JSON.stringify(manualCard) : "",
+        PAYMENT_ADDRESS_MANUAL: manualAddress
+          ? JSON.stringify(manualAddress)
+          : "",
       };
 
       logTask(
@@ -4480,6 +4803,9 @@ function spawnActivationWorker({
             : "",
           CDK_CODE: cdk,
           CDK_PLAN_TYPE: cdkDetails.plan_type || "plus",
+          CREDIT_QUANTITY: store.isCreditsPlan(cdkDetails.plan_type)
+            ? String(store.resolveCreditQuantity(cdkDetails.plan_type, 0) || "")
+            : "",
           PROXY: proxy,
         };
 
@@ -4850,8 +5176,12 @@ async function handleActivationRequest(req, res) {
     }
 
     // 判断是否走第三方代充 API 模式（后台「系统配置」开启后生效）
+    // Codex 充值点数走本地协议，不走第三方代充
     const gptApiConfig = await store.getGptApiConfig();
-    const useGptApi = gptApiConfig.enabled && Boolean(gptApiConfig.api_key);
+    const useGptApi =
+      gptApiConfig.enabled &&
+      Boolean(gptApiConfig.api_key) &&
+      !store.isCreditsPlan(cdkDetails.plan_type);
 
     if (!useGptApi) {
       const hasCard = await store.hasAvailableCard();

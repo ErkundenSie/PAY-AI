@@ -155,6 +155,10 @@ const PLAN_TYPE_LABELS = {
   plus: "ChatGPT Plus",
   pro_5x: "ChatGPT Pro 5x",
   pro_20x: "ChatGPT Pro 20x",
+  credits: "Codex 充值点数",
+  credits_500: "Codex 500 点",
+  credits_1000: "Codex 1000 点",
+  credits_2000: "Codex 2000 点",
 };
 
 /**
