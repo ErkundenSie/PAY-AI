@@ -97,6 +97,7 @@ services:
       - ./pricing-checkout.js:/app/pricing-checkout.js
       - ./tax-free-address.js:/app/tax-free-address.js
       - ./us-tax-free-address.js:/app/us-tax-free-address.js
+      - ./runtime-log.js:/app/runtime-log.js
       - ./browser-pool.js:/app/browser-pool.js
       - ./browser-pool-client.js:/app/browser-pool-client.js
       - ./browser-standalone.js:/app/browser-standalone.js

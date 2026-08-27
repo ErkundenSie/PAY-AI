@@ -5,7 +5,7 @@ const {
   US_TAX_FREE_STREETS,
   generateRandomUsTaxFreeAddress,
   normalizeUsStateName,
-} = require("../us-tax-free-address");
+} = require("../public/us-tax-free-address");
 
 describe("us-tax-free-address", () => {
   it("keeps generated addresses inside tax-free states with matching zip", () => {

@@ -23,215 +23,270 @@
         >
       </header>
 
-      <section class="checkout-panel checkout-session-panel">
-        <div class="checkout-session-main">
-          <div class="checkout-panel-head">
-            <span class="checkout-icon-badge"
-              ><i data-lucide="code-2"></i
-            ></span>
-            <div>
-              <h2>自助开通</h2>
-              <p>从 ChatGPT 获取的 Session JSON，用于验证并开通服务。</p>
+      <section class="checkout-workspace">
+        <main class="checkout-form-column">
+          <section class="checkout-panel checkout-session-panel">
+            <div class="checkout-session-main">
+              <div class="checkout-panel-head">
+                <span class="checkout-icon-badge"
+                  ><i data-lucide="code-2"></i
+                ></span>
+                <div>
+                  <h2>自助开通</h2>
+                  <p>从 ChatGPT 获取的 Session JSON，用于验证并开通服务。</p>
+                </div>
+              </div>
+              <div class="checkout-session-entry">
+                <textarea
+                  id="sessionInput"
+                  placeholder="从 chatgpt.com/api/auth/session 粘贴 Session JSON"
+                  rows="1"
+                ></textarea>
+                <p class="checkout-secure-hint">
+                  <i data-lucide="info"></i>
+                  填写账单与支付信息以开通服务，开通后即可使用全部功能。
+                </p>
+                <div class="checkout-session-actions">
+                  <button
+                    type="button"
+                    id="cancelRenewBtn"
+                    class="checkout-ghost-btn checkout-cancel-btn"
+                    title="取消自动续费"
+                    aria-label="取消自动续费"
+                  >
+                    <i data-lucide="ban"></i>
+                    <span class="btn-text">取消自动续费</span>
+                  </button>
+                  <button type="button" id="payBtn" class="checkout-pay-btn">
+                    <i data-lucide="zap"></i>
+                    <span class="btn-text">开通服务</span>
+                    <div class="loader"></div>
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-          <textarea
-            id="sessionInput"
-            placeholder="从 chatgpt.com/api/auth/session 全选复制完整 JSON"
-            rows="5"
-          ></textarea>
-          <div class="checkout-session-footer">
-            <p class="checkout-secure-hint">
-              <i data-lucide="info"></i>
-              填写账单与支付信息以开通服务，开通后即可使用全部功能。
-            </p>
-            <div class="checkout-session-actions">
-              <button
-                type="button"
-                id="cancelRenewBtn"
-                class="checkout-ghost-btn checkout-cancel-btn"
-              >
-                <i data-lucide="ban"></i>
-                <span class="btn-text">取消自动续费</span>
-              </button>
-              <button type="button" id="payBtn" class="checkout-pay-btn">
-                <i data-lucide="zap"></i>
-                <span class="btn-text">开始开通</span>
-                <div class="loader"></div>
-              </button>
+          </section>
+
+          <section class="checkout-split">
+            <article class="checkout-panel">
+              <div class="checkout-panel-head">
+                <span class="checkout-icon-badge"
+                  ><i data-lucide="credit-card"></i
+                ></span>
+                <div>
+                  <h2>支付信息</h2>
+                </div>
+              </div>
+              <div class="checkout-grid checkout-plan-row">
+                <div>
+                  <label class="field-label" for="planSelect">套餐</label>
+                  <select id="planSelect">
+                    <option value="plus">ChatGPT Plus</option>
+                    <option value="pro_5x">ChatGPT Pro 5x</option>
+                    <option value="pro_20x">ChatGPT Pro 20x</option>
+                    <option value="credits">Codex 充值点数</option>
+                  </select>
+                </div>
+                <div id="creditQuantityWrap" hidden>
+                  <label class="field-label" for="creditQuantity"
+                    >充值点数</label
+                  >
+                  <select id="creditQuantity">
+                    <option value="500">500</option>
+                    <option value="1000">1000</option>
+                    <option value="2000">2000</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label" for="regionSelect">账单地区</label>
+                  <select id="regionSelect"></select>
+                  <p
+                    id="regionHint"
+                    class="field-hint checkout-inline-hint"
+                  ></p>
+                </div>
+              </div>
+              <div class="checkout-card-box">
+                <span class="checkout-card-box-title">银行卡信息</span>
+                <div class="checkout-labeled-field">
+                  <span>卡号</span>
+                  <input
+                    id="cardNumber"
+                    type="text"
+                    inputmode="numeric"
+                    autocomplete="cc-number"
+                    placeholder="16 位卡号"
+                    maxlength="23"
+                  />
+                </div>
+                <div class="checkout-grid">
+                  <div class="checkout-labeled-field">
+                    <span>有效期</span>
+                    <input
+                      id="cardExpiry"
+                      type="text"
+                      inputmode="numeric"
+                      autocomplete="cc-exp"
+                      placeholder="MM/YY"
+                      maxlength="5"
+                    />
+                  </div>
+                  <div class="checkout-labeled-field">
+                    <span>CVC</span>
+                    <input
+                      id="cardCvc"
+                      type="text"
+                      inputmode="numeric"
+                      autocomplete="cc-csc"
+                      placeholder="3-4 位"
+                      maxlength="4"
+                    />
+                  </div>
+                </div>
+                <div class="checkout-labeled-field">
+                  <span>持卡人</span>
+                  <input
+                    id="cardHolder"
+                    type="text"
+                    autocomplete="cc-name"
+                    placeholder="持卡人姓名"
+                  />
+                </div>
+              </div>
+            </article>
+
+            <article class="checkout-panel">
+              <div class="checkout-panel-head">
+                <span class="checkout-icon-badge"
+                  ><i data-lucide="map-pin"></i
+                ></span>
+                <div>
+                  <h2>账单地址</h2>
+                  <p>可根据卡片信息一键补全账单地址</p>
+                </div>
+                <button
+                  type="button"
+                  id="fillAddressBtn"
+                  class="checkout-ghost-btn"
+                  onclick="fillSampleAddress()"
+                >
+                  <i data-lucide="sparkles"></i> 一键填卡
+                </button>
+              </div>
+              <div class="checkout-grid checkout-address-grid">
+                <div class="checkout-span-2">
+                  <label class="field-label" for="addrLine1">街道</label>
+                  <input
+                    id="addrLine1"
+                    type="text"
+                    autocomplete="address-line1"
+                    placeholder="Street address"
+                  />
+                </div>
+                <div>
+                  <label class="field-label" for="addrCity">城市</label>
+                  <input
+                    id="addrCity"
+                    type="text"
+                    autocomplete="address-level2"
+                    placeholder="City"
+                  />
+                </div>
+                <div>
+                  <label class="field-label" for="addrState">州 / 省</label>
+                  <input
+                    id="addrState"
+                    type="text"
+                    autocomplete="address-level1"
+                    placeholder="State"
+                  />
+                </div>
+                <div>
+                  <label class="field-label" for="addrPostal">邮编</label>
+                  <input
+                    id="addrPostal"
+                    type="text"
+                    autocomplete="postal-code"
+                    placeholder="ZIP"
+                  />
+                </div>
+                <div>
+                  <label class="field-label" for="addrCountry">国家</label>
+                  <input
+                    id="addrCountry"
+                    type="text"
+                    autocomplete="country"
+                    value="US"
+                    maxlength="2"
+                  />
+                </div>
+              </div>
+            </article>
+          </section>
+        </main>
+
+        <aside class="checkout-panel checkout-task-log-panel">
+          <div class="checkout-task-log-head">
+            <div class="checkout-panel-head">
+              <span class="checkout-icon-badge"
+                ><i data-lucide="notebook-tabs"></i
+              ></span>
+              <div>
+                <h2>本次任务日志</h2>
+                <p>开通开始后显示当前任务实时流水。</p>
+              </div>
             </div>
+            <span id="checkoutTaskState" class="checkout-task-state is-pending">
+              <span class="checkout-task-state-dot"></span>
+              <span class="checkout-task-state-text">等待开始</span>
+            </span>
           </div>
-        </div>
-        <aside class="checkout-tips">
-          <h3><i data-lucide="lightbulb"></i> 提示</h3>
-          <ul>
-            <li>前往 chatgpt.com，登录您的账号</li>
-            <li>点击获取 Session 按钮，复制全部代码</li>
-            <li>返回此页面粘贴完整的 Session JSON</li>
-          </ul>
-          <div class="checkout-tips-secure">
-            <i data-lucide="lock"></i>
-            <div>
-              <strong>安全加密</strong>
-              <p>我们使用安全的加密连接保护您的信息安全。</p>
-            </div>
+          <div
+            id="checkoutTaskLog"
+            class="checkout-task-log"
+            role="log"
+            aria-live="polite"
+          >
+            <p class="checkout-task-log-empty">等待开始开通...</p>
           </div>
-          <a
-            href="https://chatgpt.com/api/auth/session"
-            target="_blank"
-            rel="noopener"
-            class="checkout-tips-link"
-            >获取 Session <i data-lucide="arrow-right"></i
-          ></a>
         </aside>
       </section>
 
-      <section class="checkout-split">
-        <article class="checkout-panel">
-          <div class="checkout-panel-head">
-            <span class="checkout-icon-badge"
-              ><i data-lucide="credit-card"></i
-            ></span>
-            <div>
-              <h2>支付信息</h2>
-            </div>
-          </div>
-          <div class="checkout-grid checkout-plan-row">
-            <div>
-              <label class="field-label" for="planSelect">套餐</label>
-              <select id="planSelect">
-                <option value="plus">ChatGPT Plus</option>
-                <option value="pro_5x">ChatGPT Pro 5x</option>
-                <option value="pro_20x">ChatGPT Pro 20x</option>
-                <option value="credits">Codex 充值点数</option>
-              </select>
-            </div>
-            <div id="creditQuantityWrap" hidden>
-              <label class="field-label" for="creditQuantity">充值点数</label>
-              <select id="creditQuantity">
-                <option value="500">500</option>
-                <option value="1000">1000</option>
-                <option value="2000">2000</option>
-              </select>
-            </div>
-            <div>
-              <label class="field-label" for="regionSelect">账单地区</label>
-              <select id="regionSelect"></select>
-              <p id="regionHint" class="field-hint checkout-inline-hint"></p>
-            </div>
-          </div>
-          <div class="checkout-card-box">
-            <span class="checkout-card-box-title">银行卡信息</span>
-            <div class="checkout-labeled-field">
-              <span>卡号</span>
-              <input
-                id="cardNumber"
-                type="text"
-                inputmode="numeric"
-                autocomplete="cc-number"
-                placeholder="16 位卡号"
-                maxlength="23"
-              />
-            </div>
-            <div class="checkout-grid">
-              <div class="checkout-labeled-field">
-                <span>有效期</span>
-                <input
-                  id="cardExpiry"
-                  type="text"
-                  inputmode="numeric"
-                  autocomplete="cc-exp"
-                  placeholder="MM/YY"
-                  maxlength="5"
-                />
-              </div>
-              <div class="checkout-labeled-field">
-                <span>CVC</span>
-                <input
-                  id="cardCvc"
-                  type="text"
-                  inputmode="numeric"
-                  autocomplete="cc-csc"
-                  placeholder="3-4 位"
-                  maxlength="4"
-                />
-              </div>
-            </div>
-            <div class="checkout-labeled-field">
-              <span>持卡人</span>
-              <input
-                id="cardHolder"
-                type="text"
-                autocomplete="cc-name"
-                placeholder="持卡人姓名"
-              />
-            </div>
+      <section class="checkout-assurance-grid" aria-label="服务保障">
+        <article class="checkout-assurance-card">
+          <span class="checkout-assurance-icon"
+            ><i data-lucide="shield-check"></i
+          ></span>
+          <div>
+            <h3>安全保障</h3>
+            <p>敏感信息仅用于本次开通验证。</p>
           </div>
         </article>
-
-        <article class="checkout-panel">
-          <div class="checkout-panel-head">
-            <span class="checkout-icon-badge"
-              ><i data-lucide="map-pin"></i
-            ></span>
-            <div>
-              <h2>账单地址</h2>
-              <p>可根据卡片信息一键补全账单地址</p>
-            </div>
-            <button
-              type="button"
-              id="fillAddressBtn"
-              class="checkout-ghost-btn"
-            >
-              <i data-lucide="sparkles"></i> 一键填卡
-            </button>
+        <article class="checkout-assurance-card">
+          <span class="checkout-assurance-icon"
+            ><i data-lucide="lock-keyhole"></i
+          ></span>
+          <div>
+            <h3>数据加密</h3>
+            <p>全程 SSL 加密传输，保护数据安全。</p>
           </div>
-          <div class="checkout-grid checkout-address-grid">
-            <div class="checkout-span-2">
-              <label class="field-label" for="addrLine1">街道</label>
-              <input
-                id="addrLine1"
-                type="text"
-                autocomplete="address-line1"
-                placeholder="Street address"
-              />
-            </div>
-            <div>
-              <label class="field-label" for="addrCity">城市</label>
-              <input
-                id="addrCity"
-                type="text"
-                autocomplete="address-level2"
-                placeholder="City"
-              />
-            </div>
-            <div>
-              <label class="field-label" for="addrState">州 / 省</label>
-              <input
-                id="addrState"
-                type="text"
-                autocomplete="address-level1"
-                placeholder="State"
-              />
-            </div>
-            <div>
-              <label class="field-label" for="addrPostal">邮编</label>
-              <input
-                id="addrPostal"
-                type="text"
-                autocomplete="postal-code"
-                placeholder="ZIP"
-              />
-            </div>
-            <div>
-              <label class="field-label" for="addrCountry">国家</label>
-              <input
-                id="addrCountry"
-                type="text"
-                autocomplete="country"
-                value="US"
-                maxlength="2"
-              />
-            </div>
+        </article>
+        <article class="checkout-assurance-card">
+          <span class="checkout-assurance-icon"
+            ><i data-lucide="user-round-check"></i
+          ></span>
+          <div>
+            <h3>隐私保护</h3>
+            <p>任务完成后不保留任何敏感数据。</p>
+          </div>
+        </article>
+        <article class="checkout-assurance-card">
+          <span class="checkout-assurance-icon"
+            ><i data-lucide="badge-check"></i
+          ></span>
+          <div>
+            <h3>安全可靠</h3>
+            <p>银行级安全标准，多重防护机制。</p>
           </div>
         </article>
       </section>
@@ -275,8 +330,10 @@
         "taskProgressPercent",
       );
       const taskProgressText = document.getElementById("taskProgressText");
+      const checkoutTaskLog = document.getElementById("checkoutTaskLog");
+      const checkoutTaskState = document.getElementById("checkoutTaskState");
 
-      const START_DEFAULT_TEXT = "开始开通";
+      const START_DEFAULT_TEXT = "开通服务";
       const START_PENDING_TEXT = "开通中...";
       const START_FAILED_TEXT = "重新尝试";
       const START_SUCCESS_TEXT = "开通成功";
@@ -290,10 +347,14 @@
       let activeViewerToken = "";
       let taskCompleted = false;
       let taskStatusPollTimer = null;
+      let checkoutLogAfter = 0;
+      let checkoutLogDrainTicks = 0;
+      const CHECKOUT_LOG_CAP = 200;
+      const CHECKOUT_LOG_DRAIN_TICKS = 5;
       const WS_HEARTBEAT_INTERVAL_MS = 15000;
       const WS_HEARTBEAT_TIMEOUT_MS = 45000;
-      const decodeJwtPart = window.JwtDecode.decodeJwtPart;
-      const parseSessionJsonInput = window.JwtDecode.parseSessionJson;
+      const decodeJwtPart = window.JwtDecode?.decodeJwtPart;
+      const parseSessionJsonInput = window.JwtDecode?.parseSessionJson;
 
       function validateAccessToken(token) {
         const value = String(token || "").trim();
@@ -498,7 +559,6 @@
       }
 
       function closeTaskSocket() {
-        stopTaskStatusPoll();
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
         clearSocketHeartbeat();
@@ -508,8 +568,56 @@
           } catch (_) {}
         }
         socket = null;
+      }
+
+      function resetActiveTaskKeys() {
+        stopTaskStatusPoll();
+        closeTaskSocket();
         activeJobKey = "";
         activeViewerToken = "";
+        checkoutLogAfter = 0;
+        checkoutLogDrainTicks = 0;
+      }
+
+      function setCheckoutTaskState(status) {
+        if (!checkoutTaskState) return;
+        const state = String(status || "pending").toLowerCase();
+        const isSuccess = state === "success";
+        const isError = ["failed", "maintenance", "manual"].includes(state);
+        const isRunning = state === "running";
+        const text = isSuccess
+          ? "已完成"
+          : isError
+            ? "异常结束"
+            : isRunning
+              ? "进行中"
+              : "等待开始";
+        checkoutTaskState.className = `checkout-task-state ${
+          isSuccess
+            ? "is-success"
+            : isError
+              ? "is-error"
+              : isRunning
+                ? "is-running"
+                : "is-pending"
+        }`;
+        const textNode = checkoutTaskState.querySelector(
+          ".checkout-task-state-text",
+        );
+        if (textNode) textNode.textContent = text;
+      }
+
+      function isCheckoutLogPlaceholder() {
+        return checkoutTaskLog?.dataset.empty === "true";
+      }
+
+      function showCheckoutTaskLogPlaceholder(message) {
+        if (!checkoutTaskLog) return;
+        const empty = document.createElement("p");
+        empty.className = "checkout-task-log-empty";
+        empty.textContent = message;
+        checkoutTaskLog.replaceChildren(empty);
+        checkoutTaskLog.dataset.empty = "true";
       }
 
       function applyTaskState(data) {
@@ -520,12 +628,16 @@
 
         if (status === "success") {
           taskCompleted = true;
+          setCheckoutTaskState(status);
           closeTaskSocket();
           setProgress(100, message || "开通成功", "success", { force: true });
           showStatus(message || "开通成功", "success");
           setButtonText(START_SUCCESS_TEXT);
           setLoading(false);
           payBtn.disabled = true;
+          if (isCheckoutLogPlaceholder()) {
+            showCheckoutTaskLogPlaceholder(message || "开通成功");
+          }
           return;
         }
 
@@ -535,6 +647,7 @@
           status === "manual"
         ) {
           taskCompleted = true;
+          setCheckoutTaskState(status);
           closeTaskSocket();
           const failPct =
             Number.isFinite(progress) && progress > 0
@@ -545,15 +658,62 @@
           setButtonText(START_FAILED_TEXT);
           setLoading(false);
           payBtn.disabled = false;
+          if (isCheckoutLogPlaceholder()) {
+            showCheckoutTaskLogPlaceholder(message || "开通失败");
+          }
           return;
         }
 
         if (Number.isFinite(progress)) {
+          setCheckoutTaskState(status);
           setProgress(progress, message || "正在开通中...", "running", {
             force: forceProgress,
           });
           if (message) showStatus(message, "success");
         }
+      }
+
+      function resetCheckoutTaskLog(message = "等待开始开通...") {
+        checkoutLogAfter = 0;
+        checkoutLogDrainTicks = 0;
+        setCheckoutTaskState("pending");
+        showCheckoutTaskLogPlaceholder(message);
+      }
+
+      function appendCheckoutTaskLogs(entries) {
+        if (!checkoutTaskLog || !Array.isArray(entries) || !entries.length) {
+          return 0;
+        }
+        const rows = entries
+          .map((entry) => {
+            const text = String(entry.text || "").trim();
+            if (!text) return null;
+            const row = document.createElement("div");
+            row.className = "checkout-task-log-entry";
+
+            const dot = document.createElement("span");
+            dot.className = "checkout-task-log-dot";
+            const time = document.createElement("time");
+            time.className = "checkout-task-log-time";
+            time.textContent = new Date(
+              Number(entry.ts) || Date.now(),
+            ).toLocaleTimeString("zh-CN", { hour12: false });
+            const content = document.createElement("span");
+            content.className = "checkout-task-log-text";
+            content.textContent = text;
+            row.append(dot, time, content);
+            return row;
+          })
+          .filter(Boolean);
+        if (!rows.length) return 0;
+        if (isCheckoutLogPlaceholder()) checkoutTaskLog.replaceChildren();
+        checkoutTaskLog.dataset.empty = "false";
+        rows.forEach((row) => checkoutTaskLog.appendChild(row));
+        while (checkoutTaskLog.childElementCount > CHECKOUT_LOG_CAP) {
+          checkoutTaskLog.firstElementChild?.remove();
+        }
+        checkoutTaskLog.scrollTop = checkoutTaskLog.scrollHeight;
+        return rows.length;
       }
 
       function stopTaskStatusPoll() {
@@ -562,13 +722,13 @@
       }
 
       async function pollTaskStatus() {
-        if (!activeJobKey || taskCompleted) {
+        if (!activeJobKey) {
           stopTaskStatusPoll();
           return;
         }
         try {
           const response = await fetch(
-            `/api/public/checkout/status/${encodeURIComponent(activeJobKey)}?token=${encodeURIComponent(activeViewerToken)}`,
+            `/api/public/checkout/status/${encodeURIComponent(activeJobKey)}?token=${encodeURIComponent(activeViewerToken)}&after=${checkoutLogAfter}`,
           );
           const data = await response.json();
           if (response.status === 401 || response.status === 400) {
@@ -582,13 +742,24 @@
             return;
           }
           if (!data.success) return;
-          applyTaskState({
-            type: "snapshot",
-            jobKey: activeJobKey,
-            status: data.status,
-            message: data.message,
-            progress: Number(data.progress || 0),
-          });
+          const incoming = appendCheckoutTaskLogs(data.logs || []);
+          if (data.logAfter != null) checkoutLogAfter = Number(data.logAfter);
+          if (!taskCompleted) {
+            applyTaskState({
+              type: "snapshot",
+              jobKey: activeJobKey,
+              status: data.status,
+              message: data.message,
+              progress: Number(data.progress || 0),
+            });
+          }
+          if (taskCompleted || data.isTerminal) {
+            checkoutLogDrainTicks =
+              incoming > 0 ? 0 : checkoutLogDrainTicks + 1;
+            if (checkoutLogDrainTicks >= CHECKOUT_LOG_DRAIN_TICKS) {
+              stopTaskStatusPoll();
+            }
+          }
         } catch (_) {}
       }
 
@@ -751,22 +922,33 @@
       }
 
       function fillSampleAddress() {
-        const generator = window.UsTaxFreeAddress;
-        if (
-          !generator ||
-          typeof generator.generateRandomUsTaxFreeAddress !== "function"
-        ) {
-          showStatus("地址生成器未加载，请刷新页面后重试", "error");
-          return;
+        try {
+          const generator = window.UsTaxFreeAddress;
+          const address =
+            generator &&
+            typeof generator.generateRandomUsTaxFreeAddress === "function"
+              ? generator.generateRandomUsTaxFreeAddress()
+              : {
+                  line1: `${100 + Math.floor(Math.random() * 8900)} SW 6th Ave`,
+                  city: "Portland",
+                  state: "Oregon",
+                  postal_code: "97204",
+                  country: "US",
+                };
+          addrLine1.value = address.line1 || "";
+          addrCity.value = address.city || "";
+          addrState.value = address.state || "";
+          addrPostal.value = address.postal_code || "";
+          addrCountry.value = address.country || "US";
+          cardHolder.value = generateRandomHolderName();
+        } catch (error) {
+          showStatus(
+            error.message || "一键填卡失败，请刷新页面后重试",
+            "error",
+          );
         }
-        const address = generator.generateRandomUsTaxFreeAddress();
-        addrLine1.value = address.line1;
-        addrCity.value = address.city;
-        addrState.value = address.state;
-        addrPostal.value = address.postal_code;
-        addrCountry.value = address.country || "US";
-        cardHolder.value = generateRandomHolderName();
       }
+      window.fillSampleAddress = fillSampleAddress;
 
       function updateRegionHint() {
         const option = regionSelect.selectedOptions[0];
@@ -839,7 +1021,8 @@
         if (typeof address === "string") return showStatus(address, "error");
 
         taskCompleted = false;
-        closeTaskSocket();
+        resetActiveTaskKeys();
+        resetCheckoutTaskLog("任务启动中...");
         setButtonText(START_PENDING_TEXT);
         setLoading(true);
         payBtn.disabled = true;
@@ -954,7 +1137,7 @@
         }
       }
 
-      fillAddressBtn.addEventListener("click", fillSampleAddress);
+      fillAddressBtn?.addEventListener("click", fillSampleAddress);
       cancelRenewBtn.addEventListener("click", cancelAutoRenew);
       payBtn.addEventListener("click", startCheckout);
 

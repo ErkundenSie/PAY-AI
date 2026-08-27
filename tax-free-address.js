@@ -5,7 +5,7 @@ const {
   US_STATE_LABELS,
   generateRandomUsTaxFreeAddress,
   normalizeUsStateName,
-} = require("./us-tax-free-address");
+} = require("./public/us-tax-free-address");
 
 // ─── Validation ────────────────────────────────────────────────────────────────
 

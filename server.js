@@ -551,7 +551,7 @@ app.use(async (req, res, next) => {
 
 app.get("/us-tax-free-address.js", (req, res) => {
   res.type("application/javascript");
-  res.sendFile(path.join(__dirname, "us-tax-free-address.js"));
+  res.sendFile(path.join(__dirname, "public", "us-tax-free-address.js"));
 });
 
 app.use(express.static(path.join(__dirname, "public")));
@@ -2372,6 +2372,43 @@ app.post(
   },
 );
 
+function redactPublicCheckoutLog(value) {
+  return String(value || "")
+    .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)\S+/gi, "$1[REDACTED]")
+    .replace(
+      /(["']?(?:access_?token|session|cookie|card_(?:number|cvc)|CHATGPT_TOKEN|CHATGPT_SESSION_JSON|PAYMENT_CARD_MANUAL)["']?\s*[:=]\s*["']?)[^\s,"'}]+/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/\b\d{12,19}\b/g, "[REDACTED_CARD]")
+    .slice(0, 500);
+}
+
+function listPublicCheckoutLogs(jobKey, after, limit) {
+  const cap = Math.min(200, Math.max(1, Number(limit) || 80));
+  if (typeof runtimeLog.forJob === "function") {
+    return runtimeLog.forJob(jobKey, after, cap);
+  }
+  return runtimeLog
+    .after(after, 2000)
+    .filter((entry) => String(entry.jobKey || "") === String(jobKey))
+    .slice(0, cap);
+}
+
+function logsFromRawOutput(rawOutput, after) {
+  if (after > 0) return [];
+  return String(rawOutput || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 200)
+    .map((text, index) => ({
+      id: index + 1,
+      ts: Date.now(),
+      text: redactPublicCheckoutLog(text),
+    }));
+}
+
 app.get(
   "/api/public/checkout/status/:jobKey",
   limitPublicRequests("public-checkout-status", 60, 60 * 1000),
@@ -2392,6 +2429,21 @@ app.get(
       if (!task) {
         return res.status(404).json({ success: false, error: "任务不存在" });
       }
+      const after = Math.max(
+        0,
+        parseInt(String(req.query.after || "0"), 10) || 0,
+      );
+      let logEntries = listPublicCheckoutLogs(jobKey, after, 200).map(
+        (entry) => ({
+          id: entry.id,
+          ts: entry.ts,
+          text: redactPublicCheckoutLog(entry.text),
+        }),
+      );
+      if (!logEntries.length) {
+        logEntries = logsFromRawOutput(task.raw_output, after);
+      }
+      const lastLog = logEntries[logEntries.length - 1];
       return res.json({
         success: true,
         jobKey,
@@ -2399,6 +2451,8 @@ app.get(
         message: task.message,
         progress: Number(task.progress || 0),
         isTerminal: TERMINAL_TASK_STATUSES.has(task.status),
+        logs: logEntries,
+        logAfter: lastLog ? lastLog.id : after,
       });
     } catch (error) {
       return res.status(500).json({ success: false, error: error.message });
