@@ -146,6 +146,21 @@ describe("subscription cancellation", () => {
     expect(evaluate).toHaveBeenCalledTimes(2);
   });
 
+  it("stops after the configured retry limit when propagation remains incomplete", async () => {
+    const evaluate = vi.fn().mockResolvedValue({
+      status: 404,
+      data: { detail: "no active subscription found for account" },
+    });
+
+    const result = await cancelAutoRenewWithBrowserPage(
+      { isClosed: () => false, evaluate },
+      { accountId: ACCOUNT_ID, maxAttempts: 3, delayMs: 0 },
+    );
+
+    expect(result).toMatchObject({ ok: false, statusCode: 404 });
+    expect(evaluate).toHaveBeenCalledTimes(3);
+  });
+
   it("returns a mapped forbidden error for HTTP 403", async () => {
     axios.defaults.adapter = async (config) => ({
       status: 403,

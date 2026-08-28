@@ -10,6 +10,21 @@ function passthrough(_req, _res, next) {
   next();
 }
 
+function authenticateTestAdmin(req, res, next) {
+  const cookie = String(req.headers.cookie || "");
+  if (!/(?:^|;\s*)oai_admin_session=(?:admin-token|refreshed)(?:;|$)/.test(cookie)) {
+    return res.status(401).json({ success: false, message: "未登录" });
+  }
+  req.admin = {
+    pv: 1,
+    email: "admin@example.com",
+    iat: Date.now(),
+    exp: Date.now() + 60_000,
+    permissions: [],
+  };
+  next();
+}
+
 function createLoginApp(overrides = {}) {
   const app = express();
   app.use(express.json());
@@ -91,6 +106,7 @@ function createLoginApp(overrides = {}) {
       loginPath: "/admin-login",
     }),
   });
+  app.use("/api/admin", authenticateTestAdmin);
   registerAdminSecurityRoutes(app, {
     adminAuth,
     store,
@@ -110,7 +126,7 @@ function createLoginApp(overrides = {}) {
     buildAdminPanelUrl: (paths) => `/${paths.panelPath}`,
     buildCheckoutUrl: (paths) => `/${paths.checkoutPath}`,
     ADMIN_REFRESH_AFTER_MS: 60 * 60 * 1000,
-    authenticateAdmin: passthrough,
+    authenticateAdmin: authenticateTestAdmin,
   });
   return app;
 }
@@ -164,7 +180,46 @@ describe("admin login routes", () => {
     expect(res.json.token).toBeUndefined();
     expect(res.setCookie).toContain("oai_admin_session=admin-token");
     expect(res.setCookie).toContain("HttpOnly");
+    expect(res.setCookie).toContain("SameSite=Strict");
     expect(res.json.requires2fa).toBe(false);
+  });
+
+  it("uses the session cookie for authenticated requests and clears it on logout", async () => {
+    const app = createLoginApp();
+    const login = await request(app, "POST", "/api/admin/login", {
+      email: "admin@example.com",
+      password: "correct-password",
+    });
+    const cookie = login.setCookie.split(";")[0];
+
+    const session = await request(
+      app,
+      "GET",
+      "/api/admin/session",
+      undefined,
+      { Cookie: cookie },
+    );
+    expect(session.status).toBe(200);
+    expect(session.json).toMatchObject({
+      success: true,
+      email: "admin@example.com",
+      refreshed: false,
+    });
+    expect(session.json.token).toBeUndefined();
+
+    const logout = await request(
+      app,
+      "POST",
+      "/api/admin/logout",
+      undefined,
+      { Cookie: cookie },
+    );
+    expect(logout.status).toBe(200);
+    expect(logout.setCookie).toContain("oai_admin_session=");
+    expect(logout.setCookie).toContain("Max-Age=0");
+
+    const unauthenticated = await request(app, "GET", "/api/admin/session");
+    expect(unauthenticated.status).toBe(401);
   });
 
   it("rejects a wrong password", async () => {
@@ -180,11 +235,21 @@ describe("admin login routes", () => {
 describe("admin security routes", () => {
   it("saves custom admin paths", async () => {
     const app = createLoginApp();
-    const res = await request(app, "POST", "/api/admin/security/paths", {
-      loginPath: "secure-login",
-      panelPath: "secure-panel",
-      checkoutPath: "pay",
+    const login = await request(app, "POST", "/api/admin/login", {
+      email: "admin@example.com",
+      password: "correct-password",
     });
+    const res = await request(
+      app,
+      "POST",
+      "/api/admin/security/paths",
+      {
+        loginPath: "secure-login",
+        panelPath: "secure-panel",
+        checkoutPath: "pay",
+      },
+      { Cookie: login.setCookie.split(";")[0] },
+    );
     expect(res.status).toBe(200);
     expect(res.json.loginUrl).toBe("/secure-login");
     expect(res.json.panelUrl).toBe("/secure-panel");
@@ -193,7 +258,17 @@ describe("admin security routes", () => {
 
   it("reports an unverified secondary session", async () => {
     const app = createLoginApp();
-    const res = await request(app, "GET", "/api/admin/secondary/session");
+    const login = await request(app, "POST", "/api/admin/login", {
+      email: "admin@example.com",
+      password: "correct-password",
+    });
+    const res = await request(
+      app,
+      "GET",
+      "/api/admin/secondary/session",
+      undefined,
+      { Cookie: login.setCookie.split(";")[0] },
+    );
     expect(res.json).toMatchObject({ success: true, verified: false });
   });
 });
