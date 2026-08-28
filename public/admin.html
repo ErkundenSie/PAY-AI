@@ -595,6 +595,168 @@
         color: var(--text-dim);
       }
 
+      .account-action-bar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 16px;
+      }
+
+      .account-action-bar .btn {
+        min-width: 112px;
+        height: 38px;
+        justify-content: center;
+        background: var(--surface);
+        color: var(--text-secondary);
+        border: 1px solid var(--glass-border);
+        box-shadow: none;
+      }
+
+      .account-action-bar .btn:hover:not(:disabled) {
+        background: var(--primary-soft);
+        color: var(--primary);
+        border-color: #bfdbfe;
+      }
+
+      .account-action-bar .btn-primary {
+        background: var(--primary);
+        color: var(--on-primary);
+        border-color: var(--primary);
+      }
+
+      .account-action-bar .btn-primary:hover:not(:disabled) {
+        background: var(--primary-hover);
+        border-color: var(--primary-hover);
+        color: var(--on-primary);
+      }
+
+      .account-status-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .account-status-card {
+        min-width: 0;
+        padding: 18px;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius-lg);
+        background: var(--bg-secondary);
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .account-status-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .account-status-card-title {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text-main);
+      }
+
+      .account-status-fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px 14px;
+      }
+
+      .account-status-field {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .account-status-field.wide {
+        grid-column: 1 / -1;
+      }
+
+      .account-status-label {
+        font-size: 12px;
+        color: var(--text-dim);
+        font-weight: 600;
+      }
+
+      .account-status-value {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--text-main);
+        line-height: 1.35;
+        word-break: break-word;
+      }
+
+      .account-status-badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+        background: var(--primary-soft);
+        color: var(--primary);
+      }
+
+      .account-status-badge.ok {
+        background: rgba(4, 120, 87, 0.12);
+        color: #047857;
+      }
+
+      .account-status-badge.warn {
+        background: rgba(180, 83, 9, 0.12);
+        color: #b45309;
+      }
+
+      .account-status-badge.danger {
+        background: rgba(185, 28, 28, 0.12);
+        color: #b91c1c;
+      }
+
+      .account-quota-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .account-quota-item {
+        padding: 12px;
+        border: 1px solid var(--glass-border);
+        border-radius: 12px;
+        background: var(--card-bg);
+        display: grid;
+        gap: 8px;
+      }
+
+      .account-quota-item-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .account-quota-meta {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px 12px;
+        font-size: 12px;
+        color: var(--text-dim);
+      }
+
+      .account-quota-meta strong {
+        display: block;
+        margin-top: 3px;
+        color: var(--text-main);
+        font-size: 13px;
+      }
+
       @media (max-width: 1100px) {
         #browser_pool_summary_stats,
         .stat-grid {
@@ -603,6 +765,10 @@
 
         .dashboard-business-grid {
           grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .account-status-grid {
+          grid-template-columns: 1fr;
         }
 
         .browser-pool-config-hint {
@@ -622,6 +788,11 @@
 
         .dashboard-business-grid {
           grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .account-status-fields,
+        .account-quota-meta {
+          grid-template-columns: 1fr;
         }
       }
 
@@ -2670,8 +2841,8 @@
           onclick="switchPage('cancel_renewal', this)"
           data-page="cancel_renewal"
         >
-          <i data-lucide="circle-x"></i>
-          <span>续费管理</span>
+          <i data-lucide="user-round-cog"></i>
+          <span>账户管理</span>
         </div>
         <div
           class="nav-item"
@@ -2706,14 +2877,18 @@
       <div class="sidebar-footer">
         <div
           class="nav-item"
+          title="打开自助开通页"
+          onclick="openSelfCheckoutPage()"
+        >
+          <i data-lucide="zap"></i>
+          <span>自助开通</span>
+        </div>
+        <div
+          class="nav-item"
           style="color: var(--error)"
-          onclick="location.href = '/'"
+          onclick="logoutAdmin()"
         >
           <i data-lucide="log-out"></i>
-          <span>返回前台</span>
-        </div>
-        <div class="nav-item" onclick="logoutAdmin()">
-          <i data-lucide="shield-off"></i>
           <span>退出登录</span>
         </div>
       </div>
@@ -4851,18 +5026,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 >
                   已使用
                 </button>
-                <button
-                  class="filter-option"
-                  onclick="selectFilter('cdk', 'unshipped', '未出库')"
-                >
-                  未出库
-                </button>
-                <button
-                  class="filter-option"
-                  onclick="selectFilter('cdk', 'shipped', '已出库')"
-                >
-                  已出库
-                </button>
               </div>
             </div>
             <div
@@ -4963,7 +5126,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                   <th width="100px" style="text-align: center">套餐</th>
                   <th width="120px">银行卡分组</th>
                   <th width="200px">Session 记录</th>
-                  <th width="120px" style="text-align: center">是否出库</th>
                   <th width="140px">状态</th>
                   <th width="180px">使用时间</th>
                   <th width="100px" style="text-align: center">操作</th>
@@ -4978,10 +5140,10 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
 
       <div id="cancel_renewal" class="page-view">
         <div class="page-header">
-          <h1>续费管理</h1>
+          <h1>账户管理</h1>
           <p>
-            粘贴 Session 后管理 ChatGPT Plus/Pro 自动续费（App Store / Google
-            Play 订阅需在对应平台操作）
+            粘贴 Session 后查询订阅套餐、到期时间、开通货币和 Codex
+            额度，并可开启/取消自动续费、重置额度。
           </p>
         </div>
 
@@ -4998,18 +5160,19 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             placeholder="粘贴 Session JSON 或 AccessToken"
             style="font-family: ui-monospace, monospace; font-size: 12px"
           ></textarea>
-          <div
-            style="
-              display: flex;
-              gap: 12px;
-              align-items: center;
-              flex-wrap: wrap;
-              margin-top: 16px;
-            "
-          >
+          <div class="account-action-bar">
             <button
               type="button"
-              class="btn btn-danger"
+              class="btn btn-primary"
+              id="account_status_btn"
+              onclick="submitAccountStatusPage()"
+            >
+              <i data-lucide="search"></i>
+              查询账户
+            </button>
+            <button
+              type="button"
+              class="btn"
               id="cancel_renewal_btn"
               onclick="submitCancelRenewalPage()"
             >
@@ -5018,7 +5181,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             </button>
             <button
               type="button"
-              class="btn btn-success"
+              class="btn"
               id="enable_renewal_btn"
               onclick="submitEnableRenewalPage()"
             >
@@ -5027,10 +5190,20 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             </button>
             <button
               type="button"
-              class="btn btn-secondary"
+              class="btn"
+              id="reset_codex_quota_btn"
+              onclick="submitResetCodexQuotaPage()"
+            >
+              <i data-lucide="rotate-ccw"></i>
+              重置额度
+            </button>
+            <button
+              type="button"
+              class="btn"
               onclick="clearCancelRenewalPage()"
             >
-              清空
+              <i data-lucide="eraser"></i>
+              清空数据
             </button>
             <span
               id="cancel_renewal_hint"
@@ -5044,15 +5217,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           class="panel"
           style="display: none; margin-top: 24px"
         >
-          <h2 class="panel-title">操作结果</h2>
+          <h2 class="panel-title">账户状态</h2>
           <div
             id="cancel_renewal_status"
-            style="font-weight: 600; margin-top: 12px; margin-bottom: 12px"
+            style="font-weight: 600; margin-top: 12px; margin-bottom: 16px"
           ></div>
-          <div
-            id="cancel_renewal_detail"
-            style="display: grid; gap: 8px; font-size: 14px"
-          ></div>
+          <div id="cancel_renewal_detail"></div>
         </div>
       </div>
 

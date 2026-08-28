@@ -1,4 +1,5 @@
       let adminLoginPath = "/admin-login";
+      let adminCheckoutPath = "/checkout";
       const _lucideCreateIcons =
         typeof lucide !== "undefined" && lucide.createIcons
           ? lucide.createIcons.bind(lucide)
@@ -632,6 +633,25 @@
         location.href = adminLoginPath;
       }
 
+      function normalizePublicPath(raw, fallback) {
+        const value = String(raw || "")
+          .trim()
+          .replace(/^\/+/, "")
+          .split(/[?#]/)[0];
+        if (!value) {
+          return fallback;
+        }
+        return `/${value}`;
+      }
+
+      function setAdminCheckoutPath(raw) {
+        adminCheckoutPath = normalizePublicPath(raw, "/checkout");
+      }
+
+      function openSelfCheckoutPage() {
+        window.open(adminCheckoutPath, "_blank", "noopener");
+      }
+
       function updateAdminPathPreview() {
         const origin = location.origin;
         const loginSeg = String(
@@ -707,6 +727,9 @@
           if (data.loginUrl) {
             adminLoginPath = data.loginUrl;
           }
+          if (data.checkoutUrl || data.checkoutPath) {
+            setAdminCheckoutPath(data.checkoutUrl || data.checkoutPath);
+          }
           const loginPathEl = document.getElementById("admin_login_path");
           const panelPathEl = document.getElementById("admin_panel_path");
           const checkoutPathEl = document.getElementById("checkout_path");
@@ -771,6 +794,9 @@
           }
           if (data.loginUrl) {
             adminLoginPath = data.loginUrl;
+          }
+          if (data.checkoutUrl || data.checkoutPath) {
+            setAdminCheckoutPath(data.checkoutUrl || data.checkoutPath);
           }
           if (data.loginPath) {
             document.getElementById("admin_login_path").value = data.loginPath;
@@ -1204,23 +1230,101 @@
         }
       }
 
+      function accountStatusBadgeClass(text) {
+        const value = String(text || "");
+        if (/已订阅(?!（不续费）)/.test(value) || value === "是" || value === "可重置") {
+          return "ok";
+        }
+        if (/未订阅|已过期|否|暂无/.test(value)) {
+          return "danger";
+        }
+        if (/不续费|未返回|未读取/.test(value)) {
+          return "warn";
+        }
+        return "";
+      }
+
+      function renderAccountStatusField(label, value, { wide = false, badge = false } = {}) {
+        const text = String(value || "—");
+        const badgeClass = badge ? accountStatusBadgeClass(text) : "";
+        const valueHtml = badge
+          ? `<span class="account-status-badge ${badgeClass}">${escapeHtml(text)}</span>`
+          : escapeHtml(text);
+        return `<div class="account-status-field${wide ? " wide" : ""}">
+          <span class="account-status-label">${escapeHtml(label)}</span>
+          <div class="account-status-value">${valueHtml}</div>
+        </div>`;
+      }
+
       function renderCancelRenewalDetail(data = {}) {
-        const rows = [
-          ["账号", data.email || "—"],
-          ["套餐", data.plan || "—"],
-          ["订阅渠道", data.subscriptionChannel || "—"],
-          ["到期时间", data.expiresAtDisplay || "—"],
-          ["自动续费", data.autoRenew || "—"],
-        ];
-        return rows
-          .map(
-            ([label, value]) =>
-              `<div style="display:flex; justify-content:space-between; gap:16px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
-                          <span style="color: var(--text-dim);">${escapeHtml(label)}</span>
-                          <strong>${escapeHtml(String(value))}</strong>
-                      </div>`,
-          )
-          .join("");
+        const quota = data.codexQuota || {};
+        const windows = Array.isArray(quota.windows) ? quota.windows : [];
+        const statusText =
+          data.accountStatus ||
+          (data.hasActiveSubscription ? "已订阅" : "未订阅");
+        const quotaItems = windows.length
+          ? windows
+              .map(
+                (item) => `<div class="account-quota-item">
+                  <div class="account-quota-item-head">
+                    <span>${escapeHtml(item.windowLabel || "额度窗口")}</span>
+                  </div>
+                  <div class="account-quota-meta">
+                    <div>已用 / 总量<strong>${escapeHtml(item.usageText || "—")}</strong></div>
+                    <div>剩余<strong>${escapeHtml(item.remainingText || "—")}</strong></div>
+                    <div>周期<strong>${escapeHtml(item.periodText || "—")}</strong></div>
+                    <div>重置时间<strong>${escapeHtml(item.resetAtText || "—")}</strong></div>
+                  </div>
+                </div>`,
+              )
+              .join("")
+          : `<div class="account-quota-item">
+              <div class="account-quota-item-head">
+                <span>${escapeHtml(quota.status || "未读取到")}</span>
+              </div>
+              <div class="account-quota-meta">
+                <div>已用 / 总量<strong>${escapeHtml(quota.usageText || "—")}</strong></div>
+                <div>剩余<strong>${escapeHtml(quota.remainingText || "—")}</strong></div>
+                <div>重置时间<strong>${escapeHtml(quota.resetAtText || "—")}</strong></div>
+              </div>
+            </div>`;
+
+        return `<div class="account-status-grid">
+          <section class="account-status-card">
+            <div class="account-status-card-head">
+              <div class="account-status-card-title">账户信息</div>
+            </div>
+            <div class="account-status-fields">
+              ${renderAccountStatusField("账号", data.email || "—", { wide: true })}
+              ${renderAccountStatusField("账户 ID", data.accountId || "—", { wide: true })}
+              ${renderAccountStatusField("开通货币", data.currency || "—")}
+              ${renderAccountStatusField("订阅渠道", data.subscriptionChannel || "—")}
+            </div>
+          </section>
+          <section class="account-status-card">
+            <div class="account-status-card-head">
+              <div class="account-status-card-title">订阅状态</div>
+              <span class="account-status-badge ${accountStatusBadgeClass(statusText)}">${escapeHtml(statusText)}</span>
+            </div>
+            <div class="account-status-fields">
+              ${renderAccountStatusField("套餐", data.plan || "—")}
+              ${renderAccountStatusField("自动续费", data.autoRenew || "—", { badge: true })}
+              ${renderAccountStatusField("到期时间", data.expiresAtDisplay || "—")}
+              ${renderAccountStatusField("剩余天数", data.remainingDaysDisplay || "—", { badge: true })}
+            </div>
+          </section>
+          <section class="account-status-card">
+            <div class="account-status-card-head">
+              <div class="account-status-card-title">Codex 额度</div>
+              <span class="account-status-badge ${accountStatusBadgeClass(quota.resetAvailableText)}">${escapeHtml(quota.resetAvailableText || quota.status || "未返回")}</span>
+            </div>
+            <div class="account-status-fields">
+              ${renderAccountStatusField("重置次数", quota.resetCountText || "—")}
+              ${renderAccountStatusField("可否重置", quota.resetAvailableText || "—", { badge: true })}
+            </div>
+            <div class="account-quota-list">${quotaItems}</div>
+          </section>
+        </div>`;
       }
 
       function showCancelRenewalResult(data = {}, message = "") {
@@ -1309,6 +1413,46 @@
         return data.data || {};
       }
 
+      async function requestAccountStatus(sessionRaw) {
+        const res = await authFetch("/api/admin/account/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session: sessionRaw,
+            timezone_offset_min: getAdminTimeZoneOffsetMinutes(),
+          }),
+        });
+        const parsed = await readJsonResponse(res);
+        if (!parsed.ok) {
+          throw new Error(parsed.message);
+        }
+        const data = parsed.data;
+        if (!res.ok || !data.success) {
+          throw new Error(data.message || "查询账户状态失败");
+        }
+        return data.data || {};
+      }
+
+      async function requestResetCodexQuota(sessionRaw) {
+        const res = await authFetch("/api/admin/account/reset-codex-quota", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session: sessionRaw,
+            timezone_offset_min: getAdminTimeZoneOffsetMinutes(),
+          }),
+        });
+        const parsed = await readJsonResponse(res);
+        if (!parsed.ok) {
+          throw new Error(parsed.message);
+        }
+        const data = parsed.data;
+        if (!res.ok || !data.success) {
+          throw new Error(data.message || "重置 Codex 额度失败");
+        }
+        return data.data || {};
+      }
+
       function applyRenewalStatusFromResult(jobKey, result = {}) {
         if (!jobKey) {
           return;
@@ -1324,39 +1468,38 @@
         renderSessionTable();
       }
 
-      async function submitCancelRenewalPage() {
+      async function runAccountPageAction({
+        buttonId,
+        requireSession = true,
+        confirmText,
+        hintText,
+        requestFn,
+        fallbackMessage,
+        errorMessage,
+      }) {
         const input = document.getElementById("cancel_renewal_session");
-        const btn = document.getElementById("cancel_renewal_btn");
+        const btn = document.getElementById(buttonId);
         const hint = document.getElementById("cancel_renewal_hint");
         const sessionRaw = String(input?.value || "").trim();
-        if (!sessionRaw) {
+        if (requireSession && !sessionRaw) {
           showMessage("请先粘贴 Session JSON 或 AccessToken", "warning");
           return;
         }
-        if (
-          !confirm("确认要关闭该账号的自动续费吗？当前计费周期内仍可继续使用。")
-        ) {
+        if (confirmText && !confirm(confirmText)) {
           return;
         }
         if (btn) {
           btn.disabled = true;
         }
         if (hint) {
-          hint.textContent = "正在处理，请稍候…";
-        }
-        const box = document.getElementById("cancel_renewal_result");
-        if (box) {
-          box.style.display = "none";
+          hint.textContent = hintText || "正在处理，请稍候…";
         }
         try {
-          const result = await requestCancelAutoRenew(sessionRaw);
-          showCancelRenewalResult(result, result.message || "");
-          showMessage(
-            result.message || "操作完成",
-            result.alreadyCancelled || result.cancelled ? "success" : "info",
-          );
+          const result = await requestFn(sessionRaw);
+          showCancelRenewalResult(result, result.message || fallbackMessage);
+          showMessage(result.message || fallbackMessage || "操作完成", "success");
         } catch (error) {
-          showMessage(error.message || "取消自动续费失败", "error");
+          showMessage(error.message || errorMessage || "操作失败", "error");
         } finally {
           if (btn) {
             btn.disabled = false;
@@ -1368,43 +1511,48 @@
         }
       }
 
+      async function submitAccountStatusPage() {
+        await runAccountPageAction({
+          buttonId: "account_status_btn",
+          hintText: "正在查询账户状态…",
+          requestFn: requestAccountStatus,
+          fallbackMessage: "查询完成",
+          errorMessage: "查询账户状态失败",
+        });
+      }
+
+      async function submitCancelRenewalPage() {
+        await runAccountPageAction({
+          buttonId: "cancel_renewal_btn",
+          confirmText:
+            "确认要关闭该账号的自动续费吗？当前计费周期内仍可继续使用。",
+          hintText: "正在处理，请稍候…",
+          requestFn: requestCancelAutoRenew,
+          fallbackMessage: "操作完成",
+          errorMessage: "取消自动续费失败",
+        });
+      }
+
       async function submitEnableRenewalPage() {
-        const input = document.getElementById("cancel_renewal_session");
-        const btn = document.getElementById("enable_renewal_btn");
-        const hint = document.getElementById("cancel_renewal_hint");
-        const sessionRaw = String(input?.value || "").trim();
-        if (!sessionRaw) {
-          showMessage("请先粘贴 Session JSON 或 AccessToken", "warning");
-          return;
-        }
-        if (!confirm("确认要开启该账号的自动续费吗？")) {
-          return;
-        }
-        if (btn) {
-          btn.disabled = true;
-        }
-        if (hint) {
-          hint.textContent = "正在处理，请稍候…";
-        }
-        const box = document.getElementById("cancel_renewal_result");
-        if (box) {
-          box.style.display = "none";
-        }
-        try {
-          const result = await requestEnableAutoRenew(sessionRaw);
-          showCancelRenewalResult(result, result.message || "");
-          showMessage(result.message || "操作完成", "success");
-        } catch (error) {
-          showMessage(error.message || "开启自动续费失败", "error");
-        } finally {
-          if (btn) {
-            btn.disabled = false;
-          }
-          if (hint) {
-            hint.textContent = "";
-          }
-          lucide.createIcons();
-        }
+        await runAccountPageAction({
+          buttonId: "enable_renewal_btn",
+          confirmText: "确认要开启该账号的自动续费吗？",
+          hintText: "正在处理，请稍候…",
+          requestFn: requestEnableAutoRenew,
+          fallbackMessage: "操作完成",
+          errorMessage: "开启自动续费失败",
+        });
+      }
+
+      async function submitResetCodexQuotaPage() {
+        await runAccountPageAction({
+          buttonId: "reset_codex_quota_btn",
+          confirmText: "确认要重置该账号的 Codex 额度吗？将消耗一次官方重置次数。",
+          hintText: "正在重置 Codex 额度…",
+          requestFn: requestResetCodexQuota,
+          fallbackMessage: "已提交 Codex 额度重置请求",
+          errorMessage: "重置 Codex 额度失败",
+        });
       }
 
       async function cancelAutoRenewByJobKey(jobKey, triggerBtn) {
@@ -2566,6 +2714,9 @@
         const response = await authFetch("/api/admin/session");
         const data = await response.json();
         if (data.loginPath) adminLoginPath = data.loginPath;
+        if (data.checkoutUrl || data.checkoutPath) {
+          setAdminCheckoutPath(data.checkoutUrl || data.checkoutPath);
+        }
         scheduleSessionRefresh(data.expiresAt);
         return data;
       }
@@ -3904,8 +4055,6 @@
             const code = typeof cdk === "string" ? cdk : cdk.code || "";
             const status =
               typeof cdk === "string" ? "unused" : cdk.status || "unused";
-            const shipped =
-              typeof cdk === "string" ? false : Boolean(cdk.shipped);
             const planType =
               typeof cdk === "string" ? "plus" : cdk.plan_type || "plus";
             const usedAt = typeof cdk === "string" ? null : cdk.used_at;
@@ -3951,11 +4100,10 @@
             return `
                       <tr>
                           <td class="select-cell"><input type="checkbox" ${selectedItems.cdk.has(code) ? "checked" : ""} onchange="toggleSelection('cdk', '${code}', this.checked)"></td>
-                          <td><span class="cdk-copy" onclick="copyCDK('${code}')"><code>${code}</code><i data-lucide="copy"></i></span></td>
+                          <td><span class="cdk-copy" title="复制兑换链接" onclick="copyCDK('${code}')"><code>${code}</code><i data-lucide="copy"></i></span></td>
                           <td style="text-align:center"><span class="status-badge" style="background: ${planTypeBg}; color: ${planTypeColor}">${planTypeLabel}</span></td>
                           <td>${escapeHtml(typeof cdk === "string" ? "不限分组" : cdk.card_group_name || "不限分组")}</td>
                           <td><code>${sessionPreview ? escapeHtml(sessionPreview) : "-"}</code></td>
-                          <td style="text-align:center"><span class="readonly-switch ${shipped ? "active" : ""}" title="${shipped ? "已出库" : "未出库"}"></span></td>
                           <td>${
                             status === "processing"
                               ? '<span class="status-badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">开通中</span>'
@@ -3977,11 +4125,15 @@
         lucide.createIcons();
       }
 
+      function buildCdkRedeemUrl(cdk) {
+        const origin = String(location.origin || "").replace(/\/+$/, "");
+        return `${origin}/?cdk=${encodeURIComponent(cdk)}`;
+      }
+
       async function copyCDK(cdk) {
         try {
-          await copyText(cdk);
-          await markCDKShipped(cdk);
-          showMessage(`已复制激活码: ${cdk}`, "success");
+          await copyText(buildCdkRedeemUrl(cdk));
+          showMessage(`已复制兑换链接: ${cdk}`, "success");
         } catch (error) {
           showMessage("复制失败，请手动复制", "error");
         }
@@ -4000,24 +4152,6 @@
         document.body.removeChild(input);
       }
 
-      async function markCDKShipped(cdk) {
-        const res = await authFetch(
-          `/api/admin/cdks/${encodeURIComponent(cdk)}/ship`,
-          { method: "POST" },
-        );
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-          throw new Error(data.message || "标记出库失败");
-        }
-        const item = cdkPool.find(
-          (entry) => (typeof entry === "string" ? entry : entry.code) === cdk,
-        );
-        if (item && typeof item !== "string") {
-          item.shipped = true;
-        }
-        renderCDKTable();
-      }
-
       async function batchCopyCDKs() {
         const codes = Array.from(selectedItems.cdk);
         if (codes.length === 0) {
@@ -4026,9 +4160,8 @@
         }
 
         try {
-          await copyText(codes.join("\n"));
-          await Promise.all(codes.map((code) => markCDKShipped(code)));
-          showMessage(`已复制 ${codes.length} 个 CDK，并标记出库`, "success");
+          await copyText(codes.map((code) => buildCdkRedeemUrl(code)).join("\n"));
+          showMessage(`已复制 ${codes.length} 条兑换链接`, "success");
         } catch (error) {
           showMessage(error.message || "批量复制失败", "error");
         }

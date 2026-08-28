@@ -6,6 +6,8 @@ const {
   cancelAutoRenew,
   cancelAutoRenewAfterActivation,
   cancelAutoRenewWithBrowserPage,
+  parseCodexQuotaPayload,
+  parseAccountCheckResponse,
 } = require("../subscription-check");
 
 const ACCOUNT_ID = "acct-test-123";
@@ -224,5 +226,61 @@ describe("subscription cancellation", () => {
     expect(get).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({ ok: true, data: { cancelled: true } });
     expect(result.data.message).toContain("请稍后刷新确认状态");
+  });
+});
+
+describe("account status parsing", () => {
+  it("parses subscription and Codex quota windows", () => {
+    const account = parseAccountCheckResponse(activeSubscription(true), {
+      email: "user@example.com",
+      accountId: ACCOUNT_ID,
+    });
+    expect(account).toMatchObject({
+      email: "user@example.com",
+      plan: "ChatGPT Plus",
+      hasActiveSubscription: true,
+      autoRenew: "是",
+      accountStatus: "已订阅",
+    });
+
+    const quota = parseCodexQuotaPayload({
+      rate_limit: {
+        primary_window: {
+          used: 12,
+          limit: 80,
+          remaining: 68,
+          reset_at: "2026-08-28T18:30:45.000Z",
+          reset_after_seconds: 18000,
+          limit_window_seconds: 18000,
+        },
+        secondary_window: {
+          used: 120,
+          limit: 1000,
+          remaining: 880,
+          limit_window_seconds: 604800,
+        },
+      },
+      available_count: 1,
+      credits: [
+        {
+          id: "credit-1",
+          status: "available",
+          title: "Rate limit reset",
+          description: "Expires soon",
+        },
+      ],
+    });
+    expect(quota.status).toBe("已读取");
+    expect(quota.canReset).toBe(true);
+    expect(quota.resetCredits).toHaveLength(1);
+    expect(quota.windows.map((item) => item.windowLabel)).toEqual([
+      "5小时额度",
+      "周额度",
+    ]);
+    expect(quota.windows[0].resetAtText).toMatch(
+      /^\d{2}\/\d{2} \d{2}:\d{2} \(5h\)$/,
+    );
+    expect(quota.windows[0].resetAtText).not.toMatch(/1970|秒/);
+    expect(quota.windows[1].resetAtText).toBe("—");
   });
 });

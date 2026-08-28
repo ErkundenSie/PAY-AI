@@ -1690,6 +1690,12 @@
       loadPublicRuntime();
       publicRuntimeTimer = setInterval(loadPublicRuntime, 3000);
       lucide.createIcons();
+
+      const linkedCdk = new URLSearchParams(location.search).get("cdk");
+      if (linkedCdk && cdkInput) {
+        cdkInput.value = linkedCdk.trim();
+        redeemBtn.click();
+      }
     </script>
   </body>
 </html>

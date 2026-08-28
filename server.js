@@ -57,6 +57,8 @@ const browserPool = require("./browser-pool");
 const { buildWorkerRuntimeEnv } = require("./browser-runtime");
 const {
   querySubscriptionBySession,
+  queryAccountStatusBySession,
+  resetCodexQuota,
   validateSessionTokenForQuery,
   cancelAutoRenew,
   cancelAutoRenewAfterActivation,
@@ -2486,6 +2488,94 @@ app.post("/api/admin/subscription/enable-auto-renew", async (req, res) => {
       });
     }
 
+    return res.json({ success: true, data: result.data });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+function parseAdminSessionPayload(req) {
+  const rawSession = String(req.body?.session || req.body?.token || "")
+    .trim()
+    .replace(/^\uFEFF/, "");
+  if (!rawSession) {
+    return {
+      error: {
+        status: 400,
+        message: "请粘贴 Session JSON 或 AccessToken",
+      },
+    };
+  }
+  const token = normalizeSessionToken(rawSession);
+  const tokenCheck = validateSessionTokenForQuery(token);
+  if (!tokenCheck.valid) {
+    return { error: { status: 400, message: tokenCheck.message } };
+  }
+  const timezoneOffsetMin = Number(req.body?.timezone_offset_min);
+  return {
+    rawSession,
+    token,
+    tokenCheck,
+    timezoneOffsetMin: Number.isFinite(timezoneOffsetMin)
+      ? timezoneOffsetMin
+      : -new Date().getTimezoneOffset(),
+  };
+}
+
+app.post("/api/admin/account/status", async (req, res) => {
+  try {
+    const parsed = parseAdminSessionPayload(req);
+    if (parsed.error) {
+      return res.status(parsed.error.status).json({
+        success: false,
+        message: parsed.error.message,
+      });
+    }
+    const result = await queryAccountStatusBySession(parsed.token, {
+      timezoneOffsetMin: parsed.timezoneOffsetMin,
+      email:
+        extractEmailFromSession(parsed.rawSession) ||
+        parsed.tokenCheck.email ||
+        "",
+    });
+    if (!result.ok) {
+      return res
+        .status(adminSubscriptionActionErrorStatus(result.statusCode))
+        .json({
+          success: false,
+          message: result.error || "查询账户状态失败",
+        });
+    }
+    return res.json({ success: true, data: result.data });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.post("/api/admin/account/reset-codex-quota", async (req, res) => {
+  try {
+    const parsed = parseAdminSessionPayload(req);
+    if (parsed.error) {
+      return res.status(parsed.error.status).json({
+        success: false,
+        message: parsed.error.message,
+      });
+    }
+    const result = await resetCodexQuota(parsed.token, {
+      timezoneOffsetMin: parsed.timezoneOffsetMin,
+      email:
+        extractEmailFromSession(parsed.rawSession) ||
+        parsed.tokenCheck.email ||
+        "",
+    });
+    if (!result.ok) {
+      return res
+        .status(adminSubscriptionActionErrorStatus(result.statusCode))
+        .json({
+          success: false,
+          message: result.error || "重置 Codex 额度失败",
+        });
+    }
     return res.json({ success: true, data: result.data });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
