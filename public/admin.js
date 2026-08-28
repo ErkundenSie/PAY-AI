@@ -4981,6 +4981,79 @@
         return formatAdminDateTime(ts);
       }
 
+      async function confirmDeleteEmptyCardGroups(emptiedGroups) {
+        const groups = Array.isArray(emptiedGroups) ? emptiedGroups : [];
+        if (!groups.length) return false;
+        const names = groups
+          .map((group) => group.name || `#${group.id}`)
+          .join("、");
+        const cdkCount = groups.reduce(
+          (sum, group) => sum + Number(group.cdk_count || 0),
+          0,
+        );
+        const extra = cdkCount
+          ? `若删除分组，CDK 管理中绑定这些分组的 ${cdkCount} 个卡密也会一并删除，且不可恢复。`
+          : "这些分组下已没有银行卡。删除分组不会影响未绑定分组的 CDK。";
+        return showAdminConfirm(
+          `删除后，分组「${names}」将变成空分组。是否同时删除这些分组？\n\n${extra}`,
+          "删除空分组",
+        );
+      }
+
+      async function deleteCardsAndMaybeEmptyGroups(cardIds) {
+        const ids = (Array.isArray(cardIds) ? cardIds : [])
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0);
+        if (!ids.length) {
+          throw new Error("请选择要删除的银行卡");
+        }
+        const firstRes = await authFetch("/api/admin/cards/batch-delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cardIds: ids }),
+        });
+        const firstData = await firstRes.json();
+        if (!firstRes.ok || !firstData.success) {
+          throw new Error(firstData.message || firstData.error || "删除失败");
+        }
+        const emptiedGroups = firstData.emptied_groups || [];
+        if (!emptiedGroups.length) {
+          return firstData;
+        }
+        const deleteGroups = await confirmDeleteEmptyCardGroups(emptiedGroups);
+        if (!deleteGroups) {
+          return {
+            ...firstData,
+            message: `${firstData.message || "卡片已删除"}。空分组已保留。`,
+          };
+        }
+        const groupIds = emptiedGroups.map((group) => Number(group.id));
+        let deletedGroups = 0;
+        let deletedCdks = 0;
+        for (const groupId of groupIds) {
+          const groupRes = await authFetch(
+            `/api/admin/card-groups/${groupId}?deleteBoundCdks=1`,
+            { method: "DELETE" },
+          );
+          const groupData = await groupRes.json().catch(() => ({}));
+          if (!groupRes.ok || groupData.success === false) {
+            throw new Error(groupData.message || "删除空分组失败");
+          }
+          deletedGroups += 1;
+          deletedCdks += Number(groupData.deleted_cdks || 0);
+        }
+        let message = `已删除 ${firstData.deleted || ids.length} 张卡，并删除 ${deletedGroups} 个空分组`;
+        if (deletedCdks) {
+          message += `及绑定的 ${deletedCdks} 个 CDK`;
+        }
+        return {
+          ...firstData,
+          deleted_groups: deletedGroups,
+          deleted_cdks: deletedCdks,
+          message,
+        };
+      }
+
       async function deleteCardPoolItem(cardId) {
         const ok = await showAdminConfirm(
           "确定删除该卡片？删除后不可恢复。",
@@ -4988,19 +5061,12 @@
         );
         if (!ok) return;
         try {
-          const res = await authFetch(`/api/admin/cards/${cardId}`, {
-            method: "DELETE",
-          });
-          if (res.ok) {
-            selectedCardIds.delete(Number(cardId));
-            showMessage("卡片已删除", "success");
-            await loadCardPoolList();
-          } else {
-            const err = await res.json().catch(() => ({}));
-            showMessage(err.error || "删除失败", "error");
-          }
+          const data = await deleteCardsAndMaybeEmptyGroups([cardId]);
+          selectedCardIds.delete(Number(cardId));
+          showMessage(data.message || "卡片已删除", "success");
+          await loadCardPoolList();
         } catch (e) {
-          showMessage("删除请求失败", "error");
+          showMessage(e.message || "删除请求失败", "error");
         }
       }
 
@@ -5034,10 +5100,7 @@
         );
         if (!ok) return;
         try {
-          const data = await postSelectedCards(
-            "/api/admin/cards/batch-delete",
-            {},
-          );
+          const data = await deleteCardsAndMaybeEmptyGroups(cardIds);
           selectedCardIds.clear();
           showMessage(data.message || "已删除", "success");
           await loadCardPoolList();

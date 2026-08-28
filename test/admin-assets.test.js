@@ -170,9 +170,14 @@ describe("admin asset routes", () => {
   it("batch deletes, pauses, and sets card usage limits", async () => {
     const calls = [];
     const store = {
-      deleteCardsByIds: async (cardIds) => {
-        calls.push(["delete", cardIds]);
-        return { deleted: cardIds.length };
+      deleteCardsByIds: async (cardIds, options = {}) => {
+        calls.push(["delete", cardIds, options]);
+        return {
+          deleted: cardIds.length,
+          emptied_groups: [],
+          deleted_groups: 0,
+          deleted_cdks: 0,
+        };
       },
       setCardsPaused: async (options) => {
         calls.push(["pause", options]);
@@ -204,7 +209,7 @@ describe("admin asset routes", () => {
     });
     expect(limited.json.max_usage_count).toBe(5);
     expect(calls).toEqual([
-      ["delete", [1, 2]],
+      ["delete", [1, 2], { deleteEmptyGroups: false }],
       ["pause", { cardIds: [3], paused: true }],
       ["limit", { cardIds: [4], maxUsageCount: 5 }],
     ]);

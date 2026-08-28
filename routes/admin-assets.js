@@ -137,8 +137,24 @@ function registerAdminAssetRoutes(app, deps) {
     async (req, res) => {
       try {
         await ensureStoreReady();
-        await store.deleteCardGroup(req.params.id);
-        res.json({ success: true, message: "分组已删除" });
+        const result = await store.deleteCardGroup(req.params.id, {
+          deleteBoundCdks: ["1", "true", "yes"].includes(
+            String(
+              req.query?.deleteBoundCdks ??
+                req.query?.delete_bound_cdks ??
+                "",
+            )
+              .trim()
+              .toLowerCase(),
+          ),
+        });
+        res.json({
+          success: true,
+          ...result,
+          message: result.deleted_cdks
+            ? `分组已删除，同时删除 ${result.deleted_cdks} 个绑定 CDK`
+            : "分组已删除",
+        });
       } catch (error) {
         res.status(400).json({ success: false, message: error.message });
       }
@@ -152,9 +168,26 @@ function registerAdminAssetRoutes(app, deps) {
       try {
         await ensureStoreReady();
         const cardIds = req.body?.cardIds || req.body?.card_ids || [];
-        const result = await store.deleteCardsByIds(cardIds);
+        const result = await store.deleteCardsByIds(cardIds, {
+          deleteEmptyGroups: Boolean(
+            req.body?.deleteEmptyGroups ?? req.body?.delete_empty_groups,
+          ),
+        });
         auditAdminAction(req, "cards_batch_deleted", `删除 ${result.deleted} 张卡`);
-        res.json({ success: true, ...result, message: `已删除 ${result.deleted} 张卡` });
+        const emptiedGroups = result.emptied_groups || [];
+        let message = `已删除 ${result.deleted} 张卡`;
+        if (result.deleted_groups) {
+          message += `，并删除 ${result.deleted_groups} 个空分组`;
+          if (result.deleted_cdks) {
+            message += `及绑定的 ${result.deleted_cdks} 个 CDK`;
+          }
+        }
+        res.json({
+          success: true,
+          ...result,
+          emptied_groups: emptiedGroups,
+          message,
+        });
       } catch (error) {
         res.status(400).json({ success: false, message: error.message });
       }
@@ -227,15 +260,19 @@ function registerAdminAssetRoutes(app, deps) {
       if (!cardId || !Number.isFinite(cardId)) {
         return res.status(400).json({ success: false, error: "无效的卡片 ID" });
       }
-      const result = await store.runExecute(
-        `DELETE FROM card_assets WHERE id = ?`,
-        [cardId],
-      );
-      if (result.affectedRows === 0) {
+      const result = await store.deleteCardsByIds([cardId], {
+        deleteEmptyGroups: Boolean(
+          req.body?.deleteEmptyGroups ??
+            req.body?.delete_empty_groups ??
+            req.query?.deleteEmptyGroups ??
+            req.query?.delete_empty_groups,
+        ),
+      });
+      if (!result.deleted) {
         return res.status(404).json({ success: false, error: "卡片不存在" });
       }
       auditAdminAction(req, "card_deleted", `删除卡片 #${cardId}`);
-      res.json({ success: true });
+      res.json({ success: true, ...result });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
     }

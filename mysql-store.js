@@ -2060,19 +2060,30 @@ async function assignCardsToGroup({ groupId, cardIds = [] } = {}) {
   return { updated: ids.length, group_id: id };
 }
 
-async function deleteCardGroup(groupId) {
+async function deleteCardGroup(groupId, options = {}) {
   const id = normalizeCardGroupId(groupId);
+  const deleteBoundCdks = Boolean(options.deleteBoundCdks);
   return withTransaction(async (connection) => {
     await runExecute(
       `UPDATE card_assets SET group_id = NULL WHERE group_id = ?`,
       [id],
       { connection },
     );
-    await runExecute(
-      `UPDATE cdk_codes SET card_group_id = NULL WHERE card_group_id = ?`,
-      [id],
-      { connection },
-    );
+    let deletedCdks = 0;
+    if (deleteBoundCdks) {
+      const cdkResult = await runExecute(
+        `DELETE FROM cdk_codes WHERE card_group_id = ?`,
+        [id],
+        { connection },
+      );
+      deletedCdks = Number(cdkResult.affectedRows || 0);
+    } else {
+      await runExecute(
+        `UPDATE cdk_codes SET card_group_id = NULL WHERE card_group_id = ?`,
+        [id],
+        { connection },
+      );
+    }
     const result = await runExecute(
       `DELETE FROM card_groups WHERE id = ?`,
       [id],
@@ -2083,7 +2094,7 @@ async function deleteCardGroup(groupId) {
     if (!result.affectedRows) {
       throw new Error("银行卡分组不存在");
     }
-    return { success: true };
+    return { success: true, deleted_cdks: deletedCdks };
   });
 }
 
@@ -2150,17 +2161,83 @@ function buildCardAvailabilitySql(alias = "") {
                AND (${prefix}max_usage_count IS NULL OR ${prefix}usage_count < ${prefix}max_usage_count)`;
 }
 
-async function deleteCardsByIds(cardIds = []) {
+async function deleteCardsByIds(cardIds = [], options = {}) {
   const ids = normalizeCardIds(cardIds);
   if (!ids.length) {
     throw new Error("请选择要删除的银行卡");
   }
-  const placeholders = ids.map(() => "?").join(", ");
-  const result = await runExecute(
-    `DELETE FROM card_assets WHERE id IN (${placeholders})`,
-    ids,
+  const deleteEmptyGroups = Boolean(
+    options.deleteEmptyGroups ?? options.delete_empty_groups,
   );
-  return { deleted: Number(result.affectedRows || 0) };
+  const placeholders = ids.map(() => "?").join(", ");
+  return withTransaction(async (connection) => {
+    const groupRows = await runQuery(
+      `SELECT DISTINCT group_id
+           FROM card_assets
+           WHERE id IN (${placeholders})
+             AND group_id IS NOT NULL`,
+      ids,
+      { connection },
+    );
+    const groupIds = groupRows
+      .map((row) => Number(row.group_id))
+      .filter((id) => Number.isInteger(id) && id > 0);
+    const result = await runExecute(
+      `DELETE FROM card_assets WHERE id IN (${placeholders})`,
+      ids,
+      { connection },
+    );
+    const emptiedGroups = [];
+    for (const groupId of groupIds) {
+      const remainRows = await runQuery(
+        `SELECT COUNT(*) AS total FROM card_assets WHERE group_id = ?`,
+        [groupId],
+        { connection },
+      );
+      if (Number(remainRows[0]?.total || 0) > 0) continue;
+      const groupRowsById = await runQuery(
+        `SELECT id, name FROM card_groups WHERE id = ? LIMIT 1`,
+        [groupId],
+        { connection },
+      );
+      const group = groupRowsById[0];
+      if (!group) continue;
+      const cdkRows = await runQuery(
+        `SELECT COUNT(*) AS total FROM cdk_codes WHERE card_group_id = ?`,
+        [groupId],
+        { connection },
+      );
+      emptiedGroups.push({
+        id: groupId,
+        name: group.name,
+        cdk_count: Number(cdkRows[0]?.total || 0),
+      });
+    }
+    let deletedGroups = 0;
+    let deletedCdks = 0;
+    if (deleteEmptyGroups && emptiedGroups.length) {
+      for (const group of emptiedGroups) {
+        const cdkResult = await runExecute(
+          `DELETE FROM cdk_codes WHERE card_group_id = ?`,
+          [group.id],
+          { connection },
+        );
+        deletedCdks += Number(cdkResult.affectedRows || 0);
+        const groupResult = await runExecute(
+          `DELETE FROM card_groups WHERE id = ?`,
+          [group.id],
+          { connection },
+        );
+        deletedGroups += Number(groupResult.affectedRows || 0);
+      }
+    }
+    return {
+      deleted: Number(result.affectedRows || 0),
+      emptied_groups: emptiedGroups,
+      deleted_groups: deletedGroups,
+      deleted_cdks: deletedCdks,
+    };
+  });
 }
 
 async function setCardsPaused({ cardIds = [], paused = true } = {}) {
