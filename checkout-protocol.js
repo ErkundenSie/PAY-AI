@@ -345,18 +345,17 @@ function buildConfirmationTokenForm({
       "address",
     ],
     ["setup_future_usage", "off_session"],
+    [
+      "client_context[currency]",
+      String(billing.currency || "usd").toLowerCase(),
+    ],
+    ["client_context[mode]", "subscription"],
+    ["client_context[payment_method_types][0]", "card"],
+    ["client_context[payment_method_types][1]", "link"],
   ];
 
   if (cussSecret) {
-    pairs.push(
-      [
-        "client_context[currency]",
-        String(billing.currency || "usd").toLowerCase(),
-      ],
-      ["client_context[mode]", "subscription"],
-      ["client_context[payment_method_types][0]", "card"],
-      ["client_context[payment_method_types][1]", "link"],
-    );
+    pairs.push(["client_context[customer_session_client_secret]", cussSecret]);
   }
   if (stripeCustomer) {
     pairs.push(["client_context[customer]", stripeCustomer]);
@@ -606,11 +605,18 @@ async function createConfirmationToken({
   const data = response.data || {};
   if (response.status !== 200) {
     const err = data.error || {};
+    const missingParam = String(err.param || err.message || "");
+    const configError = /missing required param|client_context/i.test(
+      missingParam,
+    );
     throw Object.assign(
       new Error(
         `Stripe 令牌化失败: ${err.message || formatApiError(response.status, data)}`,
       ),
-      { declined: Boolean(err.code || err.decline_code), stripeError: err },
+      {
+        declined: Boolean(err.code || err.decline_code) && !configError,
+        stripeError: err,
+      },
     );
   }
   const tokenId = String(data.id || data.confirmation_token || "").trim();

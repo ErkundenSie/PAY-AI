@@ -157,5 +157,31 @@ describe("checkout protocol helpers", () => {
     expect(text).toContain("_stripe_version=2025-03-31.basil");
     expect(text).toContain("key=pk_test_xxx");
     expect(text).toContain("client_context");
+    expect(text).toContain("client_context%5Bmode%5D=subscription");
+  });
+
+  it("keeps client_context mode even without customer session secret", () => {
+    const form = buildConfirmationTokenForm({
+      card: {
+        number: "4242424242424242",
+        cvc: "123",
+        exp_month: "12",
+        exp_year: "2028",
+      },
+      billing: {
+        line1: "123 Main St",
+        city: "Portland",
+        country: "US",
+        postal_code: "97201",
+        state: "OR",
+        name: "Jane Doe",
+        currency: "php",
+      },
+      publishableKey: "pk_live_xxx",
+    });
+    const text = form.toString();
+    expect(text).toContain("client_context%5Bmode%5D=subscription");
+    expect(text).toContain("client_context%5Bcurrency%5D=php");
+    expect(text).not.toContain("customer_session_client_secret");
   });
 });

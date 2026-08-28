@@ -52,6 +52,13 @@ function isPaymentDeclined(errorMsg) {
     "not approved",
   ];
   const lower = errorMsg.toLowerCase();
+  if (
+    /missing required param|client_context\[mode\]|invalid_request_error/.test(
+      lower,
+    )
+  ) {
+    return false;
+  }
   return declinedKeywords.some((kw) => lower.includes(kw));
 }
 
