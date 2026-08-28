@@ -599,6 +599,89 @@ async function cancelAutoRenew(accessToken, options = {}) {
   };
 }
 
+async function cancelAutoRenewWithBrowserPage(page, options = {}) {
+  if (!page || page.isClosed()) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: "浏览器页面已关闭，无法使用已登录 Session 取消自动续费",
+    };
+  }
+
+  const accountId = String(options.accountId || "").trim();
+  if (!accountId) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: "缺少 account_id，无法取消自动续费",
+    };
+  }
+
+  let response;
+  try {
+    response = await page.evaluate(
+      async ({ url, targetAccountId }) => {
+        const result = await fetch(url, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            Accept: "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "chatgpt-account-id": targetAccountId,
+            "openai-account-id": targetAccountId,
+          },
+          body: JSON.stringify({ account_id: targetAccountId }),
+        });
+        const text = await result.text();
+        let data = text;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch (_) {}
+        return { status: result.status, data };
+      },
+      { url: CANCEL_SUBSCRIPTION_URL, targetAccountId: accountId },
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      statusCode: 502,
+      error: `浏览器取消自动续费请求失败：${error.message}`,
+    };
+  }
+
+  const body = normalizeResponseBody(response?.data);
+  if (response?.status === 401) {
+    return {
+      ok: false,
+      statusCode: 401,
+      error: "浏览器 Session 无效或已过期，请重新获取 Session",
+    };
+  }
+  if (response?.status === 403) {
+    const mapped = mapCheckError(403, body);
+    return { ok: false, ...mapped };
+  }
+  if (response?.status !== 200 && response?.status !== 204) {
+    const detail =
+      typeof body === "string"
+        ? body.slice(0, 200)
+        : JSON.stringify(body || {}).slice(0, 200);
+    return {
+      ok: false,
+      statusCode: response?.status || 502,
+      error: `取消自动续费失败 (${response?.status || 0})${detail ? `：${detail}` : ""}`,
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      cancelled: true,
+      message: "已提交取消自动续费请求",
+    },
+  };
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -846,6 +929,7 @@ module.exports = {
   validateSessionTokenForQuery,
   querySubscriptionBySession,
   cancelAutoRenew,
+  cancelAutoRenewWithBrowserPage,
   cancelAutoRenewAfterActivation,
   resumeAutoRenew,
 };

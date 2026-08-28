@@ -3125,6 +3125,7 @@
       }
 
       let proxyPoolList = [];
+      const selectedProxyIds = new Set();
       let editingProxyId = null;
 
       function renderProxyCheckBadge(item) {
@@ -3144,7 +3145,7 @@
 
         if (!proxyPoolList.length) {
           tbody.innerHTML =
-            '<tr><td colspan="9">暂无代理，请在上方粘贴 URL 后点击「保存代理」</td></tr>';
+            '<tr><td colspan="10">暂无代理，请在上方粘贴 URL 后点击「保存代理」</td></tr>';
           if (summary) summary.textContent = "共 0 条，启用 0 条";
           return;
         }
@@ -3162,6 +3163,9 @@
               : "—";
             return `
                           <tr id="proxy_row_${item.id}">
+                        <td class="select-cell">
+                        <input type="checkbox" ${selectedProxyIds.has(item.id) ? "checked" : ""} onchange="toggleProxySelection(${item.id}, this.checked)" aria-label="选择代理">
+                      </td>
                               <td style="text-align:center;">
                                   <label class="toggle-control" style="justify-content:center;">
                                       <input type="checkbox" class="toggle-input" ${item.is_active ? "checked" : ""} onchange="toggleProxyActive(${item.id}, this.checked)">
@@ -3192,7 +3196,7 @@
           .join("");
 
         if (summary) {
-          summary.textContent = `共 ${proxyPoolList.length} 条，启用 ${activeCount} 条`;
+          summary.textContent = `共 ${proxyPoolList.length} 条，启用 ${activeCount} 条，已选 ${selectedProxyIds.size} 条`;
         }
         lucide.createIcons();
       }
@@ -3428,6 +3432,10 @@
           throw new Error(data.message || "加载代理池失败");
         }
         proxyPoolList = Array.isArray(data.proxies) ? data.proxies : [];
+        const validIds = new Set(proxyPoolList.map((item) => item.id));
+        Array.from(selectedProxyIds).forEach((id) => {
+          if (!validIds.has(id)) selectedProxyIds.delete(id);
+        });
         renderProxyPoolTable();
       }
 
@@ -3540,8 +3548,78 @@
             `检测完成：活跃 ${okCount} / 共 ${results.length}`,
             okCount ? "success" : "warning",
           );
+          renderProxyPoolTable();
         } catch (error) {
           showMessage(error.message || "批量检测失败", "error");
+        }
+      }
+
+      function toggleProxySelection(id, checked) {
+        if (checked) {
+          selectedProxyIds.add(id);
+        } else {
+          selectedProxyIds.delete(id);
+        }
+        renderProxyPoolTable();
+      }
+
+      function toggleAllProxySelection() {
+        const shouldSelect = proxyPoolList.some(
+          (item) => !selectedProxyIds.has(item.id),
+        );
+        proxyPoolList.forEach((item) => {
+          if (shouldSelect) {
+            selectedProxyIds.add(item.id);
+          } else {
+            selectedProxyIds.delete(item.id);
+          }
+        });
+        renderProxyPoolTable();
+      }
+
+      function selectUnavailableProxies() {
+        const unavailable = proxyPoolList.filter(
+          (item) => item.last_check_ok === false,
+        );
+        if (!unavailable.length) {
+          showMessage("没有已检测为失效的代理", "warning");
+          return;
+        }
+        unavailable.forEach((item) => selectedProxyIds.add(item.id));
+        renderProxyPoolTable();
+        showMessage(`已选中 ${unavailable.length} 条失效代理`, "success");
+      }
+
+      async function batchDeleteSavedProxies() {
+        const ids = Array.from(selectedProxyIds);
+        if (!ids.length) {
+          showMessage("请先选择要删除的代理", "warning");
+          return;
+        }
+        const ok = await showAdminConfirm(
+          `确定删除选中的 ${ids.length} 条代理？`,
+          "批量删除代理",
+        );
+        if (!ok) return;
+
+        try {
+          const results = await Promise.all(
+            ids.map(async (id) => {
+              const res = await authFetch(`/api/admin/proxies/${id}`, {
+                method: "DELETE",
+              });
+              const data = await res.json();
+              if (!res.ok || !data.success) {
+                throw new Error(data.error || data.message || "删除失败");
+              }
+            }),
+          );
+          selectedProxyIds.clear();
+          showMessage(`已删除 ${results.length} 条代理`, "success");
+          await loadProxyPool();
+        } catch (error) {
+          showMessage(error.message || "批量删除失败", "error");
+          await loadProxyPool();
         }
       }
 

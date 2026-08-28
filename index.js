@@ -17,7 +17,7 @@ const {
   closeTaskBrowser,
 } = require("./browser-runtime");
 const { preparePlaywrightProxy } = require("./playwright-proxy");
-const { cancelAutoRenewAfterActivation } = require("./subscription-check");
+const { cancelAutoRenewWithBrowserPage } = require("./subscription-check");
 const fs = require("fs");
 const path = require("path");
 
@@ -768,7 +768,7 @@ async function run() {
         store.isCreditsPlan(planType) || Number(CONFIG.creditQuantity || 0) > 0;
       if (!isCredits) {
         console.log("[步骤] 正在关闭自动续费...");
-        const cancelResult = await cancelAutoRenewAfterActivation(accessToken, {
+        const cancelResult = await cancelAutoRenewWithBrowserPage(page, {
           accountId: checkoutResult?.accountId || loginInfo.accountId,
           email: email || loginInfo.email,
         });

@@ -3909,6 +3909,30 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 <i data-lucide="zap"></i>
                 批量检测
               </button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                onclick="toggleAllProxySelection()"
+              >
+                <i data-lucide="check-square"></i>
+                全选切换
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                onclick="selectUnavailableProxies()"
+              >
+                <i data-lucide="circle-x"></i>
+                选中失效
+              </button>
+              <button
+                type="button"
+                class="btn btn-danger"
+                onclick="batchDeleteSavedProxies()"
+              >
+                <i data-lucide="trash-2"></i>
+                批量删除
+              </button>
             </div>
           </div>
 
@@ -3916,6 +3940,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             <table>
               <thead>
                 <tr>
+                  <th class="select-header">选择</th>
                   <th width="72px" style="text-align: center">启用</th>
                   <th width="96px" style="text-align: center">活跃检测</th>
                   <th width="140px">出口 IP</th>
@@ -3929,7 +3954,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               </thead>
               <tbody id="proxy_pool_body">
                 <tr>
-                  <td colspan="9">加载中...</td>
+                  <td colspan="10">加载中...</td>
                 </tr>
               </tbody>
             </table>

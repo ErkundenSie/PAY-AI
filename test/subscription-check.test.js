@@ -5,6 +5,7 @@ const { request: playwrightRequest } = require("playwright");
 const {
   cancelAutoRenew,
   cancelAutoRenewAfterActivation,
+  cancelAutoRenewWithBrowserPage,
 } = require("../subscription-check");
 
 const ACCOUNT_ID = "acct-test-123";
@@ -111,6 +112,21 @@ describe("subscription cancellation", () => {
     expect(result).toMatchObject({ ok: false, statusCode: 401 });
     expect(result.error).toContain("Session");
     expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the active browser page to cancel with its session cookies", async () => {
+    const evaluate = vi.fn().mockResolvedValue({ status: 200, data: {} });
+    const result = await cancelAutoRenewWithBrowserPage(
+      { isClosed: () => false, evaluate },
+      { accountId: ACCOUNT_ID },
+    );
+
+    expect(result).toMatchObject({ ok: true, data: { cancelled: true } });
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect(evaluate.mock.calls[0][1]).toEqual({
+      url: "https://chatgpt.com/backend-api/subscriptions/cancel",
+      targetAccountId: ACCOUNT_ID,
+    });
   });
 
   it("returns a mapped forbidden error for HTTP 403", async () => {
