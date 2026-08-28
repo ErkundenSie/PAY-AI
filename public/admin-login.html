@@ -242,7 +242,6 @@
     </main>
 
     <script>
-      const TOKEN_KEY = "plus_admin_token";
       const SECONDARY_TOKEN_KEY = "plus_admin_secondary_token";
       const METHOD_LABELS = {
         totp: "Google Authenticator",
@@ -254,16 +253,6 @@
       };
       const state = { challengeToken: "", methods: [], selectedMethod: "" };
       let adminPanelPath = "/admin";
-
-      async function loadAdminPaths() {
-        try {
-          const response = await fetch("/api/public/admin-paths");
-          const data = await response.json();
-          if (data.success) {
-            adminPanelPath = data.panelUrl || `/${data.panelPath || "admin"}`;
-          }
-        } catch (_) {}
-      }
 
       function goToAdminPanel() {
         location.href = adminPanelPath;
@@ -353,25 +342,19 @@
         updateMethodUi();
       }
 
-      async function verifyExistingToken() {
-        const token = localStorage.getItem(TOKEN_KEY);
-        if (!token) return;
+      async function verifyExistingSession() {
         try {
           const response = await fetch("/api/admin/session", {
-            headers: { Authorization: `Bearer ${token}` },
+            credentials: "same-origin",
           });
           if (!response.ok) {
-            localStorage.removeItem(TOKEN_KEY);
             localStorage.removeItem(SECONDARY_TOKEN_KEY);
             return;
           }
           const data = await response.json();
-          if (data.refreshed && data.token) {
-            localStorage.setItem(TOKEN_KEY, data.token);
-          }
+          adminPanelPath = data.panelPath || adminPanelPath;
           location.href = adminPanelPath;
         } catch (_) {
-          localStorage.removeItem(TOKEN_KEY);
           localStorage.removeItem(SECONDARY_TOKEN_KEY);
         }
       }
@@ -413,8 +396,8 @@
             showStep("2fa");
             return;
           }
-          if (data.token) {
-            localStorage.setItem(TOKEN_KEY, data.token);
+          if (data.success) {
+            localStorage.removeItem("plus_admin_token");
             localStorage.removeItem(SECONDARY_TOKEN_KEY);
             adminPanelPath = data.panelPath || adminPanelPath;
             goToAdminPanel();
@@ -476,11 +459,11 @@
             }),
           });
           const data = await response.json();
-          if (!response.ok || !data.success || !data.token) {
+          if (!response.ok || !data.success) {
             setMessage(data.message || "验证失败");
             return;
           }
-          localStorage.setItem(TOKEN_KEY, data.token);
+          localStorage.removeItem("plus_admin_token");
           localStorage.removeItem(SECONDARY_TOKEN_KEY);
           adminPanelPath = data.panelPath || adminPanelPath;
           goToAdminPanel();
@@ -506,7 +489,7 @@
         if (e.key === "Enter") verify2fa();
       });
 
-      loadAdminPaths().then(() => verifyExistingToken());
+      verifyExistingSession();
     </script>
   </body>
 </html>

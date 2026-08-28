@@ -669,6 +669,41 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
+function redactInternalErrorForLog(value) {
+  return String(value || "")
+    .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)\S+/gi, "$1[REDACTED]")
+    .replace(/((?:token|secret|password|cookie|api[_-]?key)\s*[:=]\s*)\S+/gi, "$1[REDACTED]")
+    .slice(0, 1000);
+}
+
+app.use((req, res, next) => {
+  const sendJson = res.json.bind(res);
+  res.json = function sendSanitizedJson(body) {
+    if (
+      res.statusCode >= 500 &&
+      body &&
+      typeof body === "object" &&
+      !Array.isArray(body) &&
+      (typeof body.message === "string" || typeof body.error === "string")
+    ) {
+      const detail = body.message || body.error;
+      console.error(
+        `[HTTP] ${req.method} ${req.path} failed: ${redactInternalErrorForLog(detail)}`,
+      );
+      const safeBody = { ...body };
+      if (typeof safeBody.message === "string") {
+        safeBody.message = "服务器内部错误，请稍后重试";
+      }
+      if (typeof safeBody.error === "string") {
+        safeBody.error = "服务器内部错误，请稍后重试";
+      }
+      return sendJson(safeBody);
+    }
+    return sendJson(body);
+  };
+  next();
+});
+
 let cachedAdminPaths = null;
 
 async function getCachedAdminPaths() {
@@ -846,6 +881,7 @@ function validateAccessToken(token) {
 const verifyPassword = adminAuth.verifyPassword;
 const issueAdminToken = adminAuth.issueAdminToken;
 const verifyAdminToken = adminAuth.verifyAdminToken;
+const ADMIN_SESSION_COOKIE = adminAuth.ADMIN_SESSION_COOKIE;
 const requireSecondaryAuth = adminAuth.createRequireSecondaryAuth(
   store,
   ensureStoreReady,
@@ -882,22 +918,40 @@ function getBearerToken(req) {
   return null;
 }
 
+function getCookieValue(req, name) {
+  const target = `${String(name || "").trim()}=`;
+  for (const part of String(req.headers.cookie || "").split(";")) {
+    const value = part.trim();
+    if (!value.startsWith(target)) continue;
+    try {
+      return decodeURIComponent(value.slice(target.length));
+    } catch (_) {
+      return "";
+    }
+  }
+  return "";
+}
+
+async function rejectAdminAuthentication(req, res, message) {
+  try {
+    const paths = await getCachedAdminPaths();
+    res.setHeader("X-Admin-Login-Path", buildAdminLoginUrl(paths));
+  } catch (_) {}
+  return res.status(401).json({ success: false, message });
+}
+
 async function authenticateAdmin(req, res, next) {
-  const token = getBearerToken(req);
+  const token = getBearerToken(req) || getCookieValue(req, ADMIN_SESSION_COOKIE);
   const payload = verifyAdminToken(token);
   if (!payload) {
-    return res
-      .status(401)
-      .json({ success: false, message: "未授权，请重新登录" });
+    return rejectAdminAuthentication(req, res, "未授权，请重新登录");
   }
 
   try {
     await ensureStoreReady();
     const authConfig = await store.getAdminAuthConfig();
     if (Number(payload.pv || 0) !== authConfig.passwordVersion) {
-      return res
-        .status(401)
-        .json({ success: false, message: "登录状态已失效，请重新登录" });
+      return rejectAdminAuthentication(req, res, "登录状态已失效，请重新登录");
     }
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -1946,6 +2000,7 @@ registerAdminLoginRoutes(app, {
   fireAdminSecurityNotification,
   sendTelegramLoginCode,
   attachAdminPaths,
+  adminSessionCookieName: ADMIN_SESSION_COOKIE,
 });
 
 /** 运行日志：必须挂在 app.use('/api/admin', authenticateAdmin) 之前，并为每条路由单独鉴权，否则部分环境下会 404 */
@@ -2118,6 +2173,7 @@ registerAdminSecurityRoutes(app, {
   buildCheckoutUrl,
   ADMIN_REFRESH_AFTER_MS,
   authenticateAdmin,
+  adminSessionCookieName: ADMIN_SESSION_COOKIE,
 });
 
 app.get("/api/admin/task-logs", requireSecondaryAuth, async (req, res) => {
@@ -2350,6 +2406,10 @@ app.get(
   },
 );
 
+function adminSubscriptionActionErrorStatus(statusCode) {
+  return Number(statusCode) === 401 ? 422 : Number(statusCode) || 502;
+}
+
 app.post("/api/admin/subscription/cancel-auto-renew", async (req, res) => {
   try {
     const rawSession = String(req.body?.session || req.body?.token || "")
@@ -2379,7 +2439,7 @@ app.post("/api/admin/subscription/cancel-auto-renew", async (req, res) => {
     });
 
     if (!result.ok) {
-      return res.status(result.statusCode || 502).json({
+      return res.status(adminSubscriptionActionErrorStatus(result.statusCode)).json({
         success: false,
         message: result.error || "取消自动续费失败",
       });
@@ -2420,7 +2480,7 @@ app.post("/api/admin/subscription/enable-auto-renew", async (req, res) => {
     });
 
     if (!result.ok) {
-      return res.status(result.statusCode || 502).json({
+      return res.status(adminSubscriptionActionErrorStatus(result.statusCode)).json({
         success: false,
         message: result.error || "开启自动续费失败",
       });
@@ -4629,13 +4689,13 @@ async function handleActivationRequest(req, res) {
   }
 }
 
-async function authorizeTaskSubscription(data, jobKey) {
+async function authorizeTaskSubscription(data, jobKey, request) {
   if (adminAuth.verifyTaskViewerToken(String(data.viewerToken || ""), jobKey)) {
     return true;
   }
 
   const adminPayload = adminAuth.verifyAdminToken(
-    String(data.adminToken || ""),
+    String(data.adminToken || getCookieValue(request || {}, ADMIN_SESSION_COOKIE)),
   );
   if (!adminPayload) return false;
 
@@ -4670,12 +4730,14 @@ async function start() {
     console.error(`[BrowserPool] 初始化失败: ${error.message}`);
   }
 
-  // 启动时把所有遗留的 in_use 锁清空（避免上次崩溃残留的锁卡死整个池）
+  // 启动时仅回收超时锁，避免影响其他实例仍在执行的任务。
   try {
-    await store.resetAllAssetLocks();
-    console.log("🔓 [资产锁] 启动时已重置所有 in_use 标记");
+    const released = await store.releaseStaleAssetLocks();
+    console.log(
+      `🧹 [资产锁] 启动回收过期锁 phone=${released.phoneReleased} card=${released.cardReleased} pool_emails=${released.poolReleased}`,
+    );
   } catch (error) {
-    console.error(`❌ [资产锁] 启动重置失败: ${error.message}`);
+    console.error(`❌ [资产锁] 启动回收失败: ${error.message}`);
   }
 
   // 每 60 秒兜底回收一次"超过 15 分钟仍未释放"的锁（防进程崩溃）
@@ -4715,7 +4777,7 @@ async function start() {
   const wss = new WebSocket.Server({ server, maxPayload: 8 * 1024 });
   let activeWebSocketConnections = 0;
   const MAX_WEB_SOCKET_CONNECTIONS = 200;
-  wss.on("connection", (ws) => {
+  wss.on("connection", (ws, request) => {
     activeWebSocketConnections += 1;
     if (activeWebSocketConnections > MAX_WEB_SOCKET_CONNECTIONS) {
       activeWebSocketConnections -= 1;
@@ -4749,7 +4811,7 @@ async function start() {
           if (!/^[A-Za-z0-9._-]{1,80}$/.test(jobKey)) {
             return ws.close(1008, "无效任务标识");
           }
-          if (!(await authorizeTaskSubscription(data, jobKey))) {
+          if (!(await authorizeTaskSubscription(data, jobKey, request))) {
             return ws.close(1008, "未授权订阅");
           }
           if (currentJobKey && currentJobKey !== jobKey) {

@@ -55,7 +55,7 @@ ENV NODE_ENV=production \
 
 EXPOSE 17621
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
     CMD curl -f http://localhost:17621/api/public/runtime || exit 1
 
 CMD ["node", "server.js"]

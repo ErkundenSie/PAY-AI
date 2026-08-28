@@ -68,6 +68,8 @@ describe("checkout protocol helpers", () => {
       exp_month: "12",
       exp_year: "2028",
     });
+    expect(parseCardExpiry("1328")).toEqual({ exp_month: "", exp_year: "" });
+    expect(parseCardExpiry("00/28")).toEqual({ exp_month: "", exp_year: "" });
   });
 
   it("uses checkout processor_entity before country fallback", () => {

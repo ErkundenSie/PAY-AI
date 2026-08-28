@@ -1,5 +1,23 @@
 "use strict";
 
+function adminSessionCookieOptions(req, maxAge) {
+  return {
+    httpOnly: true,
+    sameSite: "strict",
+    secure: Boolean(req.secure) || process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: Math.max(0, Number(maxAge) || 0),
+  };
+}
+
+function setAdminSessionCookie(res, req, token, payload, cookieName) {
+  res.cookie(
+    cookieName,
+    token,
+    adminSessionCookieOptions(req, Number(payload?.exp || 0) - Date.now()),
+  );
+}
+
 function registerAdminLoginRoutes(app, deps) {
   const {
     adminAuth,
@@ -11,7 +29,9 @@ function registerAdminLoginRoutes(app, deps) {
     fireAdminSecurityNotification,
     sendTelegramLoginCode,
     attachAdminPaths,
+    adminSessionCookieName,
   } = deps;
+  const sessionCookieName = adminSessionCookieName || "oai_admin_session";
 
   app.get("/admin", (req, res) => {
     res.status(404).type("text/plain").send("Not Found");
@@ -89,6 +109,13 @@ function registerAdminLoginRoutes(app, deps) {
           authConfig.passwordVersion,
           authConfig.email,
         );
+        setAdminSessionCookie(
+          res,
+          req,
+          token,
+          payload,
+          sessionCookieName,
+        );
         await logAdminSecurityEvent("login_success", {
           ...clientMeta,
           email: authConfig.email,
@@ -105,7 +132,6 @@ function registerAdminLoginRoutes(app, deps) {
         return res.json(
           await attachAdminPaths({
             success: true,
-            token,
             expiresAt: payload.exp,
             issuedAt: payload.iat,
             permissions: payload.permissions,
@@ -270,6 +296,13 @@ function registerAdminLoginRoutes(app, deps) {
         authConfig.passwordVersion,
         authConfig.email,
       );
+      setAdminSessionCookie(
+        res,
+        req,
+        token,
+        payload,
+        sessionCookieName,
+      );
       await logAdminSecurityEvent("login_success", {
         ...clientMeta,
         email: authConfig.email,
@@ -287,7 +320,6 @@ function registerAdminLoginRoutes(app, deps) {
       return res.json(
         await attachAdminPaths({
           success: true,
-          token,
           expiresAt: payload.exp,
           issuedAt: payload.iat,
           permissions: payload.permissions,
@@ -297,6 +329,14 @@ function registerAdminLoginRoutes(app, deps) {
     } catch (error) {
       return res.status(500).json({ success: false, message: error.message });
     }
+  });
+
+  app.post("/api/admin/logout", (req, res) => {
+    res.clearCookie(
+      sessionCookieName,
+      adminSessionCookieOptions(req, 0),
+    );
+    return res.json({ success: true });
   });
 }
 
@@ -310,6 +350,7 @@ function registerAdminSecurityRoutes(app, deps) {
     logAdminSecurityEvent,
     fireAdminSecurityNotification,
     attachAdminPaths,
+    adminSessionCookieName,
     invalidateAdminPathsCache,
     setCachedAdminPaths,
     buildAdminLoginUrl,
@@ -318,28 +359,35 @@ function registerAdminSecurityRoutes(app, deps) {
     ADMIN_REFRESH_AFTER_MS,
     authenticateAdmin,
   } = deps;
+  const sessionCookieName = adminSessionCookieName || "oai_admin_session";
 
-  app.get("/api/admin/session", (req, res) => {
+  app.get("/api/admin/session", async (req, res) => {
     const age = Date.now() - Number(req.admin.iat || 0);
     const shouldRefresh = age >= ADMIN_REFRESH_AFTER_MS;
-    let refreshedToken = null;
     let payload = req.admin;
 
     if (shouldRefresh) {
       const refreshed = issueAdminToken(req.admin.pv, req.admin.email);
-      refreshedToken = refreshed.token;
       payload = refreshed.payload;
+      setAdminSessionCookie(
+        res,
+        req,
+        refreshed.token,
+        refreshed.payload,
+        sessionCookieName,
+      );
     }
 
-    return res.json({
-      success: true,
-      refreshed: shouldRefresh,
-      token: refreshedToken,
-      expiresAt: payload.exp,
-      issuedAt: payload.iat,
-      permissions: payload.permissions,
-      email: payload.email || "",
-    });
+    return res.json(
+      await attachAdminPaths({
+        success: true,
+        refreshed: shouldRefresh,
+        expiresAt: payload.exp,
+        issuedAt: payload.iat,
+        permissions: payload.permissions,
+        email: payload.email || "",
+      }),
+    );
   });
 
   app.get("/api/admin/security/status", async (req, res) => {

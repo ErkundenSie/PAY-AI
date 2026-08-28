@@ -1,4 +1,3 @@
-      const TOKEN_KEY = "plus_admin_token";
       let adminLoginPath = "/admin-login";
       const _lucideCreateIcons =
         typeof lucide !== "undefined" && lucide.createIcons
@@ -572,17 +571,11 @@
       }
 
       function getAdminToken() {
-        return localStorage.getItem(TOKEN_KEY);
-      }
-
-      function setAdminToken(token) {
-        if (token) {
-          localStorage.setItem(TOKEN_KEY, token);
-        }
+        return "";
       }
 
       function clearAdminToken() {
-        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem("plus_admin_token");
       }
 
       function formatDurationText(totalSeconds) {
@@ -677,22 +670,25 @@
       }
 
       function logoutAdmin() {
-        redirectToLogin();
+        fetch("/api/admin/logout", {
+          method: "POST",
+          credentials: "same-origin",
+        })
+          .catch(() => {})
+          .finally(redirectToLogin);
       }
 
       async function authFetch(url, options = {}) {
-        const token = getAdminToken();
-        if (!token) {
-          redirectToLogin();
-          throw new Error("未登录");
-        }
-
-        const headers = {
-          ...(options.headers || {}),
-          Authorization: `Bearer ${token}`,
-        };
-        const response = await fetch(url, { ...options, headers });
+        const response = await fetch(url, {
+          ...options,
+          credentials: "same-origin",
+          headers: { ...(options.headers || {}) },
+        });
         if (response.status === 401) {
+          const loginPath = response.headers.get("X-Admin-Login-Path");
+          if (loginPath && loginPath.startsWith("/")) {
+            adminLoginPath = loginPath;
+          }
           redirectToLogin();
           throw new Error("登录已失效");
         }
@@ -990,8 +986,7 @@
         if (!normalized) {
           return "";
         }
-        const token = getAdminToken() || "";
-        return `/api/admin/video?path=${encodeURIComponent(normalized)}&token=${encodeURIComponent(token)}`;
+        return `/api/admin/video?path=${encodeURIComponent(normalized)}`;
       }
 
       document.addEventListener("click", (event) => {
@@ -2570,9 +2565,7 @@
       async function ensureAdminSession() {
         const response = await authFetch("/api/admin/session");
         const data = await response.json();
-        if (data.refreshed && data.token) {
-          setAdminToken(data.token);
-        }
+        if (data.loginPath) adminLoginPath = data.loginPath;
         scheduleSessionRefresh(data.expiresAt);
         return data;
       }
@@ -5753,7 +5746,6 @@
                 JSON.stringify({
                   type: "subscribe",
                   jobKey: data.jobKey,
-                  adminToken: getAdminToken(),
                 }),
               );
               startHeartbeat();
@@ -6189,13 +6181,6 @@
 
       async function bootAdmin() {
         initializeSidebar();
-        try {
-          const res = await fetch("/api/public/admin-paths");
-          const data = await res.json();
-          if (data.success && data.loginUrl) {
-            adminLoginPath = data.loginUrl;
-          }
-        } catch (_) {}
         document
           .getElementById("admin_login_path")
           ?.addEventListener("input", updateAdminPathPreview);
@@ -6205,11 +6190,6 @@
         document
           .getElementById("checkout_path")
           ?.addEventListener("input", updateAdminPathPreview);
-
-        if (!getAdminToken()) {
-          redirectToLogin();
-          return;
-        }
 
         try {
           await ensureAdminSession();

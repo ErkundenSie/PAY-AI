@@ -81,7 +81,7 @@ function createLoginApp(overrides = {}) {
     verifyPassword: (password) => password === "correct-password",
     issueAdminToken: () => ({
       token: "admin-token",
-      payload: { exp: 1, iat: 0, permissions: [] },
+      payload: { exp: Date.now() + 60_000, iat: Date.now(), permissions: [] },
     }),
     logAdminSecurityEvent: async () => {},
     fireAdminSecurityNotification: () => {},
@@ -99,7 +99,7 @@ function createLoginApp(overrides = {}) {
       password === "correct-password" || password === "secondary-password",
     issueAdminToken: () => ({
       token: "refreshed",
-      payload: { exp: 2, iat: 1, permissions: [] },
+      payload: { exp: Date.now() + 60_000, iat: Date.now(), permissions: [] },
     }),
     logAdminSecurityEvent: async () => {},
     fireAdminSecurityNotification: () => {},
@@ -134,7 +134,7 @@ async function request(app, method, url, body, headers = {}) {
     } catch (_) {
       json = text;
     }
-    return { status: res.status, json };
+    return { status: res.status, json, setCookie: res.headers.get("set-cookie") || "" };
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -153,7 +153,7 @@ describe("admin login routes", () => {
     expect(res.status).toBe(400);
   });
 
-  it("issues a token when 2FA is not required", async () => {
+  it("issues an HttpOnly session cookie when 2FA is not required", async () => {
     const app = createLoginApp();
     const res = await request(app, "POST", "/api/admin/login", {
       email: "admin@example.com",
@@ -161,7 +161,9 @@ describe("admin login routes", () => {
     });
     expect(res.status).toBe(200);
     expect(res.json.success).toBe(true);
-    expect(res.json.token).toBe("admin-token");
+    expect(res.json.token).toBeUndefined();
+    expect(res.setCookie).toContain("oai_admin_session=admin-token");
+    expect(res.setCookie).toContain("HttpOnly");
     expect(res.json.requires2fa).toBe(false);
   });
 

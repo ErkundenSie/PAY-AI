@@ -17,6 +17,7 @@ const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const TG_CODE_MAX_ATTEMPTS = 5;
 const TASK_VIEWER_TOKEN_TTL_MS = 60 * 60 * 1000;
 const MIN_ADMIN_TOKEN_SECRET_LENGTH = 32;
+const ADMIN_SESSION_COOKIE = "oai_admin_session";
 
 const loginAttempts = new Map();
 const tgLoginCodes = new Map();
@@ -620,6 +621,7 @@ module.exports = {
   ADMIN_TOKEN_TTL_MS,
   ADMIN_REFRESH_AFTER_MS,
   TASK_VIEWER_TOKEN_TTL_MS,
+  ADMIN_SESSION_COOKIE,
   resolveAdminTokenSecret,
   createPasswordHash,
   verifyPassword,

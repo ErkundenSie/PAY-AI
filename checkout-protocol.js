@@ -83,6 +83,9 @@ function parseCardExpiry(expiry) {
   if (digits.length === 4) {
     const month = Number(digits.slice(0, 2));
     const year2 = Number(digits.slice(2));
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      return { exp_month: "", exp_year: "" };
+    }
     return {
       exp_month: String(month),
       exp_year: String(2000 + year2),
@@ -93,6 +96,9 @@ function parseCardExpiry(expiry) {
   const month = Number(match[1]);
   const yearRaw = match[2];
   const year = yearRaw.length === 2 ? 2000 + Number(yearRaw) : Number(yearRaw);
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    return { exp_month: "", exp_year: "" };
+  }
   return {
     exp_month: String(month),
     exp_year: String(year),

@@ -153,6 +153,20 @@ async function attemptCardPayment(
     );
   }
 
+  const checkoutUrl = String(checkoutContext.checkoutUrl || "").trim();
+  const currentUrl =
+    page && typeof page.url === "function" ? String(page.url() || "") : "";
+  if (checkoutUrl && currentUrl !== checkoutUrl) {
+    progress("正在打开 Checkout 页面以继续 UI 支付...");
+    await page.goto(checkoutUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 90000,
+    });
+    await page
+      .waitForLoadState("networkidle", { timeout: 30000 })
+      .catch(() => {});
+  }
+
   return completeStripeCardPayment(page, cardInfo, address, {
     cardAttempt,
     holderName,
@@ -411,26 +425,44 @@ async function executePaymentWithRetry(page, options) {
           card.card_holder ||
           billingHolderName ||
           "";
+        let cardReleased = !card.id;
         if (card.id) {
-          await store.bindCardPaymentProfile(card.id, { holderName, address });
+          await store
+            .bindCardPaymentProfile(card.id, { holderName, address })
+            .catch((error) =>
+              progress(`支付成功后保存卡片资料失败: ${error.message}`),
+            );
           if (address.id) {
-            await markAddressBound(address.id, card.id);
+            await markAddressBound(address.id, card.id).catch((error) =>
+              progress(`支付成功后更新地址绑定失败: ${error.message}`),
+            );
           }
-          await store.recordCardUsage(card.id);
-          await store.releaseCard(card.id);
+          await store.recordCardUsage(card.id).catch((error) =>
+            progress(`支付成功后记录卡片使用失败: ${error.message}`),
+          );
+          try {
+            await store.releaseCard(card.id);
+            cardReleased = true;
+          } catch (error) {
+            progress(`支付成功后释放卡片失败: ${error.message}`);
+          }
         }
-        cardHandled = true;
-        await store.createBillingRecord({
-          card_number: card.card_number,
-          card_last4: cardLast4,
-          amount: billedAmount,
-          currency: billedCurrency,
-          plan_type: planType || "plus",
-          cdk_code: cdkCode,
-          email,
-          stripe_session_id: protocolSessionId || null,
-          status: "success",
-        });
+        cardHandled = cardReleased;
+        await store
+          .createBillingRecord({
+            card_number: card.card_number,
+            card_last4: cardLast4,
+            amount: billedAmount,
+            currency: billedCurrency,
+            plan_type: planType || "plus",
+            cdk_code: cdkCode,
+            email,
+            stripe_session_id: protocolSessionId || null,
+            status: "success",
+          })
+          .catch((error) =>
+            progress(`支付成功后写入账单记录失败: ${error.message}`),
+          );
         progress(
           `支付成功！卡片: ...${cardLast4}，姓名: ${holderName}，地址: ${address.line1}, ${address.city}`,
         );
@@ -450,24 +482,28 @@ async function executePaymentWithRetry(page, options) {
 
       const declined = paymentResult.declined || isPaymentDeclined(lastError);
       if (declined) {
-        await store.createBillingRecord({
-          card_number: card.card_number,
-          card_last4: cardLast4,
-          amount: billedAmount,
-          currency: billedCurrency,
-          plan_type: planType || "plus",
-          cdk_code: cdkCode,
-          email,
-          stripe_session_id: protocolSessionId || null,
-          status: "failed",
-          error_code: "card_declined",
-          error_message: lastError,
-        });
+        await store
+          .createBillingRecord({
+            card_number: card.card_number,
+            card_last4: cardLast4,
+            amount: billedAmount,
+            currency: billedCurrency,
+            plan_type: planType || "plus",
+            cdk_code: cdkCode,
+            email,
+            stripe_session_id: protocolSessionId || null,
+            status: "failed",
+            error_code: "card_declined",
+            error_message: lastError,
+          })
+          .catch((error) => progress(`写入拒付账单记录失败: ${error.message}`));
         progress(
           `Stripe 拒绝支付，标记卡片已报废 (ID: ${card.id || "-"}, ...${cardLast4})`,
         );
         if (card.id) {
-          await store.markCardExhausted(card.id);
+          await store
+            .markCardExhausted(card.id)
+            .catch((error) => progress(`标记拒付卡片失败: ${error.message}`));
         }
         cardHandled = true;
         declinedLast4s.push(cardLast4);

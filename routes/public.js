@@ -120,24 +120,6 @@ function registerPublicRoutes(app, deps) {
     },
   );
 
-  app.get("/api/public/admin-paths", async (req, res) => {
-    try {
-      await ensureStoreReady();
-      const paths = await store.getAdminPaths();
-      return res.json({
-        success: true,
-        loginPath: paths.loginPath,
-        panelPath: paths.panelPath,
-        checkoutPath: paths.checkoutPath,
-        loginUrl: buildAdminLoginUrl(paths),
-        panelUrl: buildAdminPanelUrl(paths),
-        checkoutUrl: buildCheckoutUrl(paths),
-      });
-    } catch (error) {
-      return res.status(500).json({ success: false, message: error.message });
-    }
-  });
-
   app.post(
     "/api/public/subscription/check",
     limitPublicRequests("subscription-check", 10, 60 * 1000),
