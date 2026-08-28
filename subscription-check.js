@@ -617,69 +617,90 @@ async function cancelAutoRenewWithBrowserPage(page, options = {}) {
     };
   }
 
-  let response;
-  try {
-    response = await page.evaluate(
-      async ({ url, targetAccountId }) => {
-        const result = await fetch(url, {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            Accept: "application/json, text/plain, */*",
-            "Content-Type": "application/json",
-            "chatgpt-account-id": targetAccountId,
-            "openai-account-id": targetAccountId,
-          },
-          body: JSON.stringify({ account_id: targetAccountId }),
-        });
-        const text = await result.text();
-        let data = text;
-        try {
-          data = text ? JSON.parse(text) : null;
-        } catch (_) {}
-        return { status: result.status, data };
-      },
-      { url: CANCEL_SUBSCRIPTION_URL, targetAccountId: accountId },
-    );
-  } catch (error) {
-    return {
-      ok: false,
-      statusCode: 502,
-      error: `浏览器取消自动续费请求失败：${error.message}`,
-    };
+  const maxAttempts = Math.max(1, Number(options.maxAttempts || 3));
+  const requestedDelayMs = Number(options.delayMs);
+  const delayMs = Math.max(
+    0,
+    Number.isFinite(requestedDelayMs) ? requestedDelayMs : 2000,
+  );
+  let lastResult = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let response;
+    try {
+      response = await page.evaluate(
+        async ({ url, targetAccountId }) => {
+          const result = await fetch(url, {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              Accept: "application/json, text/plain, */*",
+              "Content-Type": "application/json",
+              "chatgpt-account-id": targetAccountId,
+              "openai-account-id": targetAccountId,
+            },
+            body: JSON.stringify({ account_id: targetAccountId }),
+          });
+          const text = await result.text();
+          let data = text;
+          try {
+            data = text ? JSON.parse(text) : null;
+          } catch (_) {}
+          return { status: result.status, data };
+        },
+        { url: CANCEL_SUBSCRIPTION_URL, targetAccountId: accountId },
+      );
+    } catch (error) {
+      lastResult = {
+        ok: false,
+        statusCode: 502,
+        error: `浏览器取消自动续费请求失败：${error.message}`,
+      };
+    }
+
+    if (response?.status === 200 || response?.status === 204) {
+      return {
+        ok: true,
+        data: {
+          cancelled: true,
+          message: "已提交取消自动续费请求",
+        },
+      };
+    }
+
+    if (response) {
+      const body = normalizeResponseBody(response.data);
+      if (response.status === 401) {
+        lastResult = {
+          ok: false,
+          statusCode: 401,
+          error: "浏览器 Session 无效或已过期，请重新获取 Session",
+        };
+      } else if (response.status === 403) {
+        lastResult = { ok: false, ...mapCheckError(403, body) };
+      } else {
+        const detail =
+          typeof body === "string"
+            ? body.slice(0, 200)
+            : JSON.stringify(body || {}).slice(0, 200);
+        lastResult = {
+          ok: false,
+          statusCode: response.status || 502,
+          error: `取消自动续费失败 (${response.status || 0})${detail ? `：${detail}` : ""}`,
+        };
+      }
+    }
+
+    const shouldRetry =
+      lastResult?.statusCode === 404 &&
+      /no active subscription found/i.test(String(lastResult.error || ""));
+    if (!shouldRetry || attempt === maxAttempts) {
+      return lastResult;
+    }
+    await sleep(Math.min(delayMs * attempt, 8000));
   }
 
-  const body = normalizeResponseBody(response?.data);
-  if (response?.status === 401) {
-    return {
-      ok: false,
-      statusCode: 401,
-      error: "浏览器 Session 无效或已过期，请重新获取 Session",
-    };
-  }
-  if (response?.status === 403) {
-    const mapped = mapCheckError(403, body);
-    return { ok: false, ...mapped };
-  }
-  if (response?.status !== 200 && response?.status !== 204) {
-    const detail =
-      typeof body === "string"
-        ? body.slice(0, 200)
-        : JSON.stringify(body || {}).slice(0, 200);
-    return {
-      ok: false,
-      statusCode: response?.status || 502,
-      error: `取消自动续费失败 (${response?.status || 0})${detail ? `：${detail}` : ""}`,
-    };
-  }
-
-  return {
-    ok: true,
-    data: {
-      cancelled: true,
-      message: "已提交取消自动续费请求",
-    },
-  };
+  return lastResult;
 }
 
 function sleep(ms) {
