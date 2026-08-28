@@ -1493,11 +1493,61 @@ async function getBillingOverviewStats() {
   }));
 }
 
-const ADMIN_STATS_CACHE_MS = 3000;
+const ADMIN_STATS_CACHE_MS = 5000;
+const ADMIN_CONFIG_CACHE_MS = 10000;
 let adminStatsCache = { ts: 0, data: null, promise: null };
+let adminConfigCache = { ts: 0, rows: null, promise: null };
 
 function invalidateAdminStatsCache() {
   adminStatsCache = { ts: 0, data: null, promise: null };
+}
+
+function invalidateAdminConfigCache() {
+  adminConfigCache = { ts: 0, rows: null, promise: null };
+}
+
+async function loadAdminConfigRows() {
+  const now = Date.now();
+  if (
+    adminConfigCache.rows &&
+    now - adminConfigCache.ts < ADMIN_CONFIG_CACHE_MS
+  ) {
+    return adminConfigCache.rows;
+  }
+  if (adminConfigCache.promise) {
+    return adminConfigCache.promise;
+  }
+  adminConfigCache.promise = runQuery(
+    `SELECT config_key, config_value
+             FROM app_config
+             WHERE config_key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      "proxy",
+      "max_concurrent_activations",
+      "max_background_concurrent",
+      "maintenance_mode",
+      "maintenance_mode_drain",
+      "pool_email_enabled",
+      "pool_email_imap_host",
+      "pool_email_include_junk",
+      "random_email_domain",
+      "email_source",
+      "inbox_api_base",
+      "inbox_email_domain",
+      "inbox_email_domains",
+      "record_video",
+      "default_timezone",
+    ],
+  )
+    .then((rows) => {
+      adminConfigCache = { ts: Date.now(), rows, promise: null };
+      return rows;
+    })
+    .catch((error) => {
+      adminConfigCache.promise = null;
+      throw error;
+    });
+  return adminConfigCache.promise;
 }
 
 async function loadAdminDashboardStats() {
@@ -1510,7 +1560,7 @@ async function loadAdminDashboardStats() {
   }
 
   adminStatsCache.promise = (async () => {
-    const [statsRows, cdkStatsRows, cardCountRows, billingOverviewRows] =
+    const [statsRows, cdkStatsRows, cardCountRows, billingOverviewRows, planCountRows] =
       await Promise.all([
         runQuery(
           `SELECT
@@ -1531,12 +1581,22 @@ async function loadAdminDashboardStats() {
         ),
         runQuery(`SELECT COUNT(*) AS total FROM card_assets`),
         getBillingOverviewStats(),
+        runQuery(
+          `SELECT
+                    COALESCE(SUM(plan_type = 'plus'), 0) AS plus_count,
+                    COALESCE(SUM(plan_type IN ('pro_5x', 'pro_20x') OR plan_type LIKE 'pro%'), 0) AS pro_count,
+                    COALESCE(SUM(plan_type = 'credits' OR plan_type LIKE 'credits%'), 0) AS credits_count,
+                    COALESCE(SUM(plan_type NOT IN ('plus', 'pro_5x', 'pro_20x', 'credits') AND plan_type NOT LIKE 'pro%' AND plan_type NOT LIKE 'credits%'), 0) AS other_count
+                 FROM billing_records
+                 WHERE status = 'success'`,
+        ),
       ]);
     const stats = statsRows[0] || {};
     const cdkStats = cdkStatsRows[0] || {};
     const billingOverview = Array.isArray(billingOverviewRows)
       ? billingOverviewRows
       : [];
+    const planCounts = planCountRows[0] || {};
     const primaryBilling = billingOverview[0] || {
       currency: "USD",
       revenue: 0,
@@ -1556,6 +1616,10 @@ async function loadAdminDashboardStats() {
         billing_currency: primaryBilling.currency || "USD",
         billing_paid_count: Number(primaryBilling.paid_count || 0),
         billing_by_currency: billingOverview,
+        plan_plus: Number(planCounts.plus_count || 0),
+        plan_pro: Number(planCounts.pro_count || 0),
+        plan_credits: Number(planCounts.credits_count || 0),
+        plan_other: Number(planCounts.other_count || 0),
       },
     };
     adminStatsCache = { ts: Date.now(), data, promise: null };
@@ -1571,28 +1635,7 @@ async function loadAdminDashboardStats() {
 async function getAdminData(options = {}) {
   const light = Boolean(options.light);
   const [configRows, dashboardStats] = await Promise.all([
-    runQuery(
-      `SELECT config_key, config_value
-             FROM app_config
-             WHERE config_key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        "proxy",
-        "max_concurrent_activations",
-        "max_background_concurrent",
-        "maintenance_mode",
-        "maintenance_mode_drain",
-        "pool_email_enabled",
-        "pool_email_imap_host",
-        "pool_email_include_junk",
-        "random_email_domain",
-        "email_source",
-        "inbox_api_base",
-        "inbox_email_domain",
-        "inbox_email_domains",
-        "record_video",
-        "default_timezone",
-      ],
-    ),
+    loadAdminConfigRows(),
     loadAdminDashboardStats(),
   ]);
   const configMap = Object.fromEntries(
@@ -1881,6 +1924,7 @@ async function saveConfig(config = {}) {
       }
     }
   });
+  invalidateAdminConfigCache();
 }
 
 function normalizeCardGroupName(raw) {
@@ -3596,6 +3640,7 @@ async function setAppConfigValue(configKey, configValue) {
          ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)`,
     [String(configKey), encodeConfigValue(configKey, configValue)],
   );
+  invalidateAdminConfigCache();
 }
 
 const BROWSER_POOL_CONFIG_KEY = "browser_pool_enabled";
@@ -5551,6 +5596,7 @@ module.exports = {
   runExecute,
   ensureReady,
   getAdminData,
+  invalidateAdminConfigCache,
   listAdminTaskLogs,
   getResumableAdminProductGeneration,
   saveConfig,

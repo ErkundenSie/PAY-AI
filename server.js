@@ -1,7 +1,7 @@
 require("./load-env");
 
 const express = require("express");
-const { spawn, execFileSync } = require("child_process");
+const { spawn, execFile } = require("child_process");
 const path = require("path");
 const crypto = require("crypto");
 const dns = require("dns").promises;
@@ -128,6 +128,172 @@ let systemMetricsCache = {
   data: null,
   promise: null,
 };
+let diskMetricsCache = {
+  ts: 0,
+  data: null,
+  promise: null,
+};
+let cpuSample = {
+  ts: 0,
+  idle: 0,
+  total: 0,
+  percent: 0,
+};
+
+function formatGiB(bytes) {
+  return `${(Number(bytes || 0) / 1024 ** 3).toFixed(1)}G`;
+}
+
+function readCpuTimes() {
+  return (os.cpus() || []).reduce(
+    (acc, cpu) => {
+      const times = cpu.times || {};
+      const idle = Number(times.idle || 0);
+      const total = Object.values(times).reduce(
+        (sum, value) => sum + Number(value || 0),
+        0,
+      );
+      acc.idle += idle;
+      acc.total += total;
+      return acc;
+    },
+    { idle: 0, total: 0 },
+  );
+}
+
+function sampleCpuPercent() {
+  const now = Date.now();
+  const current = readCpuTimes();
+  const cpuCount = Math.max(1, (os.cpus() || []).length);
+  const load = Number(os.loadavg()[0] || 0);
+  const loadPercent = Math.min(100, Math.round((load / cpuCount) * 100));
+  let percent = cpuSample.percent || loadPercent;
+  if (cpuSample.ts && current.total > cpuSample.total) {
+    const idleDelta = current.idle - cpuSample.idle;
+    const totalDelta = current.total - cpuSample.total;
+    if (totalDelta > 0) {
+      percent = Math.min(
+        100,
+        Math.max(0, Math.round((1 - idleDelta / totalDelta) * 100)),
+      );
+    }
+  }
+  cpuSample = { ts: now, idle: current.idle, total: current.total, percent };
+  return {
+    percent,
+    load,
+    cpuCount,
+    text: `占用 ${percent}% · 负载 ${load.toFixed(2)} / ${cpuCount} 核`,
+  };
+}
+
+function parseDfKilobytes(output, fallbackDrive = "/") {
+  const lines = String(output || "")
+    .trim()
+    .split("\n");
+  if (lines.length < 2) return null;
+  const parts = lines[1].trim().split(/\s+/);
+  const total = Number(parts[1] || 0) * 1024;
+  const used = Number(parts[2] || 0) * 1024;
+  if (!Number.isFinite(total) || total <= 0) return null;
+  return {
+    percent: Math.min(100, Math.round((used / total) * 100)),
+    usedText: formatGiB(used),
+    totalText: formatGiB(total),
+    drive: parts[5] || fallbackDrive,
+  };
+}
+
+function execFileText(command, args) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { encoding: "utf8", timeout: 1500 }, (error, stdout) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(String(stdout || ""));
+    });
+  });
+}
+
+async function readDiskMetrics() {
+  const now = Date.now();
+  if (diskMetricsCache.data && now - diskMetricsCache.ts < 15000) {
+    return diskMetricsCache.data;
+  }
+  if (diskMetricsCache.promise) {
+    return diskMetricsCache.promise;
+  }
+  const fallback = {
+    percent: 0,
+    usedText: "0.0G",
+    totalText: "0.0G",
+    drive: "/",
+  };
+  diskMetricsCache.promise = (async () => {
+    const targets = ["/host", "/", process.cwd()];
+    for (const target of targets) {
+      try {
+        if (target !== "/" && target !== process.cwd() && !fs.existsSync(target)) {
+          continue;
+        }
+        const dfOut = await execFileText("df", ["-kP", target]);
+        const disk = parseDfKilobytes(dfOut, target);
+        if (disk) {
+          diskMetricsCache = { ts: Date.now(), data: disk, promise: null };
+          return disk;
+        }
+      } catch (_) {
+        /* try next mount */
+      }
+    }
+    diskMetricsCache = { ts: Date.now(), data: fallback, promise: null };
+    return fallback;
+  })().catch((error) => {
+    diskMetricsCache.promise = null;
+    throw error;
+  });
+  return diskMetricsCache.promise;
+}
+
+async function getSystemMetrics() {
+  const now = Date.now();
+  if (systemMetricsCache.data && now - systemMetricsCache.ts < 3000) {
+    return systemMetricsCache.data;
+  }
+  if (systemMetricsCache.promise) {
+    return systemMetricsCache.promise;
+  }
+
+  systemMetricsCache.promise = (async () => {
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+    const cpu = sampleCpuPercent();
+    const disk = await readDiskMetrics();
+    const data = {
+      cpu: {
+        percent: cpu.percent,
+        text: cpu.text,
+      },
+      memory: {
+        percent: totalMem > 0 ? Math.round((usedMem / totalMem) * 100) : 0,
+        text: `${formatGiB(usedMem)}/${formatGiB(totalMem)}`,
+      },
+      disk,
+      uptime: { seconds: Math.floor(os.uptime()) },
+    };
+    systemMetricsCache.data = data;
+    systemMetricsCache.ts = Date.now();
+    systemMetricsCache.promise = null;
+    return data;
+  })().catch((error) => {
+    systemMetricsCache.promise = null;
+    throw error;
+  });
+
+  return systemMetricsCache.promise;
+}
 
 function reserveForegroundSlot(slotKey) {
   activeForegroundJobs.add(String(slotKey));
@@ -224,72 +390,6 @@ function getTotalActiveJobs() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function getSystemMetrics() {
-  const now = Date.now();
-  if (systemMetricsCache.data && now - systemMetricsCache.ts < 3000) {
-    return systemMetricsCache.data;
-  }
-  if (systemMetricsCache.promise) {
-    return systemMetricsCache.promise;
-  }
-
-  systemMetricsCache.promise = (async () => {
-    const totalMem = os.totalmem();
-    const freeMem = os.freemem();
-    const usedMem = totalMem - freeMem;
-    const cpuCount = Math.max(1, (os.cpus() || []).length);
-    const load = Number(os.loadavg()[0] || 0);
-    const cpuPercent = Math.min(100, Math.round((load / cpuCount) * 100));
-
-    let disk = {
-      percent: 0,
-      usedText: "0.0G",
-      totalText: "0.0G",
-      drive: "/",
-    };
-    try {
-      const dfOut = execFileSync("df", ["-kP", "/"], { encoding: "utf8" });
-      const lines = dfOut.trim().split("\n");
-      if (lines.length >= 2) {
-        const parts = lines[1].trim().split(/\s+/);
-        const total = Number(parts[1] || 0) * 1024;
-        const used = Number(parts[2] || 0) * 1024;
-        disk = {
-          percent:
-            total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0,
-          usedText: `${(used / 1024 ** 3).toFixed(1)}G`,
-          totalText: `${(total / 1024 ** 3).toFixed(1)}G`,
-          drive: parts[5] || "/",
-        };
-      }
-    } catch (_) {
-      /* ignore */
-    }
-
-    const data = {
-      cpu: {
-        percent: cpuPercent,
-        text: `负载 ${load.toFixed(2)} / ${cpuCount} 核`,
-      },
-      memory: {
-        percent: totalMem > 0 ? Math.round((usedMem / totalMem) * 100) : 0,
-        text: `${(usedMem / 1024 ** 3).toFixed(1)}G/${(totalMem / 1024 ** 3).toFixed(1)}G`,
-      },
-      disk,
-      uptime: { seconds: Math.floor(os.uptime()) },
-    };
-    systemMetricsCache.data = data;
-    systemMetricsCache.ts = Date.now();
-    systemMetricsCache.promise = null;
-    return data;
-  })().catch((error) => {
-    systemMetricsCache.promise = null;
-    throw error;
-  });
-
-  return systemMetricsCache.promise;
 }
 
 function getClientIp(req) {
@@ -4856,6 +4956,8 @@ async function start() {
   }, 60 * 1000).unref();
 
   const server = app.listen(PORT, () => {
+    sampleCpuPercent();
+    setInterval(sampleCpuPercent, 2000).unref();
     const conn = store.connectionInfo;
     runtimeLog.push({
       jobKey: "",

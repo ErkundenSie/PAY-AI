@@ -430,6 +430,34 @@
         margin-bottom: 0;
       }
 
+      .dashboard-primary-stats .stat-card {
+        min-height: 148px;
+      }
+
+      .dashboard-stat-track {
+        height: 8px;
+        overflow: hidden;
+        border-radius: var(--radius-pill);
+        background: var(--surface-hover);
+        margin-top: 12px;
+      }
+
+      .dashboard-stat-fill {
+        width: 0;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--primary);
+        transition: width 0.2s ease;
+      }
+
+      .dashboard-stat-fill.warning {
+        background: var(--warning);
+      }
+
+      .dashboard-stat-fill.danger {
+        background: var(--error);
+      }
+
       .dashboard-business-panel {
         margin-top: 0;
       }
@@ -461,16 +489,16 @@
       }
 
       .dashboard-chart-panel {
-        min-height: 190px;
+        min-height: 0;
       }
 
       .dashboard-task-track {
         display: flex;
-        height: 12px;
+        height: 8px;
         overflow: hidden;
         border-radius: var(--radius-pill);
         background: var(--surface-hover);
-        margin: 24px 0 18px;
+        margin: 12px 0 12px;
       }
 
       .dashboard-task-segment {
@@ -510,42 +538,8 @@
         font-variant-numeric: tabular-nums;
       }
 
-      .dashboard-resource-list {
-        display: grid;
-        gap: 18px;
-        margin-top: 18px;
-      }
-
-      .dashboard-resource-row {
-        display: grid;
-        grid-template-columns: 48px minmax(0, 1fr) 42px;
-        align-items: center;
-        gap: var(--space-sm);
-        font-size: 13px;
-        color: var(--text-secondary);
-      }
-
-      .dashboard-resource-track {
-        height: 8px;
-        overflow: hidden;
-        border-radius: var(--radius-pill);
-        background: var(--surface-hover);
-      }
-
-      .dashboard-resource-fill {
-        width: 0;
-        height: 100%;
-        border-radius: inherit;
-        background: var(--primary);
-        transition: width 0.2s ease;
-      }
-
-      .dashboard-resource-fill.warning {
-        background: var(--warning);
-      }
-
-      .dashboard-resource-fill.danger {
-        background: var(--error);
+      .dashboard-plan-legend {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
       }
 
       #browser_pool_summary_stats {
@@ -3322,6 +3316,9 @@
               id="stat_cpu_meta"
               style="font-size: 13px; color: var(--text-dim)"
             ></div>
+            <div class="dashboard-stat-track" aria-hidden="true">
+              <div id="dashboard_cpu_bar" class="dashboard-stat-fill"></div>
+            </div>
           </div>
           <div class="stat-card">
             <span class="stat-label">内存占用率</span>
@@ -3332,6 +3329,9 @@
             >
               0.0G/0.0G
             </div>
+            <div class="dashboard-stat-track" aria-hidden="true">
+              <div id="dashboard_memory_bar" class="dashboard-stat-fill"></div>
+            </div>
           </div>
           <div class="stat-card">
             <span class="stat-label">硬盘占用率</span>
@@ -3341,6 +3341,9 @@
               style="font-size: 13px; color: var(--text-dim)"
             >
               0.0G/0.0G
+            </div>
+            <div class="dashboard-stat-track" aria-hidden="true">
+              <div id="dashboard_disk_bar" class="dashboard-stat-fill"></div>
             </div>
           </div>
           <div class="stat-card">
@@ -3394,37 +3397,59 @@
             </div>
           </div>
           <div class="panel dashboard-chart-panel">
-            <h2 class="panel-title">系统资源</h2>
-            <div class="dashboard-resource-list">
-              <div class="dashboard-resource-row">
-                <span>CPU</span>
-                <div class="dashboard-resource-track">
-                  <div
-                    id="dashboard_cpu_bar"
-                    class="dashboard-resource-fill"
-                  ></div>
-                </div>
-                <strong id="dashboard_cpu_value">0%</strong>
+            <h2 class="panel-title">充值类型</h2>
+            <div class="dashboard-task-track" aria-label="充值类型分布">
+              <span
+                id="dashboard_plan_plus_bar"
+                class="dashboard-task-segment dashboard-task-running"
+              ></span>
+              <span
+                id="dashboard_plan_pro_bar"
+                class="dashboard-task-segment"
+                style="background: #8b5cf6"
+              ></span>
+              <span
+                id="dashboard_plan_credits_bar"
+                class="dashboard-task-segment"
+                style="background: #0f766e"
+              ></span>
+              <span
+                id="dashboard_plan_other_bar"
+                class="dashboard-task-segment dashboard-task-failed"
+              ></span>
+            </div>
+            <div class="dashboard-chart-legend dashboard-plan-legend">
+              <div class="dashboard-chart-legend-item">
+                <span>Plus</span>
+                <strong
+                  id="dashboard_plan_plus"
+                  class="dashboard-chart-legend-value"
+                  >0</strong
+                >
               </div>
-              <div class="dashboard-resource-row">
-                <span>内存</span>
-                <div class="dashboard-resource-track">
-                  <div
-                    id="dashboard_memory_bar"
-                    class="dashboard-resource-fill"
-                  ></div>
-                </div>
-                <strong id="dashboard_memory_value">0%</strong>
+              <div class="dashboard-chart-legend-item">
+                <span>Pro</span>
+                <strong
+                  id="dashboard_plan_pro"
+                  class="dashboard-chart-legend-value"
+                  >0</strong
+                >
               </div>
-              <div class="dashboard-resource-row">
-                <span>硬盘</span>
-                <div class="dashboard-resource-track">
-                  <div
-                    id="dashboard_disk_bar"
-                    class="dashboard-resource-fill"
-                  ></div>
-                </div>
-                <strong id="dashboard_disk_value">0%</strong>
+              <div class="dashboard-chart-legend-item">
+                <span>Codex</span>
+                <strong
+                  id="dashboard_plan_credits"
+                  class="dashboard-chart-legend-value"
+                  >0</strong
+                >
+              </div>
+              <div class="dashboard-chart-legend-item">
+                <span>其他</span>
+                <strong
+                  id="dashboard_plan_other"
+                  class="dashboard-chart-legend-value"
+                  >0</strong
+                >
               </div>
             </div>
           </div>

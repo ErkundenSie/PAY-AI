@@ -3206,6 +3206,25 @@
           setTaskSegment("dashboard_task_running_bar", taskRunning);
           setTaskSegment("dashboard_task_failed_bar", taskFailed);
 
+          const planPlus = Math.max(0, Number(data.stats?.plan_plus || 0));
+          const planPro = Math.max(0, Number(data.stats?.plan_pro || 0));
+          const planCredits = Math.max(0, Number(data.stats?.plan_credits || 0));
+          const planOther = Math.max(0, Number(data.stats?.plan_other || 0));
+          const planDenominator = Math.max(
+            planPlus + planPro + planCredits + planOther,
+            1,
+          );
+          const setPlanSegment = (id, value) =>
+            setStyleById(id, "width", `${(value / planDenominator) * 100}%`);
+          setTextById("dashboard_plan_plus", planPlus);
+          setTextById("dashboard_plan_pro", planPro);
+          setTextById("dashboard_plan_credits", planCredits);
+          setTextById("dashboard_plan_other", planOther);
+          setPlanSegment("dashboard_plan_plus_bar", planPlus);
+          setPlanSegment("dashboard_plan_pro_bar", planPro);
+          setPlanSegment("dashboard_plan_credits_bar", planCredits);
+          setPlanSegment("dashboard_plan_other_bar", planOther);
+
           [
             ["cpu", Number(data.runtime?.system?.cpu?.percent || 0)],
             ["memory", Number(data.runtime?.system?.memory?.percent || 0)],
@@ -3218,19 +3237,23 @@
               bar.classList.toggle("warning", percent >= 70 && percent < 90);
               bar.classList.toggle("danger", percent >= 90);
             }
-            setTextById(`dashboard_${name}_value`, `${percent}%`);
           });
           decorateDashboardCards();
 
           if (isInitial) {
             applySystemConfigFromData(data);
             loadCardPoolList();
+            lucide.createIcons();
           }
 
           window.__adminRuntime = data.runtime || { active_activation_jobs: 0 };
           if (!isInitial) {
             lastMaintenanceModeValue = Boolean(data.config.maintenance_mode);
             updateMaintenanceModeUI(data.config, window.__adminRuntime);
+          }
+
+          if (!isInitial) {
+            return;
           }
 
           const logsPage = document.getElementById("logs");
@@ -3246,8 +3269,6 @@
               console.error("Failed to load CDK list in loadData", cdkError);
             }
           }
-
-          lucide.createIcons();
         } catch (error) {
           console.error("Failed to load data", error);
         }
