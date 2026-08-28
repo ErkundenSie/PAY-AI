@@ -30,6 +30,7 @@ function registerAdminAssetRoutes(app, deps) {
         page: req.query.page,
         pageSize: req.query.pageSize || req.query.page_size,
         groupId: req.query.group_id ?? req.query.groupId,
+        keyword: req.query.q || req.query.keyword,
       });
       res.json({
         success: true,
@@ -40,6 +41,7 @@ function registerAdminAssetRoutes(app, deps) {
         stats: result.stats || {
           total: 0,
           active: 0,
+          paused: 0,
           cooldown: 0,
           exhausted: 0,
         },
@@ -137,6 +139,81 @@ function registerAdminAssetRoutes(app, deps) {
         await ensureStoreReady();
         await store.deleteCardGroup(req.params.id);
         res.json({ success: true, message: "分组已删除" });
+      } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+      }
+    },
+  );
+
+  app.post(
+    "/api/admin/cards/batch-delete",
+    requireSecondaryAuth,
+    async (req, res) => {
+      try {
+        await ensureStoreReady();
+        const cardIds = req.body?.cardIds || req.body?.card_ids || [];
+        const result = await store.deleteCardsByIds(cardIds);
+        auditAdminAction(req, "cards_batch_deleted", `删除 ${result.deleted} 张卡`);
+        res.json({ success: true, ...result, message: `已删除 ${result.deleted} 张卡` });
+      } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+      }
+    },
+  );
+
+  app.post(
+    "/api/admin/cards/pause",
+    requireSecondaryAuth,
+    async (req, res) => {
+      try {
+        await ensureStoreReady();
+        const paused = req.body?.paused !== false && req.body?.paused !== 0;
+        const result = await store.setCardsPaused({
+          cardIds: req.body?.cardIds || req.body?.card_ids || [],
+          paused,
+        });
+        auditAdminAction(
+          req,
+          paused ? "cards_paused" : "cards_resumed",
+          `${paused ? "暂停" : "恢复"} ${result.updated} 张卡`,
+        );
+        res.json({
+          success: true,
+          ...result,
+          message: paused
+            ? `已暂停 ${result.updated} 张卡`
+            : `已恢复 ${result.updated} 张卡`,
+        });
+      } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+      }
+    },
+  );
+
+  app.post(
+    "/api/admin/cards/max-usage",
+    requireSecondaryAuth,
+    async (req, res) => {
+      try {
+        await ensureStoreReady();
+        const result = await store.setCardsMaxUsageCount({
+          cardIds: req.body?.cardIds || req.body?.card_ids || [],
+          maxUsageCount:
+            req.body?.maxUsageCount ?? req.body?.max_usage_count ?? null,
+        });
+        auditAdminAction(
+          req,
+          "cards_max_usage_updated",
+          `设置次数上限 ${result.max_usage_count == null ? "不限制" : result.max_usage_count}`,
+        );
+        res.json({
+          success: true,
+          ...result,
+          message:
+            result.max_usage_count == null
+              ? "已取消使用次数上限"
+              : `已设置最多使用 ${result.max_usage_count} 次`,
+        });
       } catch (error) {
         res.status(400).json({ success: false, message: error.message });
       }

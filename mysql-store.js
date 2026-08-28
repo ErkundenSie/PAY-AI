@@ -27,6 +27,7 @@ const {
   PLAN_NAME_MAP,
   isCreditsPlan,
   listCheckoutPlans,
+  getCheckoutPlanNameMap,
   normalizeCreditQuantity,
   resolveCreditQuantity,
   resolvePlanName,
@@ -675,6 +676,11 @@ async function ensureLegacyColumns() {
     "card_assets",
     "card_number_hash",
     "CHAR(64) NOT NULL DEFAULT ''",
+  );
+  await ensureColumn(
+    "card_assets",
+    "max_usage_count",
+    "INT NULL DEFAULT NULL COMMENT '成功支付次数上限，空为不限制'",
   );
 
   await ensureColumn("cdk_codes", "is_active", "TINYINT(1) NOT NULL DEFAULT 1");
@@ -2063,6 +2069,10 @@ function mapCardListRow(row) {
     bound_address: addressParts.join(", "),
     is_active: Number(row.is_active || 0),
     usage_count: Number(row.usage_count || 0),
+    max_usage_count:
+      row.max_usage_count == null || row.max_usage_count === ""
+        ? null
+        : Number(row.max_usage_count),
     last_used_at: row.last_used_at || null,
     status: row.status || "正常",
     cooldown_until: row.cooldown_until || null,
@@ -2071,10 +2081,112 @@ function mapCardListRow(row) {
   };
 }
 
+function normalizeCardIds(cardIds = []) {
+  return [
+    ...new Set(
+      (Array.isArray(cardIds) ? cardIds : [])
+        .map((item) => Number(item))
+        .filter((item) => Number.isInteger(item) && item > 0),
+    ),
+  ];
+}
+
+function normalizeMaxUsageCount(value) {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.min(9999, Math.floor(parsed));
+}
+
+function buildCardAvailabilitySql(alias = "") {
+  const prefix = alias ? `${alias}.` : "";
+  return `${prefix}is_active = 1
+               AND ${prefix}status = '正常'
+               AND (${prefix}cooldown_until IS NULL OR ${prefix}cooldown_until < NOW())
+               AND (${prefix}max_usage_count IS NULL OR ${prefix}usage_count < ${prefix}max_usage_count)`;
+}
+
+async function deleteCardsByIds(cardIds = []) {
+  const ids = normalizeCardIds(cardIds);
+  if (!ids.length) {
+    throw new Error("请选择要删除的银行卡");
+  }
+  const placeholders = ids.map(() => "?").join(", ");
+  const result = await runExecute(
+    `DELETE FROM card_assets WHERE id IN (${placeholders})`,
+    ids,
+  );
+  return { deleted: Number(result.affectedRows || 0) };
+}
+
+async function setCardsPaused({ cardIds = [], paused = true } = {}) {
+  const ids = normalizeCardIds(cardIds);
+  if (!ids.length) {
+    throw new Error("请选择要操作的银行卡");
+  }
+  const placeholders = ids.map(() => "?").join(", ");
+  if (paused) {
+    const result = await runExecute(
+      `UPDATE card_assets
+           SET is_active = 0,
+               status = '暂停',
+               in_use = 0,
+               locked_at = NULL,
+               locked_by = NULL
+           WHERE id IN (${placeholders})
+             AND status <> '已报废'`,
+      ids,
+    );
+    return { updated: Number(result.affectedRows || 0), paused: true };
+  }
+  const result = await runExecute(
+    `UPDATE card_assets
+         SET is_active = 1,
+             status = '正常'
+         WHERE id IN (${placeholders})
+           AND status = '暂停'`,
+    ids,
+  );
+  return { updated: Number(result.affectedRows || 0), paused: false };
+}
+
+async function setCardsMaxUsageCount({ cardIds = [], maxUsageCount } = {}) {
+  const ids = normalizeCardIds(cardIds);
+  if (!ids.length) {
+    throw new Error("请选择要设置的银行卡");
+  }
+  const maxCount = normalizeMaxUsageCount(maxUsageCount);
+  const placeholders = ids.map(() => "?").join(", ");
+  await runExecute(
+    `UPDATE card_assets
+         SET max_usage_count = ?
+         WHERE id IN (${placeholders})`,
+    [maxCount, ...ids],
+  );
+  let paused = 0;
+  if (maxCount != null) {
+    const result = await runExecute(
+      `UPDATE card_assets
+           SET is_active = 0,
+               status = '暂停',
+               in_use = 0,
+               locked_at = NULL,
+               locked_by = NULL
+           WHERE id IN (${placeholders})
+             AND status = '正常'
+             AND usage_count >= ?`,
+      [...ids, maxCount],
+    );
+    paused = Number(result.affectedRows || 0);
+  }
+  return { updated: ids.length, max_usage_count: maxCount, paused };
+}
+
 async function listAdminCards(options = {}) {
   const pageSize = Math.max(1, Math.min(Number(options.pageSize) || 20, 100));
   const requestedPage = Math.max(1, Number(options.page) || 1);
   const groupId = options.groupId ?? options.group_id ?? "all";
+  const keyword = String(options.keyword || options.q || "").trim();
   const where = [];
   const params = [];
 
@@ -2087,6 +2199,17 @@ async function listAdminCards(options = {}) {
     }
   }
 
+  const digits = digitsOnly(keyword);
+  if (digits) {
+    if (digits.length <= 4) {
+      where.push("c.card_last4 LIKE ?");
+      params.push(`%${digits}%`);
+    } else {
+      where.push("(c.card_last4 = ? OR c.card_number_hash = ?)");
+      params.push(digits.slice(-4), hashCardNumber(digits));
+    }
+  }
+
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const [countRows, statsRows] = await Promise.all([
     runQuery(
@@ -2096,12 +2219,11 @@ async function listAdminCards(options = {}) {
     runQuery(
       `SELECT
               COUNT(*) AS total,
-              COALESCE(SUM(
-                is_active = 0 OR status = '已报废'
-              ), 0) AS exhausted,
+              COALESCE(SUM(status = '已报废'), 0) AS exhausted,
+              COALESCE(SUM(status = '暂停'), 0) AS paused,
               COALESCE(SUM(
                 is_active = 1
-                AND (status IS NULL OR status <> '已报废')
+                AND status = '正常'
                 AND (
                   status = '冷却中'
                   OR (cooldown_until IS NOT NULL AND cooldown_until > NOW())
@@ -2117,14 +2239,15 @@ async function listAdminCards(options = {}) {
   const stats = statsRows[0] || {};
   const allTotal = Number(stats.total || 0);
   const exhausted = Number(stats.exhausted || 0);
+  const paused = Number(stats.paused || 0);
   const cooldown = Number(stats.cooldown || 0);
-  const active = Math.max(0, allTotal - exhausted - cooldown);
+  const active = Math.max(0, allTotal - exhausted - paused - cooldown);
 
   const rows = await runQuery(
     `SELECT c.id, c.card_number, c.card_cvc, c.card_expiry, c.card_holder, c.card_last4,
                 c.payment_holder_name, c.payment_address_line1, c.payment_address_city,
                 c.payment_address_state, c.payment_address_postal,
-                c.is_active, c.usage_count, c.last_used_at, c.status, c.cooldown_until,
+                c.is_active, c.usage_count, c.max_usage_count, c.last_used_at, c.status, c.cooldown_until,
                 c.group_id, g.name AS group_name
          FROM card_assets c
          LEFT JOIN card_groups g ON g.id = c.group_id
@@ -2142,6 +2265,7 @@ async function listAdminCards(options = {}) {
     stats: {
       total: allTotal,
       active,
+      paused,
       cooldown,
       exhausted,
     },
@@ -2153,8 +2277,9 @@ async function listAdminCardOptions() {
     `SELECT id, card_number, card_last4, card_holder, payment_holder_name, is_active, status, cooldown_until
          FROM card_assets
          WHERE is_active = 1
-           AND (status IS NULL OR status = '' OR status = '正常')
+           AND status = '正常'
            AND (cooldown_until IS NULL OR cooldown_until <= NOW())
+           AND (max_usage_count IS NULL OR usage_count < max_usage_count)
          ORDER BY sort_order ASC, id ASC
          LIMIT 200`,
   );
@@ -4759,10 +4884,8 @@ async function hasAvailableCard(groupId = null) {
   const rows = await runQuery(
     `SELECT id
          FROM card_assets
-         WHERE is_active = 1
-           AND in_use = 0
-           AND status = '正常'
-           AND (cooldown_until IS NULL OR cooldown_until < NOW())${groupFilter.sql}
+         WHERE ${buildCardAvailabilitySql()}
+           AND in_use = 0${groupFilter.sql}
          LIMIT 1`,
     groupFilter.params,
   );
@@ -4808,7 +4931,7 @@ async function reserveCardById(cardId, ownerKey) {
   if (!id) return null;
   return withTransaction(async (connection) => {
     const [rows] = await connection.query(
-      `SELECT id, card_number, card_expiry, card_cvc, card_holder, usage_count, status, is_active
+      `SELECT id, card_number, card_expiry, card_cvc, card_holder, usage_count, max_usage_count, status, is_active
              FROM card_assets
              WHERE id = ?
              LIMIT 1
@@ -4817,7 +4940,13 @@ async function reserveCardById(cardId, ownerKey) {
     );
     if (!rows.length) return null;
     const row = rows[0];
-    if (!Number(row.is_active) || row.status !== "正常") {
+    const maxUsage =
+      row.max_usage_count == null ? null : Number(row.max_usage_count);
+    if (
+      !Number(row.is_active) ||
+      row.status !== "正常" ||
+      (maxUsage != null && Number(row.usage_count || 0) >= maxUsage)
+    ) {
       throw new Error("指定卡片当前不可用");
     }
     await connection.query(
@@ -4845,10 +4974,8 @@ async function reserveCard(ownerKey, groupId = null) {
     const [rows] = await connection.query(
       `SELECT id, card_number, card_expiry, card_cvc, card_holder, usage_count
              FROM card_assets
-             WHERE is_active = 1
-               AND in_use = 0
-               AND status = '正常'
-               AND (cooldown_until IS NULL OR cooldown_until < NOW())${groupFilter.sql}
+             WHERE ${buildCardAvailabilitySql()}
+               AND in_use = 0${groupFilter.sql}
              ORDER BY usage_count ASC, COALESCE(last_used_at, '1970-01-01') ASC, id ASC
              LIMIT 1
              FOR UPDATE SKIP LOCKED`,
@@ -4935,7 +5062,7 @@ async function recordCardUsage(cardId) {
   return withTransaction(async (connection) => {
     // 获取当前卡片状态
     const [rows] = await connection.query(
-      `SELECT daily_usage_count, daily_usage_reset_at
+      `SELECT daily_usage_count, daily_usage_reset_at, usage_count, max_usage_count, status
              FROM card_assets
              WHERE id = ?
              FOR UPDATE`,
@@ -4943,7 +5070,7 @@ async function recordCardUsage(cardId) {
     );
 
     if (!rows.length) {
-      return { dailyUsageCount: 0, cooledDown: false };
+      return { dailyUsageCount: 0, cooledDown: false, paused: false };
     }
 
     const row = rows[0];
@@ -4992,7 +5119,29 @@ async function recordCardUsage(cardId) {
       cooledDown = true;
     }
 
-    return { dailyUsageCount: newDailyCount, cooledDown };
+    const newUsageCount = Number(row.usage_count || 0) + 1;
+    const maxUsage =
+      row.max_usage_count == null ? null : Number(row.max_usage_count);
+    let paused = false;
+    if (
+      maxUsage != null &&
+      newUsageCount >= maxUsage &&
+      row.status !== "已报废"
+    ) {
+      await connection.query(
+        `UPDATE card_assets
+                 SET is_active = 0,
+                     status = '暂停',
+                     in_use = 0,
+                     locked_at = NULL,
+                     locked_by = NULL
+                 WHERE id = ?`,
+        [Number(cardId)],
+      );
+      paused = true;
+    }
+
+    return { dailyUsageCount: newDailyCount, cooledDown, paused };
   });
 }
 
@@ -5517,6 +5666,9 @@ module.exports = {
   recordCardUsage,
   bindCardPaymentProfile,
   importCards,
+  deleteCardsByIds,
+  setCardsPaused,
+  setCardsMaxUsageCount,
   getPaymentRegion,
   setPaymentRegion,
   createBillingRecord,
@@ -5532,6 +5684,7 @@ module.exports = {
   resolveCreditQuantity,
   normalizeCreditQuantity,
   listCheckoutPlans,
+  getCheckoutPlanNameMap,
   CREDIT_QUANTITY_MIN,
   CREDIT_QUANTITY_STEP,
   CREDIT_QUANTITY_PRESETS,

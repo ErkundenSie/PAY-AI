@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS card_assets (
     card_last4 CHAR(4) NOT NULL DEFAULT '',
     card_number_hash CHAR(64) NOT NULL DEFAULT '',
     usage_count INT NOT NULL DEFAULT 0,
+    max_usage_count INT NULL DEFAULT NULL COMMENT '成功支付次数上限，空为不限制',
     sort_order INT NOT NULL DEFAULT 0,
     is_active TINYINT (1) NOT NULL DEFAULT 1,
     status VARCHAR(32) NOT NULL DEFAULT '正常',

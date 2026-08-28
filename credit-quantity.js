@@ -53,6 +53,12 @@ function listCheckoutPlans() {
   return CHECKOUT_PLANS.map((plan) => ({ ...plan }));
 }
 
+function getCheckoutPlanNameMap() {
+  return Object.fromEntries(
+    CHECKOUT_PLANS.map((plan) => [plan.id, resolvePlanName(plan.id)]),
+  );
+}
+
 function resolvePlanName(planType) {
   if (isCreditsPlan(planType)) {
     return PLAN_NAME_MAP.credits;
@@ -85,6 +91,7 @@ module.exports = {
   normalizeCreditQuantity,
   resolveCreditQuantity,
   listCheckoutPlans,
+  getCheckoutPlanNameMap,
   resolvePlanName,
   getPlanTypeLabel,
 };

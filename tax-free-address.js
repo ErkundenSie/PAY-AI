@@ -6,6 +6,9 @@ const {
   generateRandomUsTaxFreeAddress,
   normalizeUsStateName,
 } = require("./public/us-tax-free-address");
+const {
+  generateNominatimUsTaxFreeAddress,
+} = require("./us-tax-free-nominatim");
 
 // ─── Validation ────────────────────────────────────────────────────────────────
 
@@ -207,15 +210,26 @@ async function deleteAddress(id) {
 // ─── US Tax-Free Address Generator ───────────────────────────────────────────
 
 /**
- * 批量生成美国免税地址并写入地址池
+ * 批量生成美国免税地址并写入地址池。
+ * 优先用 Nominatim 反查真实街道；全部失败时回退到本地模板变形。
  * @param {number} count - 生成数量 (1-100)
- * @returns {Promise<{ success: boolean, count: number, ids: number[], error?: string }>}
+ * @returns {Promise<{ success: boolean, count: number, ids: number[], source: string, error?: string }>}
  */
 async function batchGenerateUsAddresses(count = 10) {
   const n = Math.min(Math.max(Number(count) || 10, 1), 100);
   const ids = [];
+  let nominatimCount = 0;
+  let fallbackCount = 0;
+
   for (let i = 0; i < n; i += 1) {
-    const addr = generateRandomUsTaxFreeAddress();
+    let addr = null;
+    try {
+      addr = await generateNominatimUsTaxFreeAddress();
+      nominatimCount += 1;
+    } catch (_) {
+      addr = generateRandomUsTaxFreeAddress();
+      fallbackCount += 1;
+    }
     const result = await createAddress({
       region: "US",
       line1: addr.line1,
@@ -228,7 +242,15 @@ async function batchGenerateUsAddresses(count = 10) {
       ids.push(result.id);
     }
   }
-  return { success: true, count: ids.length, ids };
+
+  return {
+    success: true,
+    count: ids.length,
+    ids,
+    source: nominatimCount ? "nominatim" : "template",
+    nominatim_count: nominatimCount,
+    fallback_count: fallbackCount,
+  };
 }
 
 /**

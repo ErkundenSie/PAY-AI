@@ -151,7 +151,7 @@ describe("admin asset routes", () => {
     const res = await request(
       app,
       "GET",
-      "/api/admin/cards?page=2&pageSize=20&group_id=none",
+      "/api/admin/cards?page=2&pageSize=20&group_id=none&q=4242",
     );
     expect(res.status).toBe(200);
     expect(res.json.success).toBe(true);
@@ -163,7 +163,51 @@ describe("admin asset routes", () => {
       page: "2",
       pageSize: "20",
       groupId: "none",
+      keyword: "4242",
     });
+  });
+
+  it("batch deletes, pauses, and sets card usage limits", async () => {
+    const calls = [];
+    const store = {
+      deleteCardsByIds: async (cardIds) => {
+        calls.push(["delete", cardIds]);
+        return { deleted: cardIds.length };
+      },
+      setCardsPaused: async (options) => {
+        calls.push(["pause", options]);
+        return { updated: options.cardIds.length, paused: options.paused };
+      },
+      setCardsMaxUsageCount: async (options) => {
+        calls.push(["limit", options]);
+        return {
+          updated: options.cardIds.length,
+          max_usage_count: options.maxUsageCount,
+          paused: 0,
+        };
+      },
+    };
+    const app = createApp(store, () => []);
+    const deleted = await request(app, "POST", "/api/admin/cards/batch-delete", {
+      cardIds: [1, 2],
+    });
+    expect(deleted.status).toBe(200);
+    expect(deleted.json.deleted).toBe(2);
+    const paused = await request(app, "POST", "/api/admin/cards/pause", {
+      cardIds: [3],
+      paused: true,
+    });
+    expect(paused.json.paused).toBe(true);
+    const limited = await request(app, "POST", "/api/admin/cards/max-usage", {
+      cardIds: [4],
+      maxUsageCount: 5,
+    });
+    expect(limited.json.max_usage_count).toBe(5);
+    expect(calls).toEqual([
+      ["delete", [1, 2]],
+      ["pause", { cardIds: [3], paused: true }],
+      ["limit", { cardIds: [4], maxUsageCount: 5 }],
+    ]);
   });
 
   it("lists card options for checkout debug", async () => {

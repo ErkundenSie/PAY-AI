@@ -7,6 +7,7 @@ const {
   resolveCreditQuantity,
   resolvePlanName,
   listCheckoutPlans,
+  getCheckoutPlanNameMap,
   getPlanTypeLabel,
 } = require("../credit-quantity");
 
@@ -39,5 +40,11 @@ describe("credit quantity", () => {
     expect(resolvePlanName("credits_500")).toBe("platformbusiness_usage_based");
     expect(getPlanTypeLabel("plus")).toBe("ChatGPT Plus");
     expect(getPlanTypeLabel("credits_500")).toBe("Codex 500 点");
+    expect(Object.keys(getCheckoutPlanNameMap())).toEqual([
+      "plus",
+      "pro_5x",
+      "pro_20x",
+      "credits",
+    ]);
   });
 });

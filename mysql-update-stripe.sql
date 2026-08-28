@@ -8,7 +8,8 @@ ALTER TABLE card_assets
     ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMP NULL DEFAULT NULL COMMENT '最后使用时间' AFTER locked_by,
     ADD COLUMN IF NOT EXISTS daily_usage_count INT NOT NULL DEFAULT 0 COMMENT '24h 内使用次数' AFTER last_used_at,
     ADD COLUMN IF NOT EXISTS daily_usage_reset_at TIMESTAMP NULL DEFAULT NULL COMMENT '24h 计数重置时间' AFTER daily_usage_count,
-    ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMP NULL DEFAULT NULL COMMENT '冷却截止时间' AFTER daily_usage_reset_at;
+    ADD COLUMN IF NOT EXISTS cooldown_until TIMESTAMP NULL DEFAULT NULL COMMENT '冷却截止时间' AFTER daily_usage_reset_at,
+    ADD COLUMN IF NOT EXISTS max_usage_count INT NULL DEFAULT NULL COMMENT '成功支付次数上限，空为不限制' AFTER usage_count;
 
 -- 2. cdk_codes 扩展字段：套餐类型绑定
 ALTER TABLE cdk_codes

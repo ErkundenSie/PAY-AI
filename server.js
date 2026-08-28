@@ -3140,7 +3140,14 @@ app.get("/api/admin/checkout/plans", async (req, res) => {
     const config = REGION_CONFIG[regionCode] || REGION_CONFIG.PH;
     res.json({
       success: true,
-      plans: store.PLAN_NAME_MAP,
+      plans: store.getCheckoutPlanNameMap
+        ? store.getCheckoutPlanNameMap()
+        : {
+            plus: store.resolvePlanName("plus"),
+            pro_5x: store.resolvePlanName("pro_5x"),
+            pro_20x: store.resolvePlanName("pro_20x"),
+            credits: store.resolvePlanName("credits"),
+          },
       resolved: {
         plus: store.resolvePlanName("plus"),
         pro_5x: store.resolvePlanName("pro_5x"),

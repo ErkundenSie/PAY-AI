@@ -25,6 +25,10 @@
         cdk_deleted: "删除 CDK",
         cards_imported: "导入银行卡",
         card_deleted: "删除银行卡",
+        cards_batch_deleted: "批量删除银行卡",
+        cards_paused: "暂停银行卡",
+        cards_resumed: "恢复银行卡",
+        cards_max_usage_updated: "设置银行卡次数上限",
         session_exported: "导出 Session",
         secondary_failed: "二级密码失败",
         secondary_success: "二级密码成功",
@@ -43,6 +47,7 @@
       let cdkTotal = 0;
       let cdkListRequestSeq = 0;
       let cdkSearchTimer = null;
+      let cardSearchTimer = null;
       let productPool = [];
       let poolEmailsList = [];
       const selectedItems = {
@@ -60,6 +65,7 @@
       const tableSearch = {
         cdk: "",
         product: "",
+        card_number: "",
       };
       let cardGroupList = [];
       let cardGroupFilter = "all";
@@ -1685,26 +1691,18 @@
           ? task.screenshots.length
           : 0;
         const videoCount = Array.isArray(task?.videos) ? task.videos.length : 0;
-        const shotBtn =
-          screenshotCount > 0
-            ? `<button type="button" class="btn btn-primary" data-view-screenshots="${escapeHtml(task.id)}">看截图</button>`
-            : "";
-        const videoBtn =
-          videoCount > 0
-            ? `<button type="button" class="btn btn-secondary" data-view-video="${escapeHtml(task.id)}">看录像</button>`
-            : "";
-        if (shotBtn || videoBtn) {
-          return `<div class="task-media-actions">${shotBtn}${videoBtn}</div>`;
-        }
         const status = String(task?.status || "").toLowerCase();
-        if (
+        const running =
           status === "running" ||
           status === "retry" ||
-          status === "processing"
-        ) {
-          return '<span style="color:var(--text-dim); font-size:12px;">任务进行中，结束后可查看</span>';
-        }
-        return '<span style="color:var(--text-dim); font-size:12px;">暂无截图/录像</span>';
+          status === "processing";
+        const shotBtn = screenshotCount
+          ? `<button type="button" class="btn-icon" title="查看截图 (${screenshotCount})" data-view-screenshots="${escapeHtml(task.id)}"><i data-lucide="image"></i></button>`
+          : `<button type="button" class="btn-icon is-disabled" title="${running ? "任务进行中，结束后可查看截图" : "暂无截图"}" disabled><i data-lucide="image"></i></button>`;
+        const videoBtn = videoCount
+          ? `<button type="button" class="btn-icon" title="查看录像 (${videoCount})" data-view-video="${escapeHtml(task.id)}"><i data-lucide="clapperboard"></i></button>`
+          : `<button type="button" class="btn-icon is-disabled" title="${running ? "任务进行中，结束后可查看录像" : "暂无录像"}" disabled><i data-lucide="clapperboard"></i></button>`;
+        return `<div class="task-media-actions">${shotBtn}${videoBtn}</div>`;
       }
 
       function closeTaskDetailModal() {
@@ -1927,6 +1925,7 @@
           if (extraEl) {
             extraEl.innerHTML = extraHtml || "";
             extraEl.hidden = !extraHtml;
+            enhanceAssetSelects(extraEl);
           }
           overlay.classList.add("is-open");
           overlay.setAttribute("aria-hidden", "false");
@@ -1965,7 +1964,13 @@
       }
 
       document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && adminConfirmResolver) {
+        if (e.key !== "Escape") return;
+        if (document.querySelector(".ui-select.open, .ui-date.open, .filter-dropdown.open")) {
+          e.preventDefault();
+          closeFilterMenus();
+          return;
+        }
+        if (adminConfirmResolver) {
           e.preventDefault();
           closeAdminConfirm(false);
         }
@@ -2060,7 +2065,10 @@
         });
         ["type", "cdk", "account", "status"].forEach((key) => {
           const input = document.getElementById(`task_filter_${key}`);
-          if (input) input.value = taskLogFilters[key];
+          if (input) {
+            input.value = taskLogFilters[key];
+            if (input.tagName === "SELECT") syncUiSelect(input);
+          }
         });
         paginationState.log.page = 1;
         renderLogTable(window.__adminLogs || []);
@@ -2170,7 +2178,7 @@
 
       function closeFilterMenus() {
         document
-          .querySelectorAll(".filter-dropdown.open")
+          .querySelectorAll(".filter-dropdown.open, .ui-select.open, .ui-date.open")
           .forEach((dropdown) => dropdown.classList.remove("open"));
       }
 
@@ -2204,10 +2212,337 @@
       }
 
       document.addEventListener("click", (event) => {
-        if (!event.target.closest(".filter-dropdown")) {
+        if (
+          !event.target.closest(".filter-dropdown") &&
+          !event.target.closest(".ui-select") &&
+          !event.target.closest(".ui-date")
+        ) {
           closeFilterMenus();
         }
       });
+
+      function getSelectOptionLabel(option) {
+        return String(option?.textContent || option?.label || "").trim();
+      }
+
+      function syncUiSelect(select) {
+        const wrap = select?.closest(".ui-select");
+        if (!wrap) return;
+        const labelEl = wrap.querySelector(".ui-select-trigger span");
+        const menu = wrap.querySelector(".ui-select-menu");
+        if (!labelEl || !menu) return;
+        const selected = select.options[select.selectedIndex];
+        labelEl.textContent = selected
+          ? getSelectOptionLabel(selected)
+          : "";
+        const current = String(select.value ?? "");
+        menu.querySelectorAll(".ui-select-option").forEach((btn) => {
+          btn.classList.toggle(
+            "active",
+            String(btn.dataset.value ?? "") === current,
+          );
+        });
+      }
+
+      function rebuildUiSelectMenu(select) {
+        const wrap = select?.closest(".ui-select");
+        const menu = wrap?.querySelector(".ui-select-menu");
+        if (!menu) return;
+        menu.replaceChildren();
+        Array.from(select.options).forEach((option) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "ui-select-option";
+          btn.dataset.value = option.value;
+          btn.textContent = getSelectOptionLabel(option);
+          btn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (select.value !== option.value) {
+              select.value = option.value;
+              select.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+            syncUiSelect(select);
+            closeFilterMenus();
+          });
+          menu.appendChild(btn);
+        });
+        syncUiSelect(select);
+      }
+
+      function enhanceSelect(select) {
+        if (!select || select.dataset.uiSelect === "1") return;
+        const wrap = document.createElement("div");
+        wrap.className = "ui-select";
+        if (select.style.width) {
+          wrap.style.width = select.style.width;
+          wrap.classList.add("is-inline");
+        }
+        select.parentNode.insertBefore(wrap, select);
+        wrap.appendChild(select);
+        const trigger = document.createElement("button");
+        trigger.type = "button";
+        trigger.className = "ui-select-trigger";
+        trigger.setAttribute("aria-haspopup", "listbox");
+        const label = document.createElement("span");
+        const chevron = document.createElement("i");
+        chevron.setAttribute("data-lucide", "chevron-down");
+        trigger.append(label, chevron);
+        const menu = document.createElement("div");
+        menu.className = "ui-select-menu";
+        wrap.append(trigger, menu);
+        select.dataset.uiSelect = "1";
+        trigger.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const shouldOpen = !wrap.classList.contains("open");
+          closeFilterMenus();
+          if (shouldOpen) wrap.classList.add("open");
+        });
+        select.addEventListener("change", () => syncUiSelect(select));
+        const valueDesc = Object.getOwnPropertyDescriptor(
+          HTMLSelectElement.prototype,
+          "value",
+        );
+        if (valueDesc?.set && valueDesc?.get) {
+          Object.defineProperty(select, "value", {
+            configurable: true,
+            enumerable: valueDesc.enumerable,
+            get() {
+              return valueDesc.get.call(this);
+            },
+            set(next) {
+              valueDesc.set.call(this, next);
+              syncUiSelect(this);
+            },
+          });
+        }
+        const observer = new MutationObserver(() => rebuildUiSelectMenu(select));
+        observer.observe(select, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+        });
+        rebuildUiSelectMenu(select);
+      }
+
+      function enhanceAssetSelects(root = document) {
+        root
+          .querySelectorAll("select.asset-input")
+          .forEach((select) => enhanceSelect(select));
+        enhanceDateInputs(root);
+        if (typeof lucide !== "undefined") lucide.createIcons();
+      }
+
+      function padDatePart(value) {
+        return String(value).padStart(2, "0");
+      }
+
+      function formatDateInputValue(year, month, day) {
+        return `${year}-${padDatePart(month)}-${padDatePart(day)}`;
+      }
+
+      function parseDateInputValue(value) {
+        const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) return null;
+        const year = Number(match[1]);
+        const month = Number(match[2]);
+        const day = Number(match[3]);
+        const date = new Date(year, month - 1, day);
+        if (
+          date.getFullYear() !== year ||
+          date.getMonth() !== month - 1 ||
+          date.getDate() !== day
+        ) {
+          return null;
+        }
+        return date;
+      }
+
+      function formatDateTriggerLabel(value) {
+        const date = parseDateInputValue(value);
+        if (!date) return "年 / 月 / 日";
+        return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+      }
+
+      function syncUiDate(input) {
+        const wrap = input?.closest(".ui-date");
+        if (!wrap) return;
+        const labelEl = wrap.querySelector(".ui-date-trigger span");
+        const trigger = wrap.querySelector(".ui-date-trigger");
+        if (!labelEl || !trigger) return;
+        const value = String(input.value || "");
+        labelEl.textContent = formatDateTriggerLabel(value);
+        trigger.classList.toggle("is-empty", !value);
+      }
+
+      function renderUiDateMenu(input, viewDate) {
+        const wrap = input?.closest(".ui-date");
+        const menu = wrap?.querySelector(".ui-date-menu");
+        if (!menu) return;
+        const selected = parseDateInputValue(input.value);
+        const today = new Date();
+        const view = viewDate
+          ? new Date(viewDate.getFullYear(), viewDate.getMonth(), 1)
+          : new Date(
+              (selected || today).getFullYear(),
+              (selected || today).getMonth(),
+              1,
+            );
+        wrap._uiDateView = view;
+        const year = view.getFullYear();
+        const month = view.getMonth();
+        const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const prevDays = new Date(year, month, 0).getDate();
+        const weekdays = ["一", "二", "三", "四", "五", "六", "日"];
+        const cells = [];
+        for (let i = 0; i < 42; i += 1) {
+          const offset = i - firstWeekday + 1;
+          let cellYear = year;
+          let cellMonth = month + 1;
+          let cellDay = offset;
+          let outside = false;
+          if (offset < 1) {
+            cellMonth = month;
+            cellDay = prevDays + offset;
+            outside = true;
+            if (cellMonth < 1) {
+              cellMonth = 12;
+              cellYear -= 1;
+            }
+          } else if (offset > daysInMonth) {
+            cellMonth = month + 2;
+            cellDay = offset - daysInMonth;
+            outside = true;
+            if (cellMonth > 12) {
+              cellMonth = 1;
+              cellYear += 1;
+            }
+          }
+          const value = formatDateInputValue(cellYear, cellMonth, cellDay);
+          const isSelected = input.value === value;
+          const isToday =
+            today.getFullYear() === cellYear &&
+            today.getMonth() + 1 === cellMonth &&
+            today.getDate() === cellDay;
+          cells.push(
+            `<button type="button" class="ui-date-day${outside ? " is-outside" : ""}${isSelected ? " is-selected" : ""}${isToday ? " is-today" : ""}" data-date="${value}">${cellDay}</button>`,
+          );
+        }
+        menu.innerHTML = `
+          <div class="ui-date-head">
+            <button type="button" class="ui-date-nav" data-date-nav="prev" aria-label="上一月"><i data-lucide="chevron-left"></i></button>
+            <div class="ui-date-month">${year}年${padDatePart(month + 1)}月</div>
+            <button type="button" class="ui-date-nav" data-date-nav="next" aria-label="下一月"><i data-lucide="chevron-right"></i></button>
+          </div>
+          <div class="ui-date-week">${weekdays.map((day) => `<span>${day}</span>`).join("")}</div>
+          <div class="ui-date-grid">${cells.join("")}</div>
+          <div class="ui-date-foot">
+            <button type="button" data-date-action="clear">清除</button>
+            <button type="button" data-date-action="today">今天</button>
+          </div>
+        `;
+        if (typeof lucide !== "undefined") lucide.createIcons();
+      }
+
+      function setUiDateValue(input, value) {
+        if (input.value !== value) {
+          input.value = value;
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        syncUiDate(input);
+      }
+
+      function enhanceDateInput(input) {
+        if (!input || input.dataset.uiDate === "1") return;
+        const wrap = document.createElement("div");
+        wrap.className = "ui-date";
+        input.parentNode.insertBefore(wrap, input);
+        wrap.appendChild(input);
+        const trigger = document.createElement("button");
+        trigger.type = "button";
+        trigger.className = "ui-date-trigger is-empty";
+        trigger.setAttribute("aria-haspopup", "dialog");
+        const label = document.createElement("span");
+        const icon = document.createElement("i");
+        icon.setAttribute("data-lucide", "calendar");
+        trigger.append(label, icon);
+        const menu = document.createElement("div");
+        menu.className = "ui-date-menu";
+        wrap.append(trigger, menu);
+        input.dataset.uiDate = "1";
+        trigger.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const shouldOpen = !wrap.classList.contains("open");
+          closeFilterMenus();
+          if (!shouldOpen) return;
+          renderUiDateMenu(input, wrap._uiDateView || parseDateInputValue(input.value));
+          wrap.classList.add("open");
+        });
+        menu.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const nav = event.target.closest("[data-date-nav]");
+          if (nav) {
+            const view = wrap._uiDateView || new Date();
+            const next =
+              nav.dataset.dateNav === "prev"
+                ? new Date(view.getFullYear(), view.getMonth() - 1, 1)
+                : new Date(view.getFullYear(), view.getMonth() + 1, 1);
+            renderUiDateMenu(input, next);
+            return;
+          }
+          const action = event.target.closest("[data-date-action]");
+          if (action) {
+            if (action.dataset.dateAction === "clear") {
+              setUiDateValue(input, "");
+            } else {
+              const today = new Date();
+              setUiDateValue(
+                input,
+                formatDateInputValue(
+                  today.getFullYear(),
+                  today.getMonth() + 1,
+                  today.getDate(),
+                ),
+              );
+            }
+            closeFilterMenus();
+            return;
+          }
+          const day = event.target.closest("[data-date]");
+          if (!day) return;
+          setUiDateValue(input, day.dataset.date || "");
+          closeFilterMenus();
+        });
+        input.addEventListener("change", () => syncUiDate(input));
+        const valueDesc = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        );
+        if (valueDesc?.set && valueDesc?.get) {
+          Object.defineProperty(input, "value", {
+            configurable: true,
+            enumerable: valueDesc.enumerable,
+            get() {
+              return valueDesc.get.call(this);
+            },
+            set(next) {
+              valueDesc.set.call(this, next);
+              syncUiDate(this);
+            },
+          });
+        }
+        syncUiDate(input);
+      }
+
+      function enhanceDateInputs(root = document) {
+        root
+          .querySelectorAll('input[type="date"]')
+          .forEach((input) => enhanceDateInput(input));
+      }
 
       function changePage(stateKey, nextPage) {
         paginationState[stateKey].page = nextPage;
@@ -4219,7 +4554,13 @@
 
       let cardPoolList = [];
       let cardPoolTotal = 0;
-      let cardPoolStats = { total: 0, active: 0, cooldown: 0, exhausted: 0 };
+      let cardPoolStats = {
+        total: 0,
+        active: 0,
+        paused: 0,
+        cooldown: 0,
+        exhausted: 0,
+      };
       let cardPoolRequestSeq = 0;
       let selectedCardIds = new Set();
 
@@ -4283,6 +4624,17 @@
         loadCardPoolList().catch((error) => {
           console.error("Failed to load card pool", error);
         });
+      }
+
+      function handleCardNumberSearch(value) {
+        tableSearch.card_number = String(value || "").trim();
+        paginationState.card_assets.page = 1;
+        if (cardSearchTimer) clearTimeout(cardSearchTimer);
+        cardSearchTimer = setTimeout(() => {
+          loadCardPoolList().catch((error) => {
+            console.error("Failed to load card pool", error);
+          });
+        }, 250);
       }
 
       function handleCdkGroupFilter(value) {
@@ -4445,6 +4797,8 @@
             pageSize: String(pageSize),
             group_id: String(cardGroupFilter || "all"),
           });
+          const keyword = String(tableSearch.card_number || "").trim();
+          if (keyword) params.set("q", keyword);
           const res = await authFetch(`/api/admin/cards?${params.toString()}`);
           const data = await res.json();
           if (requestId !== cardPoolRequestSeq) return;
@@ -4457,6 +4811,7 @@
           cardPoolStats = data.stats || {
             total: cardPoolTotal,
             active: 0,
+            paused: 0,
             cooldown: 0,
             exhausted: 0,
           };
@@ -4486,6 +4841,10 @@
         document.getElementById("card_stat_active").textContent = Number(
           cardPoolStats.active || 0,
         );
+        const pausedEl = document.getElementById("card_stat_paused");
+        if (pausedEl) {
+          pausedEl.textContent = Number(cardPoolStats.paused || 0);
+        }
         document.getElementById("card_stat_cooldown").textContent = Number(
           cardPoolStats.cooldown || 0,
         );
@@ -4524,6 +4883,12 @@
             const paymentHolder = escapeHtml(card.payment_holder_name || "-");
             const boundAddress = escapeHtml(formatBoundAddress(card));
             const usageCount = Number(card.usage_count || 0);
+            const maxUsage =
+              card.max_usage_count == null || card.max_usage_count === ""
+                ? null
+                : Number(card.max_usage_count);
+            const usageLabel =
+              maxUsage == null ? `${usageCount} / 不限` : `${usageCount} / ${maxUsage}`;
             const lastUsed = card.last_used_at
               ? formatTimeShort(card.last_used_at)
               : "-";
@@ -4531,6 +4896,16 @@
             const checked = selectedCardIds.has(Number(card.id))
               ? "checked"
               : "";
+            const pauseAction =
+              String(card.status || "") === "已报废"
+                ? ""
+                : String(card.status || "") === "暂停" || Number(card.is_active) === 0
+                  ? `<button class="btn-delete" style="background:var(--success-soft);color:#047857;border-color:#a7f3d0;" onclick="resumeCardPoolItem(${Number(card.id)})" title="恢复">
+                                  <i data-lucide="play"></i>
+                              </button>`
+                  : `<button class="btn-delete" style="background:var(--warning-soft);color:#b45309;border-color:#fde68a;" onclick="pauseCardPoolItem(${Number(card.id)})" title="暂停">
+                                  <i data-lucide="pause"></i>
+                              </button>`;
             return `
                       <tr>
                           <td class="select-cell"><input type="checkbox" ${checked} onchange="toggleCardSelection(${Number(card.id)}, this.checked)"></td>
@@ -4542,12 +4917,15 @@
                           <td style="font-size:12px; color:var(--text-secondary); max-width:280px; word-break:break-word;">${boundAddress}</td>
                           <td>${escapeHtml(cardGroupLabel(card))}</td>
                           <td style="text-align:center">${statusBadge}</td>
-                          <td style="text-align:center">${usageCount}</td>
+                          <td style="text-align:center">${escapeHtml(usageLabel)}</td>
                           <td style="text-align:center">${lastUsed}</td>
                           <td style="text-align:center">
+                              <div class="table-action-group">
+                              ${pauseAction}
                               <button class="btn-delete" onclick="deleteCardPoolItem(${card.id})" title="删除">
                                   <i data-lucide="trash-2"></i>
                               </button>
+                              </div>
                           </td>
                       </tr>`;
           })
@@ -4561,9 +4939,12 @@
       }
 
       function getCardStatusBadge(card) {
-        const status = (card.status || "").toLowerCase();
-        if (!card.is_active || card.is_active === 0 || status === "已报废") {
+        const status = String(card.status || "");
+        if (status === "已报废") {
           return '<span class="status-badge status-failed">已报废</span>';
+        }
+        if (status === "暂停" || Number(card.is_active) === 0) {
+          return '<span class="status-badge status-warning">暂停</span>';
         }
         if (
           status === "冷却中" ||
@@ -4590,6 +4971,7 @@
             method: "DELETE",
           });
           if (res.ok) {
+            selectedCardIds.delete(Number(cardId));
             showMessage("卡片已删除", "success");
             await loadCardPoolList();
           } else {
@@ -4598,6 +4980,142 @@
           }
         } catch (e) {
           showMessage("删除请求失败", "error");
+        }
+      }
+
+      async function postSelectedCards(url, body, emptyHint) {
+        const cardIds = Array.from(selectedCardIds);
+        if (!cardIds.length) {
+          showMessage(emptyHint || "请先选择银行卡", "warning");
+          return null;
+        }
+        const res = await authFetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cardIds, ...body }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.message || data.error || "操作失败");
+        }
+        return data;
+      }
+
+      async function batchDeleteSelectedCards() {
+        const cardIds = Array.from(selectedCardIds);
+        if (!cardIds.length) {
+          showMessage("请先选择要删除的银行卡", "warning");
+          return;
+        }
+        const ok = await showAdminConfirm(
+          `确定删除选中的 ${cardIds.length} 张卡？删除后不可恢复。`,
+          "批量删除银行卡",
+        );
+        if (!ok) return;
+        try {
+          const data = await postSelectedCards(
+            "/api/admin/cards/batch-delete",
+            {},
+          );
+          selectedCardIds.clear();
+          showMessage(data.message || "已删除", "success");
+          await loadCardPoolList();
+        } catch (error) {
+          showMessage(error.message || "批量删除失败", "error");
+        }
+      }
+
+      async function pauseSelectedCards() {
+        try {
+          const data = await postSelectedCards("/api/admin/cards/pause", {
+            paused: true,
+          });
+          if (!data) return;
+          showMessage(data.message || "已暂停", "success");
+          await loadCardPoolList();
+        } catch (error) {
+          showMessage(error.message || "暂停失败", "error");
+        }
+      }
+
+      async function resumeSelectedCards() {
+        try {
+          const data = await postSelectedCards("/api/admin/cards/pause", {
+            paused: false,
+          });
+          if (!data) return;
+          showMessage(data.message || "已恢复", "success");
+          await loadCardPoolList();
+        } catch (error) {
+          showMessage(error.message || "恢复失败", "error");
+        }
+      }
+
+      async function pauseCardPoolItem(cardId) {
+        try {
+          const res = await authFetch("/api/admin/cards/pause", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cardIds: [Number(cardId)], paused: true }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || "暂停失败");
+          }
+          showMessage(data.message || "已暂停", "success");
+          await loadCardPoolList();
+        } catch (error) {
+          showMessage(error.message || "暂停失败", "error");
+        }
+      }
+
+      async function resumeCardPoolItem(cardId) {
+        try {
+          const res = await authFetch("/api/admin/cards/pause", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cardIds: [Number(cardId)], paused: false }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || "恢复失败");
+          }
+          showMessage(data.message || "已恢复", "success");
+          await loadCardPoolList();
+        } catch (error) {
+          showMessage(error.message || "恢复失败", "error");
+        }
+      }
+
+      async function setSelectedCardsMaxUsage() {
+        const cardIds = Array.from(selectedCardIds);
+        if (!cardIds.length) {
+          showMessage("请先选择银行卡", "warning");
+          return;
+        }
+        const extraHtml = `<label>最多使用次数（留空表示不限制）</label>
+                <input data-confirm-value class="asset-input" type="number" min="1" step="1" placeholder="不限制" />`;
+        const confirmed = await showAdminConfirm(
+          `为选中的 ${cardIds.length} 张卡设置成功支付次数上限。任务成功后次数 +1，达到上限后自动暂停。`,
+          "设置使用次数上限",
+          extraHtml,
+        );
+        if (!confirmed) return;
+        const raw =
+          typeof confirmed === "object" ? String(confirmed.source || "").trim() : "";
+        const maxUsageCount = raw === "" ? null : Number(raw);
+        if (raw !== "" && (!Number.isFinite(maxUsageCount) || maxUsageCount <= 0)) {
+          showMessage("请输入大于 0 的次数，或留空表示不限制", "warning");
+          return;
+        }
+        try {
+          const data = await postSelectedCards("/api/admin/cards/max-usage", {
+            maxUsageCount,
+          });
+          showMessage(data.message || "已保存", "success");
+          await loadCardPoolList();
+        } catch (error) {
+          showMessage(error.message || "设置失败", "error");
         }
       }
 
@@ -4720,7 +5238,7 @@
                           <td class="col-media">${mediaCell}</td>
                           <td class="col-action" style="text-align:center">
                             <div class="table-action-group task-action-buttons">
-                              <button type="button" class="btn btn-primary" data-view-task-detail="${escapeHtml(l.id)}">详情</button>
+                              <button type="button" class="btn-icon" title="查看任务详情" data-view-task-detail="${escapeHtml(l.id)}"><i data-lucide="file-search"></i></button>
                               <button type="button" class="btn-delete" title="删除此任务记录" data-delete-task="${escapeHtml(l.id)}"><i data-lucide="trash-2"></i></button>
                             </div>
                           </td>
@@ -4814,6 +5332,7 @@
             dropdown.textContent = "全部状态";
           }
           await loadCdkList();
+            syncUiSelect(cdkFilter);
           const cdkFilter = document.getElementById("cdk_group_filter");
           if (cdkFilter) {
             cdkFilter.value = cdkGroupFilter;
@@ -6313,6 +6832,7 @@
       }
 
       async function bootAdmin() {
+        enhanceAssetSelects();
         initializeSidebar();
         document
           .getElementById("admin_login_path")
@@ -6637,7 +7157,9 @@
               !(
                 card.cooldown_until &&
                 new Date(card.cooldown_until) > new Date()
-              ),
+              ) &&
+              (card.max_usage_count == null ||
+                Number(card.usage_count || 0) < Number(card.max_usage_count)),
           );
           cardOptions += usable
             .map((card) => {
@@ -6810,12 +7332,20 @@
           pro_5x: "Pro 5x",
           pro_20x: "Pro 20x",
           credits: "Codex 点数",
-          credits_500: "Codex 500",
-          credits_1000: "Codex 1000",
-          credits_2000: "Codex 2000",
         };
-        const current = sel.value || "plus";
-        sel.innerHTML = Object.keys(checkoutPlanMap)
+        const currentRaw = sel.value || "plus";
+        const current = String(currentRaw).startsWith("credits")
+          ? "credits"
+          : currentRaw;
+        const planKeys = ["plus", "pro_5x", "pro_20x", "credits"].filter(
+          (key) => checkoutPlanMap[key],
+        );
+        const keys = planKeys.length
+          ? planKeys
+          : Object.keys(checkoutPlanMap).filter(
+              (key) => !/^credits_\d+$/.test(key),
+            );
+        sel.innerHTML = keys
           .map((key) => {
             const name = checkoutPlanMap[key] || checkoutPlanMap.plus;
             return `<option value="${escapeHtml(key)}">${escapeHtml(labels[key] || key)} — ${escapeHtml(name)}</option>`;
@@ -7388,7 +7918,7 @@
 
       async function generateRandomUsAddresses() {
         const ok = await showAdminConfirm(
-          "将随机生成 10 条美国免税州地址（OR / DE / MT / NH / AK）并加入 US 地址池，继续？",
+          "将通过 OpenStreetMap 反查生成 10 条美国免税州真实街道地址（OR / DE / MT / NH / AK）并加入地址池。失败时回退本地模板。继续？",
           "批量生成美国免税地址",
         );
         if (!ok) return;
@@ -7405,7 +7935,18 @@
           if (!res.ok || !data.success) {
             throw new Error(data.error || data.message || "生成失败");
           }
-          showMessage(`已生成 ${data.count} 条美国免税地址`, "success");
+          const nominatim = Number(data.nominatim_count || 0);
+          const fallback = Number(data.fallback_count || 0);
+          const suffix =
+            nominatim && fallback
+              ? `（地图 ${nominatim}，模板 ${fallback}）`
+              : nominatim
+                ? "（OpenStreetMap 反查）"
+                : "（模板回退）";
+          showMessage(
+            `已生成 ${data.count} 条美国免税地址${suffix}`,
+            "success",
+          );
           await loadAddressList("US");
         } catch (e) {
           showMessage(e.message || "生成失败", "error");

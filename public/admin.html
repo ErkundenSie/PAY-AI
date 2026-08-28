@@ -970,12 +970,13 @@
       }
 
       .task-log-table .col-media {
-        width: 168px;
-        text-align: left;
+        width: 108px;
+        text-align: center;
       }
 
       .task-log-table .col-action {
-        width: 112px;
+        width: 96px;
+        text-align: center;
       }
 
       .task-log-table .col-cdk code,
@@ -1032,27 +1033,20 @@
       .task-action-buttons {
         display: inline-flex;
         align-items: center;
-        justify-content: flex-start;
+        justify-content: center;
         gap: 6px;
         min-height: 32px;
       }
 
-      .task-media-actions .btn,
-      .task-action-buttons .btn,
+      .task-media-actions .btn-icon,
+      .task-action-buttons .btn-icon,
       .task-action-buttons .btn-delete {
         height: 32px;
-        margin: 0;
-        padding: 0 10px;
-        border-radius: 7px;
-        font-size: 12px;
-        line-height: 1;
-        white-space: nowrap;
-      }
-
-      .task-action-buttons .btn-delete {
         width: 32px;
         min-width: 32px;
+        margin: 0;
         padding: 0;
+        border-radius: var(--radius-sm);
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -1226,7 +1220,7 @@
         box-shadow: var(--shadow-focus);
       }
 
-      /* 自定义 <select> 样式（蓝色箭头） */
+      /* 自定义 <select>：隐藏原生弹出层，由 .ui-select 接管 */
       select.asset-input {
         -webkit-appearance: none;
         appearance: none;
@@ -1244,10 +1238,359 @@
         border-color: var(--border-strong);
       }
 
-      select.asset-input option {
-        background-color: var(--surface);
+      .ui-select {
+        position: relative;
+        display: block;
+        width: 100%;
+        min-width: 0;
+      }
+
+      .ui-select.is-inline {
+        width: auto;
+        display: inline-block;
+        vertical-align: middle;
+      }
+
+      .ui-select select.asset-input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        pointer-events: none;
+        margin: 0;
+        padding: 0 !important;
+        border: 0;
+        background: none;
+      }
+
+      .ui-select-trigger {
+        width: 100%;
+        min-height: 38px;
+        padding: 8px 12px 8px 14px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--glass-border);
+        background: var(--surface);
         color: var(--text-main);
+        outline: none;
+        cursor: pointer;
+        font-weight: 500;
+        font-size: 14px;
+        line-height: 1.3;
+        box-shadow: var(--shadow-sm);
+        transition: 0.18s;
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-family: inherit;
+        text-align: left;
+      }
+
+      .ui-select-trigger span {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .ui-select-trigger:hover,
+      .ui-select.open .ui-select-trigger {
+        border-color: var(--primary);
+        box-shadow: var(--shadow-focus);
+        color: var(--primary);
+        background: var(--surface);
+      }
+
+      .ui-select-trigger i {
+        width: 14px;
+        height: 14px;
+        flex-shrink: 0;
+        color: var(--text-dim);
+        transition:
+          transform 0.18s,
+          color 0.18s;
+      }
+
+      .ui-select.open .ui-select-trigger i {
+        transform: rotate(180deg);
+        color: var(--primary);
+      }
+
+      .ui-select-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        min-width: 100%;
+        max-height: 280px;
+        overflow-y: auto;
+        padding: 6px;
+        border-radius: 12px;
+        background: var(--surface);
+        border: 1px solid var(--glass-border);
+        box-shadow: var(--shadow-lg);
+        z-index: 80;
+        display: none;
+      }
+
+      .ui-select.open .ui-select-menu {
+        display: block;
+        animation: filter-menu-in 0.15s ease-out;
+      }
+
+      .ui-select-option {
+        width: 100%;
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        cursor: pointer;
+        text-align: left;
+        font-weight: 500;
+        font-size: 13px;
+        line-height: 1.35;
+        transition: 0.12s;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        white-space: nowrap;
+        font-family: inherit;
+      }
+
+      .ui-select-option:hover {
+        background: var(--primary-soft);
+        color: var(--primary);
+      }
+
+      .ui-select-option.active {
+        background: var(--primary-soft);
+        color: var(--primary);
+        font-weight: 600;
+      }
+
+      .task-filter-field .ui-select-trigger {
+        min-height: 36px;
+        height: 36px;
+        padding: 7px 10px;
+        font-size: 13px;
+      }
+
+      .admin-confirm-extra .ui-select {
+        width: 100%;
+      }
+
+      .ui-date {
+        position: relative;
+        display: block;
+        width: 100%;
+      }
+
+      .ui-date input[type="date"] {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        pointer-events: none;
+        margin: 0;
+        border: 0;
+        background: none;
+      }
+
+      .ui-date input[type="date"]::-webkit-calendar-picker-indicator {
+        display: none;
+      }
+
+      .ui-date-trigger {
+        width: 100%;
+        min-height: 38px;
+        padding: 8px 12px 8px 14px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--glass-border);
+        background: var(--surface);
+        color: var(--text-main);
+        outline: none;
+        cursor: pointer;
+        font-weight: 500;
+        font-size: 14px;
+        line-height: 1.3;
+        box-shadow: var(--shadow-sm);
+        transition: 0.18s;
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-family: inherit;
+        text-align: left;
+      }
+
+      .ui-date-trigger span {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .ui-date-trigger.is-empty span {
+        color: var(--text-muted);
+        font-weight: 400;
+      }
+
+      .ui-date-trigger:hover,
+      .ui-date.open .ui-date-trigger {
+        border-color: var(--primary);
+        box-shadow: var(--shadow-focus);
+        color: var(--primary);
+        background: var(--surface);
+      }
+
+      .ui-date-trigger i {
+        width: 15px;
+        height: 15px;
+        flex-shrink: 0;
+        color: var(--text-dim);
+      }
+
+      .ui-date.open .ui-date-trigger i {
+        color: var(--primary);
+      }
+
+      .ui-date-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        width: 292px;
         padding: 12px;
+        border-radius: 12px;
+        background: var(--surface);
+        border: 1px solid var(--glass-border);
+        box-shadow: var(--shadow-lg);
+        z-index: 80;
+        display: none;
+      }
+
+      .ui-date.open .ui-date-menu {
+        display: block;
+        animation: filter-menu-in 0.15s ease-out;
+      }
+
+      .ui-date-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .ui-date-month {
+        flex: 1;
+        text-align: center;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-main);
+      }
+
+      .ui-date-nav {
+        width: 28px;
+        height: 28px;
+        border: none;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text-dim);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-family: inherit;
+      }
+
+      .ui-date-nav:hover {
+        background: var(--primary-soft);
+        color: var(--primary);
+      }
+
+      .ui-date-nav i {
+        width: 14px;
+        height: 14px;
+      }
+
+      .ui-date-week,
+      .ui-date-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 2px;
+      }
+
+      .ui-date-week span {
+        text-align: center;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-dim);
+        padding: 4px 0 6px;
+      }
+
+      .ui-date-day {
+        height: 32px;
+        border: none;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        font-family: inherit;
+      }
+
+      .ui-date-day:hover {
+        background: var(--primary-soft);
+        color: var(--primary);
+      }
+
+      .ui-date-day.is-outside {
+        color: var(--text-muted);
+      }
+
+      .ui-date-day.is-today:not(.is-selected) {
+        color: var(--primary);
+        font-weight: 600;
+      }
+
+      .ui-date-day.is-selected {
+        background: var(--primary);
+        color: var(--on-primary);
+        font-weight: 600;
+      }
+
+      .ui-date-day.is-selected:hover {
+        background: var(--primary-hover);
+        color: var(--on-primary);
+      }
+
+      .ui-date-foot {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--divider);
+      }
+
+      .ui-date-foot button {
+        border: none;
+        background: transparent;
+        color: var(--primary);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        font-family: inherit;
+        padding: 4px 8px;
+        border-radius: 8px;
+      }
+
+      .ui-date-foot button:hover {
+        background: var(--primary-soft);
       }
 
       /* 通用按钮 */
@@ -1413,6 +1756,50 @@
         border: 1px solid #fecaca;
         cursor: pointer;
         transition: 0.15s;
+      }
+
+      .btn-icon {
+        width: 32px;
+        height: 32px;
+        min-width: 32px;
+        min-height: 32px;
+        padding: 0;
+        border-radius: var(--radius-sm);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--primary-soft);
+        color: var(--primary);
+        border: 1px solid #bfdbfe;
+        cursor: pointer;
+        transition: 0.15s;
+      }
+
+      .btn-icon:hover {
+        background: var(--primary);
+        color: #ffffff;
+        border-color: var(--primary);
+      }
+
+      .btn-icon.is-disabled,
+      .btn-icon:disabled {
+        background: var(--surface-soft);
+        color: var(--text-muted);
+        border-color: var(--glass-border);
+        cursor: default;
+        opacity: 0.55;
+      }
+
+      .btn-icon.is-disabled:hover,
+      .btn-icon:disabled:hover {
+        background: var(--surface-soft);
+        color: var(--text-muted);
+        border-color: var(--glass-border);
+      }
+
+      .btn-icon i {
+        width: 14px;
+        height: 14px;
       }
 
       .btn-delete:hover {
@@ -2450,12 +2837,35 @@
         height: 14px;
       }
 
-      .checkout-debug-log-toolbar {
-        justify-content: space-between;
+      .proxy-add-actions,
+      .proxy-list-actions {
+        display: flex;
         align-items: center;
+        gap: 12px;
         flex-wrap: wrap;
-        gap: var(--space-md);
-        margin-bottom: 8px;
+      }
+
+      .proxy-add-actions {
+        margin-top: 14px;
+      }
+
+      .proxy-add-actions .btn,
+      .proxy-list-actions .btn {
+        width: 128px;
+        height: 38px;
+        min-height: 38px;
+        padding: 0 14px;
+        justify-content: center;
+        box-sizing: border-box;
+      }
+
+      .checkout-debug-actions .btn {
+        width: 128px;
+        height: 38px;
+        min-height: 38px;
+        padding: 0 14px;
+        justify-content: center;
+        box-sizing: border-box;
       }
 
       .runtime-log-actions {
@@ -2520,12 +2930,14 @@
         border-radius: 14px;
         padding: 22px 22px 18px;
         box-shadow: var(--shadow-lg);
+        overflow: visible;
       }
 
       .admin-confirm-extra {
         display: grid;
         gap: 10px;
         margin: 0 0 18px;
+        overflow: visible;
       }
 
       .admin-confirm-extra .asset-input,
@@ -4029,15 +4441,7 @@ socks5://user:pass@host:port
 socks://user:pass@host:port#备注
 http://USER-session-{session}:PASS@proxy.example.com:1000"
           ></textarea>
-          <div
-            style="
-              display: flex;
-              gap: 12px;
-              margin-top: 14px;
-              flex-wrap: wrap;
-              align-items: center;
-            "
-          >
+          <div class="proxy-add-actions">
             <button
               type="button"
               class="btn btn-primary"
@@ -4051,7 +4455,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               class="btn btn-secondary"
               onclick="document.getElementById('proxy_add_input').value = ''"
             >
-              清空
+              <i data-lucide="eraser"></i>
+              清空文本
             </button>
             <span
               id="proxy_add_hint"
@@ -4063,7 +4468,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
         <div class="panel">
           <div class="panel-header">
             <h2 class="panel-title">已保存代理</h2>
-            <div style="display: flex; gap: 8px; flex-wrap: wrap">
+            <div class="proxy-list-actions">
               <button
                 type="button"
                 class="btn btn-secondary"
@@ -4386,7 +4791,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           <h1>免税地址</h1>
           <p>
             管理美国免税州账单地址池（Oregon / Delaware / Montana / New
-            Hampshire / Alaska）。支付时随机选取；州名使用完整英文（如
+            Hampshire / Alaska）。批量生成会按 OpenStreetMap 街道反查真实地址；支付时随机选取；州名使用完整英文（如
             Oregon）以匹配结账下拉框。
           </p>
         </div>
@@ -4670,15 +5075,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             ></textarea>
           </div>
 
-          <div
-            style="
-              display: flex;
-              align-items: center;
-              gap: 12px;
-              margin-top: 16px;
-              flex-wrap: wrap;
-            "
-          >
+          <div class="checkout-debug-actions">
             <button
               type="button"
               class="btn btn-primary"
@@ -4702,6 +5099,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               class="btn btn-secondary"
               onclick="clearCheckoutDebugForm()"
             >
+              <i data-lucide="eraser"></i>
               清空文本
             </button>
             <span
@@ -4765,7 +5163,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           <p>管理 Stripe 支付使用的银行卡资源（通过 API 导入与维护）</p>
         </div>
 
-        <div class="stat-grid" style="margin-bottom: 20px">
+        <div class="stat-grid" style="margin-bottom: 20px; grid-template-columns: repeat(5, minmax(0, 1fr))">
           <div class="stat-card">
             <div class="stat-header">
               <span class="stat-label">卡片总数</span>
@@ -4777,6 +5175,12 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               <span class="stat-label">可用</span>
             </div>
             <div id="card_stat_active" class="stat-value">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-header">
+              <span class="stat-label">暂停</span>
+            </div>
+            <div id="card_stat_paused" class="stat-value">0</div>
           </div>
           <div class="stat-card">
             <div class="stat-header">
@@ -4804,6 +5208,14 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 justify-content: flex-end;
               "
             >
+              <input
+                type="text"
+                id="card_number_search"
+                class="asset-input"
+                placeholder="卡号模糊筛选"
+                style="width: 180px"
+                oninput="handleCardNumberSearch(this.value)"
+              />
               <select
                 id="card_group_filter"
                 class="asset-input"
@@ -4881,6 +5293,25 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               <i data-lucide="folder-x"></i>
               移出分组
             </button>
+            <button class="btn btn-secondary" onclick="pauseSelectedCards()">
+              <i data-lucide="pause"></i>
+              暂停
+            </button>
+            <button class="btn btn-secondary" onclick="resumeSelectedCards()">
+              <i data-lucide="play"></i>
+              恢复
+            </button>
+            <button
+              class="btn btn-secondary"
+              onclick="setSelectedCardsMaxUsage()"
+            >
+              <i data-lucide="hash"></i>
+              次数上限
+            </button>
+            <button class="btn btn-danger" onclick="batchDeleteSelectedCards()">
+              <i data-lucide="trash-2"></i>
+              批量删除
+            </button>
           </div>
 
           <div class="table-container">
@@ -4896,9 +5327,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                   <th>绑定地址</th>
                   <th width="120px">分组</th>
                   <th width="90px" style="text-align: center">状态</th>
-                  <th width="80px" style="text-align: center">次数</th>
+                  <th width="110px" style="text-align: center">次数/上限</th>
                   <th width="140px" style="text-align: center">最近使用</th>
-                  <th width="80px" style="text-align: center">操作</th>
+                  <th width="120px" style="text-align: center">操作</th>
                 </tr>
               </thead>
               <tbody id="card_pool_list_body"></tbody>
