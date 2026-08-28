@@ -15,6 +15,9 @@ const {
   buildCheckoutSentinelReqBody,
   assembleCheckoutSentinelToken,
   isUsableCheckoutSentinel,
+  isCreditsCheckoutPayload,
+  buildCodexCreditPurchaseUrl,
+  isCodexCreditPurchaseUrl,
 } = require("../chatgpt");
 
 describe("chatgpt checkout helpers", () => {
@@ -34,14 +37,14 @@ describe("chatgpt checkout helpers", () => {
 
   it("builds Codex credit purchase payload", () => {
     const payload = buildCheckoutPayload(
-      "platformbusiness_usage_based",
+      "chatgptbusiness_usage_based",
       "PH",
       "PHP",
       { accountId: "acct-1", creditQuantity: 1000 },
     );
     expect(payload).toEqual({
       entry_point: "codex_team_start",
-      plan_name: "platformbusiness_usage_based",
+      plan_name: "chatgptbusiness_usage_based",
       checkout_ui_mode: "custom",
       billing_details: { country: "PH", currency: "PHP" },
       usage_based_workspace_credit_purchase_data: {
@@ -54,6 +57,37 @@ describe("chatgpt checkout helpers", () => {
       account_id: "acct-1",
       openai_account_id: "acct-1",
     });
+  });
+
+  it("detects credits checkout payloads", () => {
+    const creditsPayload = buildCheckoutPayload(
+      "chatgptbusiness_usage_based",
+      "PH",
+      "PHP",
+      { accountId: "acct-1", creditQuantity: 500 },
+    );
+    const plusPayload = buildCheckoutPayload("chatgptplusplan", "PH", "PHP", {
+      accountId: "acct-1",
+    });
+
+    expect(isCreditsCheckoutPayload(creditsPayload)).toBe(true);
+    expect(isCreditsCheckoutPayload(plusPayload)).toBe(false);
+  });
+
+  it("builds the official Codex credit purchase URL", () => {
+    const url = buildCodexCreditPurchaseUrl(2000, {
+      source: "codex-embedded-checkout",
+      autoTopUpEnabled: false,
+    });
+    expect(url).toBe(
+      "https://chatgpt.com/codex/purchase/credits?quantity=2000&source=codex-embedded-checkout&auto_top_up_enabled=false",
+    );
+    expect(isCodexCreditPurchaseUrl(url)).toBe(true);
+    expect(
+      isCodexCreditPurchaseUrl(
+        "https://chatgpt.com/codex/settings/analytics",
+      ),
+    ).toBe(false);
   });
 
   it("adds account headers from the access token", () => {
@@ -204,6 +238,12 @@ describe("chatgpt checkout helpers", () => {
       shouldFallbackFromPhpCheckout({
         ok: false,
         error: "already_subscribed",
+      }),
+    ).toBe(false);
+    expect(
+      shouldFallbackFromPhpCheckout({
+        ok: false,
+        error: "usage_based_workspace_credit_purchase_data is not enabled",
       }),
     ).toBe(false);
     expect(shouldFallbackFromPhpCheckout({ ok: true })).toBe(false);

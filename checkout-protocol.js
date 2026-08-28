@@ -354,9 +354,6 @@ function buildConfirmationTokenForm({
     ["client_context[payment_method_types][1]", "link"],
   ];
 
-  if (cussSecret) {
-    pairs.push(["client_context[customer_session_client_secret]", cussSecret]);
-  }
   if (stripeCustomer) {
     pairs.push(["client_context[customer]", stripeCustomer]);
   }

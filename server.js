@@ -1224,8 +1224,8 @@ function parseManualDebugCard(raw) {
   }
   const card = {
     card_number: parts[0].replace(/\s+/g, ""),
-    card_expiry: parts[1],
-    card_cvc: parts[2],
+    card_expiry: cardValidator.normalizeExpiry(parts[1]) || parts[1],
+    card_cvc: parts[2].replace(/\s+/g, ""),
     card_holder: parts[3] || "",
   };
   const numberCheck = cardValidator.validateCardNumber(card.card_number);

@@ -5038,7 +5038,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 <option value="pro_5x">Pro 5x — chatgptprolite</option>
                 <option value="pro_20x">Pro 20x — chatgptpro</option>
                 <option value="credits">
-                  Codex 点数 — platformbusiness_usage_based
+                  Codex 点数 — chatgptbusiness_usage_based
                 </option>
               </select>
             </div>
@@ -5050,8 +5050,10 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             >
               <label style="margin-bottom: 6px">充值点数</label>
               <select id="checkout_credit_quantity" class="asset-input">
+                <option value="250">250</option>
                 <option value="500">500</option>
                 <option value="1000">1000</option>
+                <option value="1500">1500</option>
                 <option value="2000">2000</option>
               </select>
             </div>
@@ -5265,13 +5267,14 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               <div class="import-box-title">批量导入银行卡</div>
             </div>
             <div class="import-box-tip">
-              每行一条，格式：<code>卡号|有效期|CVC|持卡人</code>（持卡人可选）。有效期支持
-              <code>MM/YY</code> 或 <code>MMYY</code>。
+              每行一条，格式：<code>卡号|有效期|CVC|持卡人</code>（持卡人可选）。分隔符支持
+              <code>|</code> 或逗号；有效期支持 <code>MM/YY</code> 或
+              <code>MMYY</code>。
             </div>
             <textarea
               id="card_pool_import_text"
               class="import-textarea"
-              placeholder="5349336392059744|04/31|738|John Doe&#10;5349336383247282|04/31|937"
+              placeholder="5349336392059744|04/31|738|John Doe&#10;5349336383247282|0431|937&#10;5349336383247282,04/31,937"
             ></textarea>
             <p
               id="card_pool_import_result"
@@ -5420,8 +5423,10 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 <option value="plus" selected>Plus</option>
                 <option value="pro_5x">Pro 5x</option>
                 <option value="pro_20x">Pro 20x</option>
+                <option value="credits_250">Codex 250</option>
                 <option value="credits_500">Codex 500</option>
                 <option value="credits_1000">Codex 1000</option>
+                <option value="credits_1500">Codex 1500</option>
                 <option value="credits_2000">Codex 2000</option>
               </select>
               <input
@@ -5520,6 +5525,10 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 >
                   Pro 20x
                 </button>
+                <button250', 'Codex 250')"
+                >
+                  Codex 250
+                </button>
                 <button
                   class="filter-option"
                   onclick="selectCdkPlanTypeFilter('credits_500', 'Codex 500')"
@@ -5531,6 +5540,16 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                   onclick="
                     selectCdkPlanTypeFilter('credits_1000', 'Codex 1000')
                   "
+                >
+                  Codex 1000
+                </button>
+                <button
+                  class="filter-option"
+                  onclick="
+                    selectCdkPlanTypeFilter('credits_1500', 'Codex 1500')
+                  "
+                >
+                  Codex 15
                 >
                   Codex 1000
                 </button>

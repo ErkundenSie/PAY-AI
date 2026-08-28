@@ -25,11 +25,13 @@ function buildCheckoutPayload(planName, country, currency, options = {}) {
   const isCredits =
     Boolean(options.credits) ||
     creditQuantity > 0 ||
-    /usage_based|platformbusiness/i.test(String(planName || ""));
+    /usage_based|platformbusiness|chatgptbusiness/i.test(
+      String(planName || ""),
+    );
   const payload = isCredits
     ? {
         entry_point: "codex_team_start",
-        plan_name: planName || "platformbusiness_usage_based",
+        plan_name: String(planName || "").trim(),
         checkout_ui_mode: uiMode,
         billing_details: { country, currency },
         usage_based_workspace_credit_purchase_data: {
@@ -57,6 +59,43 @@ function buildCheckoutPayload(planName, country, currency, options = {}) {
     payload.openai_account_id = accountId;
   }
   return payload;
+}
+
+function isCreditsCheckoutPayload(payload) {
+  return Boolean(
+    payload &&
+      payload.usage_based_workspace_credit_purchase_data &&
+      typeof payload.usage_based_workspace_credit_purchase_data === "object",
+  );
+}
+
+function buildCodexCreditPurchaseUrl(creditQuantity, options = {}) {
+  const quantity = Number(creditQuantity || 0);
+  if (!Number.isSafeInteger(quantity) || quantity < 250 || quantity % 250) {
+    throw new Error("充值点数至少 250，且需为 250 的倍数");
+  }
+  const url = new URL("https://chatgpt.com/codex/purchase/credits");
+  url.searchParams.set("quantity", String(quantity));
+  url.searchParams.set(
+    "source",
+    String(options.source || "codex-embedded-checkout"),
+  );
+  if (options.autoTopUpEnabled === false) {
+    url.searchParams.set("auto_top_up_enabled", "false");
+  }
+  return url.toString();
+}
+
+function isCodexCreditPurchaseUrl(rawUrl) {
+  try {
+    const url = new URL(String(rawUrl || ""));
+    return (
+      url.origin === "https://chatgpt.com" &&
+      url.pathname === "/codex/purchase/credits"
+    );
+  } catch (_) {
+    return false;
+  }
 }
 
 function pickCookieValue(cookies, name) {
@@ -331,7 +370,7 @@ function shouldFallbackFromPhpCheckout(parsed) {
   if (!parsed || parsed.ok) return false;
   const detail = String(parsed.error || "");
   if (
-    /already paid|already_subscribed|not_eligible|Offer not found|permission/i.test(
+    /already paid|already_subscribed|not_eligible|Offer not found|permission|usage_based_workspace_credit_purchase_data is not enabled|credit_purchase_disabled/i.test(
       detail,
     )
   ) {
@@ -784,6 +823,54 @@ async function waitForCheckoutCookies(page, timeoutMs = 15000) {
   return summary;
 }
 
+async function probePageSentinelEndpoint(page, path, body = {}) {
+  if (!page || typeof page.evaluate !== "function") {
+    return null;
+  }
+  return page
+    .evaluate(
+      async ({ path, body }) => {
+        try {
+          const response = await fetch(path, {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "content-type": "application/json",
+              accept: "application/json",
+            },
+            body: JSON.stringify(body || {}),
+          });
+          const text = await response.text();
+          let data = {};
+          try {
+            data = text ? JSON.parse(text) : {};
+          } catch (_) {
+            data = {};
+          }
+          const headerToken =
+            response.headers.get("openai-sentinel-token") ||
+            response.headers.get("OpenAI-Sentinel-Token") ||
+            "";
+          return {
+            status: response.status,
+            data,
+            headerToken,
+            bytes: text.length,
+          };
+        } catch (err) {
+          return {
+            status: 0,
+            data: {},
+            headerToken: "",
+            error: String((err && err.message) || err),
+          };
+        }
+      },
+      { path, body },
+    )
+    .catch(() => null);
+}
+
 function buildCheckoutWarmupRequests({ country = "PH" } = {}) {
   const region = String(country || "PH").toUpperCase();
   return [
@@ -1184,6 +1271,28 @@ class ChatGPTService {
       return token;
     }
 
+    if (isCreditsCheckoutPayload(options.payload)) {
+      const creditsProbe = await probePageSentinelEndpoint(
+        page,
+        "/backend-api/sentinel/chat-requirements",
+        {},
+      );
+      if (creditsProbe?.headerToken) {
+        rememberSentinelToken(page, creditsProbe.headerToken);
+      }
+      const probedToken = captureSentinelFromPayload(
+        JSON.stringify(creditsProbe?.data || {}),
+      );
+      token = mergeCheckoutSentinelToken(token, probedToken);
+      token = mergeCheckoutSentinelToken(token, await readCapturedSentinel(page));
+      console.log(
+        `[ChatGPT] sentinel/chat-requirements HTTP ${creditsProbe?.status || 0}, body=${creditsProbe?.bytes || 0}B${creditsProbe?.error ? `, err=${creditsProbe.error}` : ""}`,
+      );
+      if (isUsableCheckoutSentinel(token) && parseSentinelObject(token)?.t) {
+        return token;
+      }
+    }
+
     const cookies = await snapshotChatGptCookies(page);
     const deviceId = pickCookieValue(cookies, "oai-did");
     const fingerprint = await page
@@ -1224,45 +1333,11 @@ class ChatGPTService {
       .catch(() => buildDefaultSentinelFingerprint({ sid: deviceId }));
     const reqBody = buildCheckoutSentinelReqBody(deviceId, fingerprint);
     let challenge = null;
-    const probe = await page
-      .evaluate(async (body) => {
-        try {
-          const response = await fetch("/backend-api/sentinel/req", {
-            method: "POST",
-            credentials: "include",
-            headers: {
-              "content-type": "application/json",
-              accept: "application/json",
-            },
-            body: JSON.stringify(body),
-          });
-          const text = await response.text();
-          let data = {};
-          try {
-            data = text ? JSON.parse(text) : {};
-          } catch (_) {
-            data = {};
-          }
-          const headerToken =
-            response.headers.get("openai-sentinel-token") ||
-            response.headers.get("OpenAI-Sentinel-Token") ||
-            "";
-          return {
-            status: response.status,
-            data,
-            headerToken,
-            bytes: text.length,
-          };
-        } catch (err) {
-          return {
-            status: 0,
-            data: {},
-            headerToken: "",
-            error: String((err && err.message) || err),
-          };
-        }
-      }, reqBody)
-      .catch(() => null);
+    const probe = await probePageSentinelEndpoint(
+      page,
+      "/backend-api/sentinel/req",
+      reqBody,
+    );
 
     if (probe?.headerToken) {
       rememberSentinelToken(page, probe.headerToken);
@@ -1304,7 +1379,10 @@ class ChatGPTService {
     ).trim();
     const savedCookies = await snapshotChatGptCookies(page);
     const php = await this.collectPhpCheckoutContext(page, accountId);
-    const sentinel = await this.harvestPhpSentinel(page, options);
+    const sentinel = await this.harvestPhpSentinel(page, {
+      ...options,
+      payload,
+    });
     await restoreChatGptCookies(page, savedCookies);
     if (!isUsableCheckoutSentinel(sentinel)) {
       const sizes = summarizeCheckoutSentinel(sentinel);
@@ -1335,10 +1413,12 @@ class ChatGPTService {
     if (page && typeof page.evaluate === "function") {
       const officialPayload = {
         entry_point: payload.entry_point,
-        plan_name: payload.plan_name,
         billing_details: payload.billing_details,
         checkout_ui_mode: payload.checkout_ui_mode || "custom",
       };
+      if (payload.plan_name) {
+        officialPayload.plan_name = payload.plan_name;
+      }
       if (payload.usage_based_workspace_credit_purchase_data) {
         officialPayload.usage_based_workspace_credit_purchase_data =
           payload.usage_based_workspace_credit_purchase_data;
@@ -1672,9 +1752,11 @@ class ChatGPTService {
               payload.openai_account_id = accountId;
               this.headers = buildCheckoutHeaders(this.token, { accountId });
             }
-            parsed = await this.postCheckoutRequest(payload, options.page, {
-              forcePage: true,
-            });
+            parsed = isCreditsCheckoutPayload(payload)
+              ? await this.postCheckoutViaPageFetch(options.page, payload)
+              : await this.postCheckoutRequest(payload, options.page, {
+                  forcePage: true,
+                });
           }
         } else {
           parsed = await this.postCheckoutRequest(payload, null);
@@ -1994,6 +2076,42 @@ async function openApiCheckout(
     `🧭 [步骤] 正在通过 API 创建 Checkout (country=${region}, currency=${billingCurrency}, plan=${planType})...`,
   );
 
+  if (store.isCreditsPlan(planType)) {
+    const quantity = store.resolveCreditQuantity(planType, creditQuantity);
+    const checkoutUrl = buildCodexCreditPurchaseUrl(quantity, {
+      source: "codex-embedded-checkout",
+      autoTopUpEnabled: false,
+    });
+    console.log(
+      `🔗 [ChatGPT] Codex 点数改走官方购买页: quantity=${quantity}`,
+    );
+    if (!verifyPage) {
+      return { sessionId: null, checkoutUrl, accountId: "", data: {} };
+    }
+    await page.goto(checkoutUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 90000,
+    });
+    await page
+      .waitForLoadState("networkidle", { timeout: 30000 })
+      .catch(() => {});
+    const currentUrl = page.url();
+    const title = await page.title().catch(() => "");
+    const pageText = String(
+      (await page.textContent("body", { timeout: 5000 }).catch(() => "")) ||
+        "",
+    );
+    if (!isCodexCreditPurchaseUrl(currentUrl)) {
+      const destination = /Codex and Work Analytics/i.test(pageText)
+        ? "Codex 与 Work 分析页"
+        : title || currentUrl;
+      throw new Error(
+        `官方 Codex 点数购买页未开放，已跳转至${destination}`,
+      );
+    }
+    return { sessionId: null, checkoutUrl: currentUrl, accountId: "", data: {} };
+  }
+
   const gpt = new ChatGPTService(page.context().request, token);
   const checkout = await gpt.createCheckoutSession(
     planType,
@@ -2077,6 +2195,9 @@ module.exports.activateSubscription = activateSubscription;
 module.exports.openApiCheckout = openApiCheckout;
 module.exports.createHostedCheckoutLink = createHostedCheckoutLink;
 module.exports.buildCheckoutPayload = buildCheckoutPayload;
+module.exports.isCreditsCheckoutPayload = isCreditsCheckoutPayload;
+module.exports.buildCodexCreditPurchaseUrl = buildCodexCreditPurchaseUrl;
+module.exports.isCodexCreditPurchaseUrl = isCodexCreditPurchaseUrl;
 module.exports.buildCheckoutHeaders = buildCheckoutHeaders;
 module.exports.extractAccountIdFromCheck = extractAccountIdFromCheck;
 module.exports.describeCheckoutAccount = describeCheckoutAccount;

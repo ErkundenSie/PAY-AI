@@ -4423,8 +4423,10 @@
                 pro_5x: "Pro 5x",
                 pro_20x: "Pro 20x",
                 credits: "Codex",
+                credits_250: "Codex 250",
                 credits_500: "Codex 500",
                 credits_1000: "Codex 1000",
+                credits_1500: "Codex 1500",
                 credits_2000: "Codex 2000",
               }[planType] ||
               (String(planType).startsWith("credits") ? "Codex" : "Plus");
@@ -4434,8 +4436,10 @@
                 pro_5x: "#8b5cf6",
                 pro_20x: "#ec4899",
                 credits: "#0f766e",
+                credits_250: "#0f766e",
                 credits_500: "#0f766e",
                 credits_1000: "#0f766e",
+                credits_1500: "#0f766e",
                 credits_2000: "#0f766e",
               }[planType] ||
               (String(planType).startsWith("credits") ? "#0f766e" : "#2563eb");
@@ -4445,8 +4449,10 @@
                 pro_5x: "rgba(139, 92, 246, 0.12)",
                 pro_20x: "rgba(236, 72, 153, 0.12)",
                 credits: "rgba(15, 118, 110, 0.12)",
+                credits_250: "rgba(15, 118, 110, 0.12)",
                 credits_500: "rgba(15, 118, 110, 0.12)",
                 credits_1000: "rgba(15, 118, 110, 0.12)",
+                credits_1500: "rgba(15, 118, 110, 0.12)",
                 credits_2000: "rgba(15, 118, 110, 0.12)",
               }[planType] ||
               (String(planType).startsWith("credits")
@@ -5203,6 +5209,29 @@
         }
       }
 
+      function parseImportedCardLine(raw) {
+        const text = String(raw || "").trim();
+        if (!text) return { error: "为空" };
+        const parts = text
+          .split(/[|,，\t]/)
+          .map((item) => item.trim())
+          .filter(Boolean);
+        if (parts.length < 3) {
+          return { error: "格式错误（卡号|有效期|CVC，也可用逗号分隔）" };
+        }
+        const digits = String(parts[1] || "").replace(/\D/g, "");
+        const card_expiry =
+          digits.length === 4
+            ? `${digits.slice(0, 2)}/${digits.slice(2)}`
+            : String(parts[1] || "").trim();
+        return {
+          card_number: parts[0].replace(/\s+/g, ""),
+          card_expiry,
+          card_cvc: parts[2].replace(/\s+/g, ""),
+          card_holder: parts.slice(3).join(" ").trim(),
+        };
+      }
+
       async function importCardPool() {
         const textarea = document.getElementById("card_pool_import_text");
         const resultEl = document.getElementById("card_pool_import_result");
@@ -5220,18 +5249,12 @@
         const cards = [];
         const parseErrors = [];
         for (let i = 0; i < lines.length; i++) {
-          const parts = lines[i].split("|");
-          if (parts.length < 3) {
-            parseErrors.push(
-              `第 ${i + 1} 行格式错误（需至少 3 个字段，用 | 分隔）`,
-            );
+          const parsed = parseImportedCardLine(lines[i]);
+          if (parsed.error) {
+            parseErrors.push(`第 ${i + 1} 行${parsed.error}`);
             continue;
           }
-          const card_number = (parts[0] || "").trim();
-          const card_expiry = (parts[1] || "").trim();
-          const card_cvc = (parts[2] || "").trim();
-          const card_holder = (parts[3] || "").trim();
-          cards.push({ card_number, card_expiry, card_cvc, card_holder });
+          cards.push(parsed);
         }
 
         if (cards.length === 0) {
@@ -6647,8 +6670,10 @@
           pro_5x: "Pro 5x",
           pro_20x: "Pro 20x",
           credits: "Codex 点数",
+          credits_250: "Codex 250",
           credits_500: "Codex 500",
           credits_1000: "Codex 1000",
+          credits_1500: "Codex 1500",
           credits_2000: "Codex 2000",
         };
         tbody.innerHTML = records

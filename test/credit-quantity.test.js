@@ -37,9 +37,13 @@ describe("credit quantity", () => {
       "credits",
     ]);
     expect(resolvePlanName("plus")).toBe("chatgptplusplan");
-    expect(resolvePlanName("credits_500")).toBe("platformbusiness_usage_based");
+    expect(resolvePlanName("credits_500")).toBe("chatgptbusiness_usage_based");
+    expect(resolveCreditQuantity("credits_250")).toBe(250);
+    expect(resolveCreditQuantity("credits_1500")).toBe(1500);
     expect(getPlanTypeLabel("plus")).toBe("ChatGPT Plus");
     expect(getPlanTypeLabel("credits_500")).toBe("Codex 500 点");
+    expect(getPlanTypeLabel("credits_250")).toBe("Codex 250 点");
+    expect(getPlanTypeLabel("credits_1500")).toBe("Codex 1500 点");
     expect(Object.keys(getCheckoutPlanNameMap())).toEqual([
       "plus",
       "pro_5x",

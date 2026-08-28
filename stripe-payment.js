@@ -199,6 +199,23 @@ async function prepareCheckoutCardSection(page) {
     await page.getByText(/Configure your plan|Card number|Pay with/i).first()
         .waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
 
+    const newCardOptions = [
+        () => page.getByRole('button', { name: /^Card$/i }).first(),
+        () => page.getByRole('tab', { name: /^Card$/i }).first(),
+        () => page.locator('[data-testid*="payment-method-card" i]').first(),
+        () => page.locator('[role="radio"][aria-label*="card" i]').first(),
+    ];
+    for (const getOption of newCardOptions) {
+        try {
+            const option = getOption();
+            if (await option.isVisible({ timeout: 600 })) {
+                await option.click({ timeout: 1500 });
+                console.log('[Stripe] ✅ 已切换到新卡 Card 支付方式');
+                break;
+            }
+        } catch (_) { /* next */ }
+    }
+
     const cardLabel = page.getByText(/^Card number$/i).first();
     if (await cardLabel.isVisible({ timeout: 800 }).catch(() => false)) {
         await cardLabel.scrollIntoViewIfNeeded().catch(() => {});

@@ -21,7 +21,7 @@ function createApp(overrides = {}) {
     }),
     getPaymentRegion: async () => "PH",
     listCheckoutPlans: () => [{ key: "plus", name: "Plus" }],
-    CREDIT_QUANTITY_PRESETS: [500, 1000, 2000],
+    CREDIT_QUANTITY_PRESETS: [250, 500, 1000, 1500, 2000],
     CREDIT_QUANTITY_MIN: 250,
     CREDIT_QUANTITY_STEP: 250,
     getMaxConcurrentActivations: async () => 2,

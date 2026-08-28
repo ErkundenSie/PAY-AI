@@ -5332,12 +5332,13 @@ async function importCards(cards) {
     if (!result.valid) {
       failures.push({ index: i, errors: result.errors });
     } else {
+      const normalized = result.card || card;
       validCards.push({
         index: i,
-        card_number: String(card.card_number).trim(),
-        card_expiry: String(card.card_expiry).trim(),
-        card_cvc: String(card.card_cvc).trim(),
-        card_holder: String(card.card_holder || "").trim(),
+        card_number: String(normalized.card_number).trim(),
+        card_expiry: String(normalized.card_expiry).trim(),
+        card_cvc: String(normalized.card_cvc).trim(),
+        card_holder: String(normalized.card_holder || "").trim(),
       });
     }
   }

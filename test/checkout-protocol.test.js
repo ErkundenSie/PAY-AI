@@ -158,6 +158,7 @@ describe("checkout protocol helpers", () => {
     expect(text).toContain("key=pk_test_xxx");
     expect(text).toContain("client_context");
     expect(text).toContain("client_context%5Bmode%5D=subscription");
+    expect(text).not.toContain("customer_session_client_secret");
   });
 
   it("keeps client_context mode even without customer session secret", () => {
