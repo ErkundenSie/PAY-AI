@@ -5344,6 +5344,45 @@ async function bindCardPaymentProfile(cardId, profile = {}) {
   );
 }
 
+async function bindCardsPaymentProfile({
+  cardIds = [],
+  holderName = "",
+  address = {},
+} = {}) {
+  const ids = [
+    ...new Set(
+      (Array.isArray(cardIds) ? cardIds : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isInteger(id) && id > 0),
+    ),
+  ];
+  if (!ids.length) throw new Error("请选择银行卡");
+  const line1 = String(address.line1 || "").trim();
+  const city = String(address.city || "").trim();
+  const state = String(address.state || "").trim();
+  const postal = String(
+    address.postal_code || address.postal || address.zip || "",
+  ).trim();
+  if (!line1 || !city || !state || !postal) {
+    throw new Error("请完整填写绑定地址：街道、城市、州、邮编");
+  }
+  const holder = String(holderName || "").trim();
+  const addressId = Number(address.id) > 0 ? Number(address.id) : null;
+  const placeholders = ids.map(() => "?").join(",");
+  const result = await runExecute(
+    `UPDATE card_assets
+         SET payment_holder_name = CASE WHEN ? = '' THEN payment_holder_name ELSE ? END,
+             payment_address_line1 = ?,
+             payment_address_city = ?,
+             payment_address_state = ?,
+             payment_address_postal = ?,
+             payment_address_id = ?
+         WHERE id IN (${placeholders})`,
+    [holder, holder, line1, city, state, postal, addressId, ...ids],
+  );
+  return { updated: Number(result.affectedRows || 0) };
+}
+
 // ─── Card Import ─────────────────────────────────────────────────────────────
 
 const { validateCard } = require("./card-validator");
@@ -5836,6 +5875,7 @@ module.exports = {
   markCardExhausted,
   recordCardUsage,
   bindCardPaymentProfile,
+  bindCardsPaymentProfile,
   importCards,
   deleteCardsByIds,
   setCardsPaused,

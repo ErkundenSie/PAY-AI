@@ -240,4 +240,38 @@ describe("admin asset routes", () => {
       },
     ]);
   });
+
+  it("binds payment address onto selected cards", async () => {
+    const calls = [];
+    const store = {
+      bindCardsPaymentProfile: async (options) => {
+        calls.push(options);
+        return { updated: options.cardIds.length };
+      },
+    };
+    const app = createApp(store, () => []);
+    const res = await request(app, "POST", "/api/admin/cards/bind-address", {
+      cardIds: [8, 9],
+      holder_name: "Jane Doe",
+      address: {
+        id: 12,
+        line1: "123 SW Main St",
+        city: "Portland",
+        state: "OR",
+        postal_code: "97201",
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.success).toBe(true);
+    expect(res.json.updated).toBe(2);
+    expect(calls[0]).toMatchObject({
+      cardIds: [8, 9],
+      holderName: "Jane Doe",
+      address: {
+        city: "Portland",
+        state: "OR",
+        postal_code: "97201",
+      },
+    });
+  });
 });

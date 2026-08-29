@@ -253,6 +253,37 @@ function registerAdminAssetRoutes(app, deps) {
     },
   );
 
+  app.post(
+    "/api/admin/cards/bind-address",
+    requireSecondaryAuth,
+    async (req, res) => {
+      try {
+        await ensureStoreReady();
+        const result = await store.bindCardsPaymentProfile({
+          cardIds: req.body?.cardIds || req.body?.card_ids || [],
+          holderName:
+            req.body?.holderName ||
+            req.body?.holder_name ||
+            req.body?.payment_holder_name ||
+            "",
+          address: req.body?.address || {},
+        });
+        auditAdminAction(
+          req,
+          "cards_address_bound",
+          `绑定地址 ${result.updated} 张卡`,
+        );
+        res.json({
+          success: true,
+          ...result,
+          message: `已为 ${result.updated} 张卡绑定地址`,
+        });
+      } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+      }
+    },
+  );
+
   app.delete("/api/admin/cards/:id", requireSecondaryAuth, async (req, res) => {
     try {
       await ensureStoreReady();

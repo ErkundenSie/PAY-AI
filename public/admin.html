@@ -1141,6 +1141,32 @@
         background: var(--surface-soft);
       }
 
+      #cards table th {
+        white-space: nowrap;
+        letter-spacing: 0;
+        text-transform: none;
+      }
+
+      #cards td.card-bound-address {
+        max-width: 220px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      #cards .table-action-group {
+        flex-wrap: nowrap;
+      }
+
+      #cards th:last-child,
+      #cards td:last-child {
+        white-space: nowrap;
+        width: 96px;
+        min-width: 96px;
+      }
+
       td {
         padding: 14px 16px;
         border-bottom: 1px solid var(--divider);
@@ -1992,6 +2018,20 @@
         padding: 7px 14px;
         border-radius: 8px;
         font-size: 12px;
+      }
+
+      .batch-action-dropdown {
+        min-width: 0;
+      }
+
+      .batch-action-dropdown .filter-menu {
+        min-width: 168px;
+      }
+
+      .batch-action-dropdown .btn i:last-child {
+        width: 14px;
+        height: 14px;
+        margin-left: 2px;
       }
 
       /* 自定义下拉过滤器 */
@@ -6016,27 +6056,43 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               <i data-lucide="check-square"></i>
               本页切换
             </button>
-            <button
-              class="btn btn-primary"
-              onclick="createCardGroupFromSelection()"
+            <div
+              class="filter-dropdown batch-action-dropdown"
+              data-filter="card_group_actions"
             >
-              <i data-lucide="folder-plus"></i>
-              创建分组
-            </button>
-            <button
-              class="btn btn-secondary"
-              onclick="assignSelectedCardsToGroup()"
-            >
-              <i data-lucide="folder-input"></i>
-              加入分组
-            </button>
-            <button
-              class="btn btn-secondary"
-              onclick="clearSelectedCardGroup()"
-            >
-              <i data-lucide="folder-x"></i>
-              移出分组
-            </button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                onclick="toggleFilterMenu('card_group_actions')"
+              >
+                <i data-lucide="folder"></i>
+                分组管理
+                <i data-lucide="chevron-down"></i>
+              </button>
+              <div class="filter-menu">
+                <button
+                  type="button"
+                  class="filter-option"
+                  onclick="closeFilterMenus(); createCardGroupFromSelection()"
+                >
+                  创建分组
+                </button>
+                <button
+                  type="button"
+                  class="filter-option"
+                  onclick="closeFilterMenus(); assignSelectedCardsToGroup()"
+                >
+                  加入已有分组
+                </button>
+                <button
+                  type="button"
+                  class="filter-option"
+                  onclick="closeFilterMenus(); clearSelectedCardGroup()"
+                >
+                  移出分组
+                </button>
+              </div>
+            </div>
             <button class="btn btn-secondary" onclick="pauseSelectedCards()">
               <i data-lucide="pause"></i>
               暂停
@@ -6052,6 +6108,13 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               <i data-lucide="hash"></i>
               次数上限
             </button>
+            <button
+              class="btn btn-secondary"
+              onclick="bindSelectedCardsAddress()"
+            >
+              <i data-lucide="map-pin"></i>
+              绑定地址
+            </button>
             <button class="btn btn-danger" onclick="batchDeleteSelectedCards()">
               <i data-lucide="trash-2"></i>
               批量删除
@@ -6066,9 +6129,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                   <th width="180px">卡号</th>
                   <th width="90px">有效期</th>
                   <th width="70px">CVC</th>
-                  <th width="100px">导入持卡人</th>
-                  <th width="110px">支付姓名</th>
-                  <th>绑定地址</th>
+                  <th width="140px">持卡人</th>
+                  <th width="220px" class="card-bound-address-col">绑定地址</th>
                   <th width="120px">分组</th>
                   <th width="90px" style="text-align: center">状态</th>
                   <th width="110px" style="text-align: center">次数/上限</th>

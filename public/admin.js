@@ -4905,12 +4905,20 @@
         return parts.join(", ");
       }
 
+      function formatCardHolder(card) {
+        return (
+          String(card.payment_holder_name || "").trim() ||
+          String(card.card_holder || "").trim() ||
+          "-"
+        );
+      }
+
       function renderCardPoolTable() {
         const tbody = document.getElementById("card_pool_list_body");
         const visibleCards = getFilteredCardPoolList();
         if (visibleCards.length === 0) {
           tbody.innerHTML =
-            '<tr><td colspan="12" style="text-align:center; color: var(--text-dim); padding: 40px 0;">暂无卡片，请使用批量导入添加</td></tr>';
+            '<tr><td colspan="11" style="text-align:center; color: var(--text-dim); padding: 40px 0;">暂无卡片，请使用批量导入添加</td></tr>';
           renderPagination("card_pool_pagination", "card_assets", 0);
           lucide.createIcons();
           return;
@@ -4920,8 +4928,7 @@
             const cardNumber = escapeHtml(card.card_number || card.last4 || "-");
             const cardExpiry = escapeHtml(card.card_expiry || "-");
             const cardCvc = escapeHtml(card.card_cvc || "-");
-            const importHolder = escapeHtml(card.card_holder || "-");
-            const paymentHolder = escapeHtml(card.payment_holder_name || "-");
+            const importHolder = escapeHtml(formatCardHolder(card));
             const boundAddress = escapeHtml(formatBoundAddress(card));
             const usageCount = Number(card.usage_count || 0);
             const maxUsage =
@@ -4954,8 +4961,7 @@
                           <td><code>${cardExpiry}</code></td>
                           <td><code>${cardCvc}</code></td>
                           <td>${importHolder}</td>
-                          <td>${paymentHolder}</td>
-                          <td style="font-size:12px; color:var(--text-secondary); max-width:280px; word-break:break-word;">${boundAddress}</td>
+                          <td class="card-bound-address" title="${boundAddress}">${boundAddress}</td>
                           <td>${escapeHtml(cardGroupLabel(card))}</td>
                           <td style="text-align:center">${statusBadge}</td>
                           <td style="text-align:center">${escapeHtml(usageLabel)}</td>
@@ -5220,6 +5226,67 @@
           await loadCardPoolList();
         } catch (error) {
           showMessage(error.message || "设置失败", "error");
+        }
+      }
+
+      async function bindSelectedCardsAddress() {
+        const cardIds = Array.from(selectedCardIds);
+        if (!cardIds.length) {
+          showMessage("请先选择银行卡", "warning");
+          return;
+        }
+        let addresses = [];
+        try {
+          const res = await authFetch("/api/admin/addresses?region=US");
+          const data = await res.json();
+          addresses = Array.isArray(data.addresses) ? data.addresses : [];
+        } catch (_) {
+          addresses = [];
+        }
+        if (!addresses.length) {
+          showMessage("暂无可用免税地址，请先在「免税地址」添加", "warning");
+          return;
+        }
+        const options = addresses
+          .map((item) => {
+            const label = `${item.line1}, ${item.city}, ${item.state} ${item.postal_code || ""}`;
+            return `<option value="${escapeHtml(String(item.id))}">${escapeHtml(label)}</option>`;
+          })
+          .join("");
+        const extraHtml = `<label>支付姓名（可选，空白则保留原值）</label>
+                <input data-confirm-extra class="asset-input" placeholder="如 John Smith" />
+                <label>绑定地址</label>
+                <select data-confirm-value class="asset-input">${options}</select>`;
+        const confirmed = await showAdminConfirm(
+          `为选中的 ${cardIds.length} 张卡绑定免税地址。支付时将优先使用该地址。`,
+          "绑定地址",
+          extraHtml,
+        );
+        if (!confirmed) return;
+        const addressId =
+          typeof confirmed === "object" ? String(confirmed.source || "").trim() : "";
+        const holderName =
+          typeof confirmed === "object" ? String(confirmed.extra || "").trim() : "";
+        const addr = addresses.find((item) => String(item.id) === addressId);
+        if (!addr) {
+          showMessage("请选择要绑定的地址", "warning");
+          return;
+        }
+        try {
+          const data = await postSelectedCards("/api/admin/cards/bind-address", {
+            holder_name: holderName,
+            address: {
+              id: addr.id,
+              line1: addr.line1,
+              city: addr.city,
+              state: addr.state,
+              postal_code: addr.postal_code,
+            },
+          });
+          showMessage(data.message || "已绑定地址", "success");
+          await loadCardPoolList();
+        } catch (error) {
+          showMessage(error.message || "绑定失败", "error");
         }
       }
 
