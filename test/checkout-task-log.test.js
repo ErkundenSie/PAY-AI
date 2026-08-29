@@ -4,7 +4,10 @@ const { getTaskType } = require("../public/task-type");
 const {
   SELF_PAY_CDK,
   PAYMENT_DEBUG_CDK,
+  CUSTOM_PAY_CDK,
   isPaymentDebugCdk,
+  isCustomPayCdk,
+  isAdminPaymentCdk,
   resolvePublicCheckoutCdk,
   buildCheckoutTaskCreate,
   buildCheckoutTaskUpdate,
@@ -63,5 +66,27 @@ describe("checkout submit → task log", () => {
     expect(created.cdkCode).toBe(PAYMENT_DEBUG_CDK);
     expect(updated.message).toBe("付款调试：plus / PH");
     expect(getTaskType({ cdk: created.cdkCode })).toBe("支付调试");
+  });
+
+  it("maps admin custom pay to 自定义付款", () => {
+    expect(isCustomPayCdk(CUSTOM_PAY_CDK)).toBe(true);
+    expect(isAdminPaymentCdk(CUSTOM_PAY_CDK)).toBe(true);
+    expect(isPaymentDebugCdk(CUSTOM_PAY_CDK)).toBe(false);
+
+    const created = buildCheckoutTaskCreate({
+      tokenPreview: "debug",
+      sessionPayload: "{}",
+      cdkCode: CUSTOM_PAY_CDK,
+      cardLast4: "1111",
+    });
+    const updated = buildCheckoutTaskUpdate({
+      cdkCode: CUSTOM_PAY_CDK,
+      planType: "plus",
+      regionCode: "PH",
+    });
+
+    expect(created.cdkCode).toBe(CUSTOM_PAY_CDK);
+    expect(updated.message).toBe("自定义付款：plus / PH");
+    expect(getTaskType({ cdk: created.cdkCode })).toBe("自定义付款");
   });
 });

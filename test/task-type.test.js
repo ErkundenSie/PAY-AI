@@ -10,6 +10,7 @@ describe("getTaskType", () => {
   it("maps debug task codes", () => {
     expect(getTaskType({ cdk: "[payment-debug]" })).toBe("支付调试");
     expect(getTaskType({ cdk: "[checkout-debug]" })).toBe("链接调试");
+    expect(getTaskType({ cdk: "[custom-pay]" })).toBe("自定义付款");
   });
 
   it("treats real CDK codes as CDK 开通", () => {

@@ -59,6 +59,7 @@ const CONFIG = {
   planNameOverride: process.env.PLAN_NAME_OVERRIDE || "",
   creditQuantity: Number(process.env.CREDIT_QUANTITY || 0),
   paymentRegionOverride: process.env.PAYMENT_REGION_OVERRIDE || "",
+  checkoutUrl: process.env.CHECKOUT_URL || "",
   proxy: process.env.PROXY || "",
 };
 
@@ -684,8 +685,25 @@ async function run() {
     let checkoutResult = null;
     const planNameOverride =
       String(CONFIG.planNameOverride || "").trim() || undefined;
+    const customCheckoutUrl = String(CONFIG.checkoutUrl || "").trim();
 
-    if (checkoutMode === "api" || checkoutMode === "auto") {
+    if (customCheckoutUrl) {
+      console.log(
+        `[步骤] 自定义付款：Session 已登录，正在打开付款链接 ${customCheckoutUrl}`,
+      );
+      await page.goto(customCheckoutUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 90000,
+      });
+      await page
+        .waitForLoadState("networkidle", { timeout: 30000 })
+        .catch(() => {});
+      checkoutResult = hydrateCheckoutFromUrl(
+        { checkoutUrl: customCheckoutUrl },
+        page.url(),
+      );
+      checkoutOpened = true;
+    } else if (checkoutMode === "api" || checkoutMode === "auto") {
       try {
         checkoutResult = await openApiCheckout(page, {
           accessToken: loginInfo.session?.accessToken || CONFIG.chatgptToken,
@@ -707,7 +725,7 @@ async function run() {
       }
     } else {
       console.log(
-        "[Info] Checkout 走页面升级按钮，由站点自己完成 Sentinel 后再下单",
+        "[Info] Session 已登录，Checkout 走页面升级按钮后再付款",
       );
     }
 
@@ -747,6 +765,17 @@ async function run() {
     }
     if (stripeSessionId) {
       console.log(`[Info] Checkout session: ${stripeSessionId}`);
+    }
+
+    if (String(process.env.CHECKOUT_WAIT_USER || "").trim() === "1") {
+      const { waitForCustomCheckoutUserContinue } = require("./stripe-payment");
+      await waitForCustomCheckoutUserContinue(page, {
+        jobKey: process.env.JOB_KEY,
+        checkoutUrl:
+          customCheckoutUrl ||
+          checkoutResult?.checkoutUrl ||
+          (typeof page.url === "function" ? page.url() : ""),
+      });
     }
 
     // --- Phase 4: Execute Payment with Card Pool Retry ---

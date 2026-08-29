@@ -2263,9 +2263,13 @@ async function setCardsPaused({ cardIds = [], paused = true } = {}) {
   const result = await runExecute(
     `UPDATE card_assets
          SET is_active = 1,
-             status = '正常'
+             status = '正常',
+             in_use = 0,
+             locked_at = NULL,
+             locked_by = NULL,
+             cooldown_until = NULL
          WHERE id IN (${placeholders})
-           AND status = '暂停'`,
+           AND (status IN ('暂停', '已报废') OR is_active = 0)`,
     ids,
   );
   return { updated: Number(result.affectedRows || 0), paused: false };
@@ -4583,6 +4587,48 @@ async function getTaskStatus(jobKey) {
   return rows[0] || null;
 }
 
+async function failOrphanRunningCheckoutTasks({
+  excludeJobKeys = [],
+  minAgeSeconds = 0,
+  message = "任务进程已退出，状态已回收",
+} = {}) {
+  const exclude = [
+    ...new Set(
+      (excludeJobKeys || [])
+        .map((key) => String(key || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+  const params = [];
+  let excludeClause = "";
+  if (exclude.length) {
+    excludeClause = `AND job_key NOT IN (${exclude.map(() => "?").join(",")})`;
+    params.push(...exclude);
+  }
+  let ageClause = "";
+  if (Number(minAgeSeconds) > 0) {
+    ageClause = "AND updated_at < DATE_SUB(NOW(), INTERVAL ? SECOND)";
+    params.push(Number(minAgeSeconds));
+  }
+  const rows = await runQuery(
+    `SELECT job_key FROM task_logs
+     WHERE cdk_code IN ('[custom-pay]', '[payment-debug]', '[checkout-debug]')
+       AND status IN ('running', 'retry', 'processing')
+       ${excludeClause}
+       ${ageClause}`,
+    params,
+  );
+  const jobKeys = rows.map((row) => String(row.job_key));
+  for (const jobKey of jobKeys) {
+    await updateTaskLog(jobKey, {
+      status: "failed",
+      message,
+      progress: 100,
+    });
+  }
+  return { failed: jobKeys.length, jobKeys };
+}
+
 async function claimNextQueuedActivation() {
   return withTransaction(async (connection) => {
     const [rows] = await connection.query(
@@ -5763,6 +5809,7 @@ module.exports = {
   deleteTaskMediaFiles,
   getBillingOverviewStats,
   getTaskStatus,
+  failOrphanRunningCheckoutTasks,
   getRunningTaskByCdk,
   updateTaskLog,
   listRecentGptApiOrders,

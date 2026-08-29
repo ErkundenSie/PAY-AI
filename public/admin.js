@@ -1743,7 +1743,9 @@
           const cardLast4 = task.cardLast4 || bound.last4 || "";
           const isPaymentTask =
             String(listTask?.cdk || task.cdk || "").includes("payment-debug") ||
+            String(listTask?.cdk || task.cdk || "").includes("custom-pay") ||
             getTaskType(listTask) === "支付调试" ||
+            getTaskType(listTask) === "自定义付款" ||
             Boolean(cardLast4);
           const entries = [
             ["任务 ID", key],
@@ -1793,12 +1795,17 @@
       }
 
       async function showTaskScreenshotsByJobKey(jobKey) {
-        const task = (window.__adminLogs || []).find(
-          (item) => item.id === jobKey,
+        const fromHistory = checkoutDebugHistory.find(
+          (item) => item.id === jobKey || item.jobKey === jobKey,
         );
-        const screenshots = Array.isArray(task?.screenshots)
-          ? task.screenshots
-          : [];
+        const task =
+          fromHistory ||
+          (window.__adminLogs || []).find((item) => item.id === jobKey);
+        const screenshots =
+          (checkoutDebugJobKey === jobKey && checkoutDebugMedia.screenshots.length
+            ? checkoutDebugMedia.screenshots
+            : null) ||
+          (Array.isArray(task?.screenshots) ? task.screenshots : []);
         if (!screenshots.length) {
           showMessage("该任务暂无失败截图", "warning");
           return;
@@ -1807,10 +1814,17 @@
       }
 
       async function showTaskVideoByJobKey(jobKey) {
-        const task = (window.__adminLogs || []).find(
-          (item) => item.id === jobKey,
+        const fromHistory = checkoutDebugHistory.find(
+          (item) => item.id === jobKey || item.jobKey === jobKey,
         );
-        const videos = Array.isArray(task?.videos) ? task.videos : [];
+        const task =
+          fromHistory ||
+          (window.__adminLogs || []).find((item) => item.id === jobKey);
+        const videos =
+          (checkoutDebugJobKey === jobKey && checkoutDebugMedia.videos.length
+            ? checkoutDebugMedia.videos
+            : null) ||
+          (Array.isArray(task?.videos) ? task.videos : []);
         if (!videos.length) {
           showMessage("该任务暂无录像", "warning");
           return;
@@ -4924,13 +4938,13 @@
               ? "checked"
               : "";
             const pauseAction =
-              String(card.status || "") === "已报废"
-                ? ""
-                : String(card.status || "") === "暂停" || Number(card.is_active) === 0
-                  ? `<button class="btn-delete" style="background:var(--success-soft);color:#047857;border-color:#a7f3d0;" onclick="resumeCardPoolItem(${Number(card.id)})" title="恢复">
+              String(card.status || "") === "已报废" ||
+              String(card.status || "") === "暂停" ||
+              Number(card.is_active) === 0
+                ? `<button class="btn-delete" style="background:var(--success-soft);color:#047857;border-color:#a7f3d0;" onclick="resumeCardPoolItem(${Number(card.id)})" title="恢复">
                                   <i data-lucide="play"></i>
                               </button>`
-                  : `<button class="btn-delete" style="background:var(--warning-soft);color:#b45309;border-color:#fde68a;" onclick="pauseCardPoolItem(${Number(card.id)})" title="暂停">
+                : `<button class="btn-delete" style="background:var(--warning-soft);color:#b45309;border-color:#fde68a;" onclick="pauseCardPoolItem(${Number(card.id)})" title="暂停">
                                   <i data-lucide="pause"></i>
                               </button>`;
             return `
@@ -5325,7 +5339,7 @@
             const taskTypeClass =
               taskType === "CDK 开通"
                 ? "status-running"
-                : taskType === "支付调试"
+                : taskType === "支付调试" || taskType === "自定义付款"
                   ? "status-success"
                   : "status-warning";
             return `
@@ -7022,28 +7036,108 @@
         "timed_out",
         "manual",
       ]);
+      const CHECKOUT_DEBUG_BUSY_STATUSES = new Set([
+        "running",
+        "processing",
+        "queued",
+        "pending",
+        "retry",
+      ]);
+      let checkoutDebugUnlockTimer = null;
 
-      function resetCheckoutDebugButton() {
-        const linkButton = document.getElementById("checkout_link_debug_btn");
-        const paymentButton = document.getElementById(
-          "checkout_payment_debug_btn",
+      function checkoutDebugLogsIndicateFailure(text) {
+        return /❌\s*\[运行时错误\]|API 创建 Checkout 失败|无法创建官方 Checkout|支付失败 \(|调试失败|CHECKOUT_DEBUG_FAILED/.test(
+          String(text || ""),
         );
-        if (linkButton) {
-          linkButton.disabled = false;
-          linkButton.innerHTML = '<i data-lucide="play"></i> 链接调试';
-        }
-        if (paymentButton) {
-          paymentButton.disabled = false;
-          paymentButton.innerHTML =
-            '<i data-lucide="credit-card"></i> 支付调试';
+      }
+
+      function checkoutDebugLogsIndicateFinished(text) {
+        const raw = String(text || "");
+        return (
+          /👋 \[系统\] 流程结束/.test(raw) ||
+          /CHECKOUT_DEBUG_SUCCESS/.test(raw) ||
+          /PAYMENT_SUCCESS/.test(raw) ||
+          checkoutDebugLogsIndicateFailure(raw)
+        );
+      }
+
+      function setCheckoutDebugBusy(busy, runningLabel) {
+        const specs = [
+          [
+            "checkout_link_debug_btn",
+            "play",
+            "链接调试",
+            "链接调试中...",
+          ],
+          [
+            "checkout_payment_debug_btn",
+            "credit-card",
+            "支付调试",
+            "支付调试中...",
+          ],
+          [
+            "checkout_custom_pay_btn",
+            "log-in",
+            "自定义付款",
+            "自定义付款中...",
+          ],
+        ];
+        const activeId =
+          checkoutDebugMode === "custom"
+            ? "checkout_custom_pay_btn"
+            : checkoutDebugMode === "payment"
+              ? "checkout_payment_debug_btn"
+              : "checkout_link_debug_btn";
+        for (const [id, icon, idle] of specs) {
+          const el = document.getElementById(id);
+          if (!el) continue;
+          el.disabled = Boolean(busy);
+          if (!busy) {
+            el.innerHTML = `<i data-lucide="${icon}"></i> ${idle}`;
+          } else if (id === activeId) {
+            el.innerHTML = `<i data-lucide="loader"></i> ${runningLabel || "调试中..."}`;
+          }
         }
         lucide.createIcons();
+      }
+
+      function resetCheckoutDebugButton() {
+        if (checkoutDebugUnlockTimer) {
+          clearTimeout(checkoutDebugUnlockTimer);
+          checkoutDebugUnlockTimer = null;
+        }
+        setCheckoutDebugBusy(false);
+      }
+
+      function finishCheckoutDebugUi(status, data) {
+        stopCheckoutDebugLogStream();
+        resetCheckoutDebugButton();
+        if (data) {
+          renderCheckoutDebugStatus({
+            ...data,
+            status: status || data.status || "failed",
+          });
+        }
+      }
+
+      function scheduleCheckoutDebugUnlockFromLogs() {
+        if (checkoutDebugUnlockTimer) return;
+        checkoutDebugUnlockTimer = setTimeout(() => {
+          checkoutDebugUnlockTimer = null;
+          finishCheckoutDebugUi("failed", {
+            status: "failed",
+            message: "调试失败，可重新发起",
+            screenshots: [],
+          });
+        }, 6000);
       }
 
       function clearCheckoutDebugForm() {
         stopCheckoutDebugLogStream();
         const input = document.getElementById("checkout_session_input");
         if (input) input.value = "";
+        const checkoutUrlInput = document.getElementById("checkout_url_input");
+        if (checkoutUrlInput) checkoutUrlInput.value = "";
         const box = document.getElementById("checkout_result_box");
         if (box) box.style.display = "none";
         const pre = document.getElementById("checkout_debug_log_pre");
@@ -7074,6 +7168,10 @@
         pre.textContent = checkoutDebugLogText;
         const wrap = pre.parentElement;
         if (wrap) wrap.scrollTop = wrap.scrollHeight;
+        updateCheckoutPlanChoiceUi();
+        if (checkoutDebugLogsIndicateFailure(checkoutDebugLogText)) {
+          scheduleCheckoutDebugUnlockFromLogs();
+        }
       }
 
       function stopCheckoutDebugLogStream() {
@@ -7109,6 +7207,10 @@
           pre.textContent = checkoutDebugLogText;
           const wrap = pre.parentElement;
           if (wrap) wrap.scrollTop = wrap.scrollHeight;
+        }
+        updateCheckoutPlanChoiceUi();
+        if (checkoutDebugLogsIndicateFailure(checkoutDebugLogText)) {
+          scheduleCheckoutDebugUnlockFromLogs();
         }
       }
 
@@ -7158,6 +7260,39 @@
         }
       }
 
+      function isCheckoutWaitingPlanChoice(data) {
+        if (data && data.waiting_plan_choice === true) return true;
+        return /请用当前账号在浏览器打开付款链接|仍在等待你在付款页完成选择|等待选择套餐档位|仍在等待后台选择套餐档位/.test(
+          String(checkoutDebugLogText || ""),
+        );
+      }
+
+      function updateCheckoutPlanChoiceUi(data) {
+        const choiceWrap = document.getElementById("checkout_plan_choice_wrap");
+        const statusEl = document.getElementById("checkout_result_status");
+        const urlEl = document.getElementById("checkout_plan_choice_url");
+        if (!choiceWrap) return;
+        const waitingChoice =
+          Boolean(checkoutDebugJobKey) &&
+          checkoutDebugMode === "custom" &&
+          isCheckoutWaitingPlanChoice(data);
+        choiceWrap.style.display = waitingChoice ? "block" : "none";
+        if (waitingChoice && statusEl) {
+          statusEl.textContent = "⏳ 请在浏览器打开付款链接并完成选择";
+          statusEl.style.color = "var(--primary)";
+        }
+        if (urlEl) {
+          const checkoutUrl = String(
+            data?.checkout_url ||
+              document.getElementById("checkout_url_input")?.value ||
+              "",
+          ).trim();
+          urlEl.innerHTML = checkoutUrl
+            ? `<a href="${escapeHtml(checkoutUrl)}" target="_blank" rel="noopener">${escapeHtml(checkoutUrl)}</a>`
+            : "";
+        }
+      }
+
       function renderCheckoutDebugStatus(data) {
         const box = document.getElementById("checkout_result_box");
         const statusEl = document.getElementById("checkout_result_status");
@@ -7175,13 +7310,17 @@
         if (statusEl) {
           if (status === "success") {
             statusEl.textContent =
-              checkoutDebugMode === "payment"
+              checkoutDebugMode === "custom"
+                ? "✅ 自定义付款成功"
+                : checkoutDebugMode === "payment"
                 ? "✅ 支付调试成功"
                 : "✅ 支付链接已生成";
             statusEl.style.color = "var(--success, #22c55e)";
           } else if (status === "running") {
             statusEl.textContent =
-              checkoutDebugMode === "payment"
+              checkoutDebugMode === "custom"
+                ? "⏳ 正在登录并付款..."
+                : checkoutDebugMode === "payment"
                 ? "⏳ 正在发起支付调试..."
                 : "⏳ 链接调试进行中...";
             statusEl.style.color = "var(--text-dim)";
@@ -7193,6 +7332,7 @@
         if (emailEl && data.email) {
           emailEl.textContent = `账号: ${data.email}`;
         }
+        updateCheckoutPlanChoiceUi(data);
         if (urlWrap) {
           urlWrap.innerHTML =
             checkoutDebugMode !== "payment" && checkoutUrl
@@ -7202,16 +7342,46 @@
                 : "";
         }
         if (shotWrap) {
-          const shots = Array.isArray(data.screenshots) ? data.screenshots : [];
-          if (shots.length) {
-            shotWrap.innerHTML =
-              `<div style="font-size:13px; margin-bottom:8px; color:var(--text-dim);">失败截图 (${shots.length})</div>` +
-              shots
-                .map(
-                  (p) =>
-                    `<div style="margin-bottom:10px;"><img src="${buildScreenshotUrl(p)}" alt="${escapeHtml(p)}" style="max-width:100%; border-radius:8px; border:1px solid var(--divider);"></div>`,
-                )
-                .join("");
+          const historyTask = checkoutDebugHistory.find(
+            (item) =>
+              item.jobKey === checkoutDebugJobKey ||
+              item.id === checkoutDebugJobKey,
+          );
+          const shots = [
+            ...new Set(
+              [
+                ...(Array.isArray(data.screenshots) ? data.screenshots : []),
+                ...(Array.isArray(historyTask?.screenshots)
+                  ? historyTask.screenshots
+                  : []),
+              ].filter(Boolean),
+            ),
+          ];
+          const videos = [
+            ...new Set(
+              [
+                ...(Array.isArray(data.videos) ? data.videos : []),
+                ...(Array.isArray(historyTask?.videos)
+                  ? historyTask.videos
+                  : []),
+              ].filter(Boolean),
+            ),
+          ];
+          checkoutDebugMedia = { screenshots: shots, videos };
+          const failed =
+            !CHECKOUT_DEBUG_BUSY_STATUSES.has(String(status).toLowerCase()) &&
+            String(status).toLowerCase() !== "success";
+          if (failed && (shots.length || videos.length)) {
+            shotWrap.innerHTML = `${
+              shots.length
+                ? `<button type="button" class="btn btn-secondary" onclick="showCheckoutDebugScreenshots()"><i data-lucide="image"></i> 查看截图 (${shots.length})</button>`
+                : ""
+            }${
+              videos.length
+                ? `<button type="button" class="btn btn-secondary" onclick="showCheckoutDebugVideos()"><i data-lucide="clapperboard"></i> 查看录像 (${videos.length})</button>`
+                : ""
+            }`;
+            lucide.createIcons();
           } else {
             shotWrap.innerHTML = "";
           }
@@ -7228,18 +7398,37 @@
           if (!data.success) return;
           renderCheckoutDebugStatus(data);
           const status = String(data.status || "").toLowerCase();
-          if (CHECKOUT_DEBUG_TERMINAL_STATUSES.has(status)) {
+          const finished =
+            CHECKOUT_DEBUG_TERMINAL_STATUSES.has(status) ||
+            (Boolean(status) && !CHECKOUT_DEBUG_BUSY_STATUSES.has(status)) ||
+            checkoutDebugLogsIndicateFinished(checkoutDebugLogText);
+          if (finished) {
+            const resolvedStatus = CHECKOUT_DEBUG_BUSY_STATUSES.has(status)
+              ? checkoutDebugLogsIndicateFailure(checkoutDebugLogText)
+                ? "failed"
+                : status
+              : status;
             stopCheckoutDebugLogStream();
             fetchCheckoutDebugLogsTail().catch(() => {});
             resetCheckoutDebugButton();
+            loadCheckoutDebugHistory().catch(() => {});
+            if (resolvedStatus === "failed" && status !== "failed") {
+              renderCheckoutDebugStatus({
+                ...data,
+                status: "failed",
+                message: data.message || "调试失败",
+              });
+            }
             if (forceToast) {
               showMessage(
-                status === "success"
-                  ? checkoutDebugMode === "payment"
+                resolvedStatus === "success"
+                  ? checkoutDebugMode === "custom"
+                    ? "自定义付款成功"
+                    : checkoutDebugMode === "payment"
                     ? "支付调试成功"
                     : "支付链接生成成功"
                   : data.message || "调试失败",
-                status === "success" ? "success" : "error",
+                resolvedStatus === "success" ? "success" : "error",
               );
             }
           }
@@ -7248,29 +7437,245 @@
         }
       }
 
+      async function submitCheckoutPlanChoice(variant) {
+        if (!checkoutDebugJobKey) {
+          showMessage("当前没有自定义付款任务", "warning");
+          return;
+        }
+        try {
+          const res = await authFetch(
+            `/api/admin/checkout/${encodeURIComponent(checkoutDebugJobKey)}/choice`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ variant }),
+            },
+          );
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.error || data.message || "提交档位失败");
+          }
+          const wrap = document.getElementById("checkout_plan_choice_wrap");
+          if (wrap) wrap.style.display = "none";
+          showMessage(data.message || "已提交套餐档位", "success");
+        } catch (error) {
+          showMessage(error.message || "提交档位失败", "error");
+        }
+      }
+
       async function startCheckoutDebug() {
         return startCheckoutTask("link");
       }
 
-      async function startCheckoutPayment() {
-        let cardOptions =
-          '<option value="pool">跟随系统（卡池自动选卡）</option>';
+      let checkoutDebugHistory = [];
+      let checkoutDebugAddresses = [];
+      let checkoutDebugMedia = { screenshots: [], videos: [] };
+
+      async function showCheckoutDebugScreenshots() {
+        const shots = checkoutDebugMedia.screenshots || [];
+        if (!shots.length) {
+          showMessage("该任务暂无失败截图", "warning");
+          return;
+        }
+        await showTaskScreenshots(shots, "失败截图");
+      }
+
+      async function showCheckoutDebugVideos() {
+        const videos = checkoutDebugMedia.videos || [];
+        if (!videos.length) {
+          showMessage("该任务暂无录像", "warning");
+          return;
+        }
+        await showTaskVideoByJobKey(checkoutDebugJobKey);
+      }
+
+      function checkoutDebugTypeFromTask(task) {
+        const type = getTaskType(task);
+        if (type === "自定义付款") return "custom";
+        if (type === "支付调试") return "payment";
+        return "link";
+      }
+
+      function onCheckoutCardSourceChange() {
+        const source = document.getElementById("checkout_card_source")?.value;
+        const wrap = document.getElementById("checkout_manual_card_wrap");
+        if (wrap) wrap.hidden = source !== "manual";
+      }
+
+      function getCheckoutDebugCardChoice() {
+        const source =
+          document.getElementById("checkout_card_source")?.value || "pool";
+        const extra = document.getElementById("checkout_manual_card")?.value || "";
+        return { source, extra };
+      }
+
+      function clearCheckoutSessionText() {
+        const input = document.getElementById("checkout_session_input");
+        if (input) input.value = "";
+      }
+
+      function randomCheckoutHolderName() {
+        const first = [
+          "James",
+          "Mary",
+          "John",
+          "Patricia",
+          "Robert",
+          "Jennifer",
+          "Michael",
+          "Linda",
+        ];
+        const last = [
+          "Smith",
+          "Johnson",
+          "Williams",
+          "Brown",
+          "Jones",
+          "Miller",
+          "Davis",
+          "Wilson",
+        ];
+        return `${first[Math.floor(Math.random() * first.length)]} ${last[Math.floor(Math.random() * last.length)]}`;
+      }
+
+      function fillCheckoutDebugAddress(addr) {
+        const setVal = (id, value) => {
+          const el = document.getElementById(id);
+          if (el) el.value = value || "";
+        };
+        setVal(
+          "checkout_addr_name",
+          addr?.name || randomCheckoutHolderName(),
+        );
+        setVal("checkout_addr_line1", addr?.line1);
+        setVal("checkout_addr_city", addr?.city);
+        setVal("checkout_addr_state", addr?.state);
+        setVal("checkout_addr_postal", addr?.postal_code);
+        setVal("checkout_addr_country", addr?.country || "US");
+      }
+
+      function getCheckoutDebugAddress() {
+        const line1 = document.getElementById("checkout_addr_line1")?.value?.trim();
+        const city = document.getElementById("checkout_addr_city")?.value?.trim();
+        const state = document.getElementById("checkout_addr_state")?.value?.trim();
+        const postal = document
+          .getElementById("checkout_addr_postal")
+          ?.value?.trim();
+        const country = String(
+          document.getElementById("checkout_addr_country")?.value || "US",
+        )
+          .trim()
+          .toUpperCase();
+        const name = document
+          .getElementById("checkout_addr_name")
+          ?.value?.trim();
+        if (!line1 || !city || !state || !postal) return null;
+        return {
+          name: name || "",
+          line1,
+          city,
+          state,
+          postal_code: postal,
+          country: country || "US",
+        };
+      }
+
+      function onCheckoutAddressSourceChange() {
+        const sel = document.getElementById("checkout_address_source");
+        const value = sel?.value || "auto";
+        if (value === "none") {
+          fillCheckoutDebugAddress({ country: "US" });
+          return;
+        }
+        const addr =
+          checkoutDebugAddresses.find((item) => String(item.id) === value) ||
+          checkoutDebugAddresses.find((item) => !Number(item.is_bound)) ||
+          checkoutDebugAddresses[0];
+        fillCheckoutDebugAddress(addr || { country: "US" });
+      }
+
+      const CHECKOUT_DEBUG_FALLBACK_ADDRS = [
+        {
+          line1: "123 SW Main St",
+          city: "Portland",
+          state: "OR",
+          postal_code: "97201",
+          country: "US",
+        },
+        {
+          line1: "200 Market St",
+          city: "Wilmington",
+          state: "DE",
+          postal_code: "19801",
+          country: "US",
+        },
+        {
+          line1: "45 Main St",
+          city: "Concord",
+          state: "NH",
+          postal_code: "03301",
+          country: "US",
+        },
+        {
+          line1: "12 Last Chance Gulch",
+          city: "Helena",
+          state: "MT",
+          postal_code: "59601",
+          country: "US",
+        },
+        {
+          line1: "500 W 5th Ave",
+          city: "Anchorage",
+          state: "AK",
+          postal_code: "99501",
+          country: "US",
+        },
+      ];
+
+      function pickNextCheckoutDebugAddress() {
+        const currentLine1 =
+          document.getElementById("checkout_addr_line1")?.value?.trim() || "";
+        const currentPostal =
+          document.getElementById("checkout_addr_postal")?.value?.trim() || "";
+        const pool = [
+          ...checkoutDebugAddresses,
+          ...CHECKOUT_DEBUG_FALLBACK_ADDRS,
+        ].filter((item) => item?.line1);
+        const different = pool.filter(
+          (item) =>
+            item.line1 !== currentLine1 ||
+            String(item.postal_code || "") !== currentPostal,
+        );
+        const source = different.length ? different : pool;
+        return source[Math.floor(Math.random() * source.length)] || {
+          country: "US",
+        };
+      }
+
+      function refreshCheckoutDebugAddress() {
+        const addr = pickNextCheckoutDebugAddress();
+        fillCheckoutDebugAddress({
+          ...addr,
+          name: randomCheckoutHolderName(),
+        });
+        const sel = document.getElementById("checkout_address_source");
+        if (!sel || sel.value === "auto" || sel.value === "none") return;
+        const nextId = addr?.id != null ? String(addr.id) : "";
+        if (nextId && [...sel.options].some((opt) => opt.value === nextId)) {
+          sel.value = nextId;
+        }
+      }
+
+      async function loadCheckoutDebugCards() {
+        const sel = document.getElementById("checkout_card_source");
+        if (!sel) return;
+        const current = sel.value || "pool";
+        let options = '<option value="pool">跟随系统（卡池自动选卡）</option>';
         try {
           const res = await authFetch("/api/admin/cards/options");
           const data = await res.json();
           const cards = Array.isArray(data.cards) ? data.cards : [];
-          const usable = cards.filter(
-            (card) =>
-              Number(card.is_active) &&
-              String(card.status || "正常") === "正常" &&
-              !(
-                card.cooldown_until &&
-                new Date(card.cooldown_until) > new Date()
-              ) &&
-              (card.max_usage_count == null ||
-                Number(card.usage_count || 0) < Number(card.max_usage_count)),
-          );
-          cardOptions += usable
+          options += cards
             .map((card) => {
               const last4 = String(card.last4 || "").slice(-4);
               const holder = card.payment_holder_name || card.card_holder || "";
@@ -7279,30 +7684,198 @@
             })
             .join("");
         } catch (_) {
-          /* keep pool option */
+          /* keep pool */
         }
-        cardOptions += '<option value="manual">手动输入新卡片</option>';
-        const extraHtml = `
-                <label>用卡方式</label>
-                <select class="asset-input" data-confirm-value onchange="document.getElementById('checkout_manual_card_input').hidden = this.value !== 'manual'">
-                  ${cardOptions}
-                </select>
-                <input id="checkout_manual_card_input" class="asset-input" data-confirm-extra hidden placeholder="卡号|月/年|CVC|持卡人（可选）">
-              `;
-        const confirmed = await showAdminConfirm(
-          "默认跟随系统从卡池选卡。也可指定一张卡，或手动输入新卡片。",
-          "确认支付调试",
-          extraHtml,
+        options += '<option value="manual">手动输入新卡片</option>';
+        sel.innerHTML = options;
+        if ([...sel.options].some((opt) => opt.value === current)) {
+          sel.value = current;
+        }
+        onCheckoutCardSourceChange();
+      }
+
+      async function loadCheckoutDebugAddresses() {
+        const sel = document.getElementById("checkout_address_source");
+        if (!sel) return;
+        checkoutDebugAddresses = [];
+        try {
+          const res = await authFetch("/api/admin/addresses?region=US");
+          const data = await res.json();
+          checkoutDebugAddresses = Array.isArray(data.addresses)
+            ? data.addresses
+            : [];
+        } catch (_) {
+          checkoutDebugAddresses = [];
+        }
+        const unbound = checkoutDebugAddresses.filter(
+          (item) => !Number(item.is_bound),
         );
-        if (!confirmed) return;
-        const payload =
-          confirmed === true ? { source: "pool", extra: "" } : confirmed;
+        const generated = {
+          line1: "123 SW Main St",
+          city: "Portland",
+          state: "OR",
+          postal_code: "97201",
+          country: "US",
+        };
+        const autoAddr = unbound[0] || checkoutDebugAddresses[0] || generated;
+        let html = '<option value="auto">自动填充（免税地址池）</option>';
+        html += '<option value="none">不指定，系统自动选</option>';
+        html += checkoutDebugAddresses
+          .map((item) => {
+            const label = `${item.line1}, ${item.city}${Number(item.is_bound) ? "（已绑定）" : ""}`;
+            return `<option value="${escapeHtml(String(item.id))}">${escapeHtml(label)}</option>`;
+          })
+          .join("");
+        sel.innerHTML = html;
+        sel.value = autoAddr ? "auto" : "none";
+        fillCheckoutDebugAddress(autoAddr || { country: "US" });
+      }
+
+      function bindCheckoutDebugOverlayScroll(el) {
+        if (!el || el.dataset.overlayScroll === "1") return;
+        el.dataset.overlayScroll = "1";
+        let timer = 0;
+        el.addEventListener(
+          "scroll",
+          () => {
+            el.classList.add("is-scrolling");
+            clearTimeout(timer);
+            timer = setTimeout(() => el.classList.remove("is-scrolling"), 800);
+          },
+          { passive: true },
+        );
+      }
+
+      function bindCheckoutDebugHistoryOverlayScroll() {
+        bindCheckoutDebugOverlayScroll(
+          document.getElementById("checkout_debug_history_list"),
+        );
+        bindCheckoutDebugOverlayScroll(
+          document.querySelector("#checkout_debug .checkout-debug-body"),
+        );
+      }
+
+      function renderCheckoutDebugHistory() {
+        const list = document.getElementById("checkout_debug_history_list");
+        if (!list) return;
+        bindCheckoutDebugHistoryOverlayScroll();
+        if (!checkoutDebugHistory.length) {
+          list.innerHTML =
+            '<div class="checkout-debug-history-empty">暂无支付调试任务</div>';
+          return;
+        }
+        list.innerHTML = checkoutDebugHistory
+          .map((task) => {
+            const type = getTaskType(task);
+            const status = statusMap[task.status] || {
+              class: "status-running",
+              label: String(task.status || "").toUpperCase(),
+            };
+            const active =
+              checkoutDebugJobKey && task.jobKey === checkoutDebugJobKey
+                ? " active"
+                : "";
+            const key = escapeHtml(task.jobKey || "");
+            return `<button type="button" class="checkout-debug-history-item${active}" data-job-key="${key}" onclick="selectCheckoutDebugHistory('${key}')">
+              <div class="checkout-debug-history-top">
+                <span class="checkout-debug-history-type">${escapeHtml(type)}</span>
+                <span class="status-badge ${status.class}">${escapeHtml(status.label)}</span>
+              </div>
+              <div class="checkout-debug-history-meta">${escapeHtml(task.time || "")} · <span class="checkout-debug-history-job">${key}</span></div>
+            </button>`;
+          })
+          .join("");
+      }
+
+      async function loadCheckoutDebugHistory(showToast = false) {
+        try {
+          const res = await authFetch("/api/admin/task-logs?limit=200");
+          const data = await res.json();
+          const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+          checkoutDebugHistory = tasks.filter((task) => {
+            const cdk = String(task.cdk || "");
+            return (
+              cdk === "[checkout-debug]" ||
+              cdk === "[payment-debug]" ||
+              cdk === "[custom-pay]"
+            );
+          });
+          renderCheckoutDebugHistory();
+          if (showToast) showMessage("历史任务已刷新", "success");
+        } catch (error) {
+          if (showToast) {
+            showMessage(error.message || "加载历史任务失败", "error");
+          }
+        }
+        lucide.createIcons();
+      }
+
+      async function selectCheckoutDebugHistory(jobKey) {
+        const key = String(jobKey || "").trim();
+        if (!key) return;
+        const task = checkoutDebugHistory.find((item) => item.jobKey === key);
+        stopCheckoutDebugLogStream();
+        checkoutDebugJobKey = key;
+        checkoutDebugMode = checkoutDebugTypeFromTask(task);
+        renderCheckoutDebugHistory();
+        renderCheckoutDebugStatus({
+          status: task?.status || "running",
+          message: task?.message || "",
+          email: task?.token || "",
+          checkout_url: "",
+          screenshots: task?.screenshots || [],
+          videos: task?.videos || [],
+        });
+        try {
+          const res = await authFetch(
+            `/api/admin/task-logs/${encodeURIComponent(key)}`,
+          );
+          const data = await res.json();
+          const output = String(data.task?.output || "");
+          checkoutDebugLogText = output;
+          checkoutDebugLogAfter = 0;
+          const pre = document.getElementById("checkout_debug_log_pre");
+          if (pre) {
+            pre.textContent = output;
+            const wrap = pre.parentElement;
+            if (wrap) wrap.scrollTop = wrap.scrollHeight;
+          }
+          if (
+            CHECKOUT_DEBUG_BUSY_STATUSES.has(
+              String(task?.status || "").toLowerCase(),
+            )
+          ) {
+            startCheckoutDebugLogStream();
+          }
+        } catch (error) {
+          showMessage(error.message || "加载任务日志失败", "error");
+        }
+      }
+
+      async function startCheckoutPayment() {
+        const payload = getCheckoutDebugCardChoice();
+        if (payload.source === "manual" && !String(payload.extra || "").trim()) {
+          showMessage("请填写手动卡片：卡号|月/年|CVC", "warning");
+          return;
+        }
         await startCheckoutTask("payment", payload);
+      }
+
+      async function startCustomCheckoutPayment() {
+        const payload = getCheckoutDebugCardChoice();
+        if (payload.source === "manual" && !String(payload.extra || "").trim()) {
+          showMessage("请填写手动卡片：卡号|月/年|CVC", "warning");
+          return;
+        }
+        await startCheckoutTask("custom", payload);
       }
 
       async function startCheckoutTask(mode, cardChoice) {
         const sessionRaw = document
           .getElementById("checkout_session_input")
+          ?.value?.trim();
+        const checkoutUrl = document
+          .getElementById("checkout_url_input")
           ?.value?.trim();
         const planType =
           document.getElementById("checkout_plan_type")?.value || "plus";
@@ -7311,25 +7884,26 @@
         const regionSel = document.getElementById("checkout_region_selector");
         const region =
           normalizePaymentRegion(regionSel?.value) || currentRegion;
-        const isPayment = mode === "payment";
-        const btn = document.getElementById(
-          isPayment ? "checkout_payment_debug_btn" : "checkout_link_debug_btn",
-        );
+        const isCustom = mode === "custom";
+        const isPayment = mode === "payment" || isCustom;
+        if (isPayment && !cardChoice) {
+          cardChoice = getCheckoutDebugCardChoice();
+        }
 
         if (!sessionRaw) {
           showMessage("请粘贴 Session JSON", "warning");
           return;
         }
 
-        if (btn) {
-          btn.disabled = true;
-          btn.innerHTML = `<i data-lucide="loader"></i> ${
-            isPayment ? "支付启动中..." : "链接启动中..."
-          }`;
-          lucide.createIcons();
-        }
-
-        checkoutDebugMode = isPayment ? "payment" : "link";
+        checkoutDebugMode = isCustom ? "custom" : isPayment ? "payment" : "link";
+        setCheckoutDebugBusy(
+          true,
+          isCustom
+            ? "登录付款中..."
+            : isPayment
+              ? "支付启动中..."
+              : "链接启动中...",
+        );
 
         checkoutDebugLogText = "";
         checkoutDebugLogAfter = 0;
@@ -7370,6 +7944,11 @@
                         )
                       : undefined,
                   };
+                  if (isCustom) {
+                    requestBody.cdk_code = "[custom-pay]";
+                    requestBody.checkout_mode = "ui";
+                    if (checkoutUrl) requestBody.checkout_url = checkoutUrl;
+                  }
                   if (isPayment && cardChoice && cardChoice.source) {
                     if (String(cardChoice.source).startsWith("id:")) {
                       requestBody.card_id = Number(
@@ -7381,6 +7960,8 @@
                       ).trim();
                     }
                   }
+                  const address = getCheckoutDebugAddress();
+                  if (address) requestBody.address = address;
                   return requestBody;
                 })(),
               ),
@@ -7392,12 +7973,14 @@
           }
 
           checkoutDebugJobKey = data.jobKey;
-          if (btn) {
-            btn.innerHTML = `<i data-lucide="loader"></i> ${
-              isPayment ? "支付调试中..." : "链接调试中..."
-            }`;
-            lucide.createIcons();
-          }
+          setCheckoutDebugBusy(
+            true,
+            isCustom
+              ? "自定义付款中..."
+              : isPayment
+                ? "支付调试中..."
+                : "链接调试中...",
+          );
           renderCheckoutDebugStatus({
             status: "running",
             email: data.email,
@@ -7405,10 +7988,11 @@
             screenshots: [],
           });
           showMessage(
-            `${isPayment ? "支付" : "链接"}调试任务已启动：${data.jobKey}`,
+            `${isCustom ? "自定义付款" : isPayment ? "支付" : "链接"}任务已启动：${data.jobKey}`,
             "success",
           );
           startCheckoutDebugLogStream();
+          loadCheckoutDebugHistory().catch(() => {});
         } catch (e) {
           resetCheckoutDebugButton();
           showMessage(e.message || "启动失败", "error");
@@ -7430,6 +8014,12 @@
         const sel = document.getElementById("checkout_region_selector");
         if (sel) sel.value = currentRegion;
         onCheckoutRegionChange();
+        await Promise.all([
+          loadCheckoutDebugCards(),
+          loadCheckoutDebugAddresses(),
+          loadCheckoutDebugHistory(),
+        ]);
+        bindCheckoutDebugHistoryOverlayScroll();
         lucide.createIcons();
       }
 

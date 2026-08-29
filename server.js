@@ -15,11 +15,18 @@ const runtimeLog = require("./runtime-log");
 const { REGION_CONFIG, isSupportedRegion } = require("./region-config");
 const { getPlanTypeLabel } = require("./credit-quantity");
 const {
-  isPaymentDebugCdk,
+  isCustomPayCdk,
+  isAdminPaymentCdk,
   resolvePublicCheckoutCdk,
   buildCheckoutTaskCreate,
   buildCheckoutTaskUpdate,
 } = require("./checkout-task-log");
+const { parseCheckoutUrl } = require("./checkout-protocol");
+const {
+  setCheckoutChoice,
+  isWaitingCheckoutChoice,
+  clearCheckoutChoice,
+} = require("./checkout-choice");
 const taxFreeAddress = require("./tax-free-address");
 const { testProxyUrl, normalizeProxyLines } = require("./proxy-pool");
 const {
@@ -301,6 +308,32 @@ function reserveForegroundSlot(slotKey) {
 
 function releaseForegroundSlot(slotKey) {
   activeForegroundJobs.delete(String(slotKey));
+}
+
+async function reapOrphanCheckoutTasks({ startup = false } = {}) {
+  const message = startup
+    ? "服务重启，任务已中断"
+    : "任务进程已退出，状态已回收";
+  const result = await store.failOrphanRunningCheckoutTasks({
+    excludeJobKeys: startup ? [] : [...activeForegroundJobs],
+    minAgeSeconds: startup ? 0 : 60,
+    message,
+  });
+  for (const jobKey of result.jobKeys || []) {
+    clearCheckoutChoice(jobKey);
+    logTask(jobKey, message, "warn");
+    broadcastToTask(jobKey, {
+      type: "status",
+      jobKey,
+      status: "failed",
+      message,
+      progress: 100,
+    });
+  }
+  if (result.failed) {
+    console.warn(`[Checkout] 已回收 ${result.failed} 个卡住的调试任务`);
+  }
+  return result;
 }
 
 let drainingActivationQueue = false;
@@ -782,7 +815,7 @@ app.use((req, res, next) => {
   const sendJson = res.json.bind(res);
   res.json = function sendSanitizedJson(body) {
     if (
-      res.statusCode >= 500 &&
+      res.statusCode === 500 &&
       body &&
       typeof body === "object" &&
       !Array.isArray(body) &&
@@ -1263,9 +1296,29 @@ function parseManualBillingAddress(raw) {
   return address;
 }
 
+function resolveAdminCheckoutCdk(cdkCode) {
+  return isCustomPayCdk(cdkCode) ? "[custom-pay]" : "[payment-debug]";
+}
+
+function resolveCustomCheckoutUrl(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return "";
+  if (/^https:\/\/chatgpt\.com\/checkout\//i.test(text)) return text;
+  const parsed = parseCheckoutUrl(text);
+  if (parsed.sessionId) {
+    const processor = parsed.processorEntity || "openai_llc";
+    return (
+      parsed.checkoutUrl ||
+      `https://chatgpt.com/checkout/${processor}/${parsed.sessionId}`
+    );
+  }
+  return null;
+}
+
 async function startPublicCheckoutPay(body = {}, options = {}) {
   const requireManualPayment = Boolean(options.requireManualPayment);
-  const isAdminDebug = isPaymentDebugCdk(body.cdk_code);
+  const isCustomPay = isCustomPayCdk(body.cdk_code);
+  const isAdminDebug = isAdminPaymentCdk(body.cdk_code);
   const rawSession = String(body.session || "").trim();
   if (!rawSession) {
     return {
@@ -1387,6 +1440,28 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
     return { status: 400, payload: { success: false, error: err.message } };
   }
 
+  const checkoutUrl = resolveCustomCheckoutUrl(
+    body.checkout_url || body.checkoutUrl || "",
+  );
+  if (checkoutUrl === null) {
+    return {
+      status: 400,
+      payload: {
+        success: false,
+        error: "请填写有效的 ChatGPT Checkout 链接，例如 https://chatgpt.com/checkout/openai_llc/oaics_...",
+      },
+    };
+  }
+  const checkoutModeRaw = String(
+    body.checkout_mode || body.checkoutMode || "",
+  )
+    .trim()
+    .toLowerCase();
+  const checkoutMode =
+    checkoutUrl || isCustomPay || checkoutModeRaw === "ui"
+      ? "ui"
+      : "api";
+
   if (requireManualPayment && !manualCard) {
     return {
       status: 400,
@@ -1396,7 +1471,7 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
 
   if (!manualCard && !preferredCardId && !(await store.hasAvailableCard())) {
     return {
-      status: 503,
+      status: 409,
       payload: {
         success: false,
         error: isAdminDebug
@@ -1420,7 +1495,11 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
       cardLast4: manualCard ? manualCard.card_number : null,
     }),
   );
-  const taskLabel = isAdminDebug ? "付款调试" : "自助开通";
+  const taskLabel = isCustomPay
+    ? "自定义付款"
+    : isAdminDebug
+      ? "付款调试"
+      : "自助开通";
   await store.updateTaskLog(
     task.jobKey,
     buildCheckoutTaskUpdate({
@@ -1432,7 +1511,7 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
   );
   logTask(
     task.jobKey,
-    `${taskLabel}任务已创建 plan=${planType} plan_name=${resolvedPlanName}${creditQuantity ? ` credits=${creditQuantity}` : ""} region=${regionCode} email=${email || "-"}`,
+    `${taskLabel}任务已创建 plan=${planType} plan_name=${resolvedPlanName}${creditQuantity ? ` credits=${creditQuantity}` : ""} region=${regionCode} email=${email || "-"} mode=${checkoutMode}${checkoutUrl ? " checkout_url=yes" : ""}`,
   );
   reserveForegroundSlot(task.jobKey);
   spawnCheckoutPaymentWorker({
@@ -1448,6 +1527,8 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
     manualCard,
     manualAddress,
     taskLabel,
+    checkoutMode,
+    checkoutUrl,
   });
 
   return {
@@ -2008,7 +2089,10 @@ function runCheckoutScript(
   return new Promise((resolve) => {
     logTask(jobKey, `启动子进程 attempt=${attempt} script=${scriptPath}`);
     const child = spawn("node", [scriptPath], {
-      env,
+      env: {
+        ...env,
+        JOB_KEY: String(env?.JOB_KEY || jobKey || "").trim(),
+      },
       windowsHide: true,
     });
 
@@ -2044,7 +2128,12 @@ function runCheckoutScript(
           `attempt=${attempt} 超过 ${PROCESS_IDLE_TIMEOUT_MS / 1000} 秒无输出，终止子进程`,
           "warn",
         );
-        child.kill();
+        child.kill("SIGTERM");
+        setTimeout(() => {
+          if (finished) return;
+          child.kill("SIGKILL");
+          completeChild(null, "SIGKILL");
+        }, 8000).unref();
       }, PROCESS_IDLE_TIMEOUT_MS);
     };
 
@@ -2075,8 +2164,8 @@ function runCheckoutScript(
         "error",
       );
     });
-    child.on("close", (code, signal) => {
-      cleanup();
+    const completeChild = (code, signal) => {
+      if (finished) return;
       logTask(
         jobKey,
         `attempt=${attempt} 子进程退出 code=${code} signal=${signal || "none"} timedOut=${timedOut}`,
@@ -2088,7 +2177,9 @@ function runCheckoutScript(
         output,
         analysis: analyzeProcessOutput(output, timedOut),
       });
-    });
+    };
+    child.on("exit", (code, signal) => completeChild(code, signal));
+    child.on("close", (code, signal) => completeChild(code, signal));
   });
 }
 
@@ -3368,7 +3459,7 @@ app.post("/api/admin/checkout/pay", async (req, res) => {
     await ensureStoreReady();
     const result = await startPublicCheckoutPay({
       ...(req.body || {}),
-      cdk_code: "[payment-debug]",
+      cdk_code: resolveAdminCheckoutCdk(req.body?.cdk_code),
     });
     return res.status(result.status).json(result.payload);
   } catch (error) {
@@ -3401,6 +3492,11 @@ app.get("/api/admin/checkout/status/:jobKey", async (req, res) => {
       screenshots = extractScreenshotsFromOutput(task.raw_output || "");
     }
     const videos = extractVideosFromOutput(task.raw_output || "");
+    const waitingPlanChoice =
+      isWaitingCheckoutChoice(jobKey) ||
+      /请用当前账号在浏览器打开付款链接|仍在等待你在付款页完成选择|等待选择套餐档位|仍在等待后台选择套餐档位/.test(
+        String(task.raw_output || task.message || ""),
+      );
     res.json({
       success: true,
       jobKey,
@@ -3408,11 +3504,45 @@ app.get("/api/admin/checkout/status/:jobKey", async (req, res) => {
       message: task.message,
       progress: Number(task.progress || 0),
       checkout_url: checkoutUrl || null,
+      waiting_plan_choice: waitingPlanChoice,
       screenshots,
       videos,
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/admin/checkout/:jobKey/choice", async (req, res) => {
+  try {
+    const jobKey = decodeURIComponent(String(req.params.jobKey || "").trim());
+    if (!jobKey) {
+      return res.status(400).json({ success: false, error: "缺少 jobKey" });
+    }
+    const variant = String(req.body?.variant || req.body?.choice || "").trim();
+    if (!activeForegroundJobs.has(jobKey)) {
+      await store.updateTaskLog(jobKey, {
+        status: "failed",
+        message: "任务进程已退出，无法继续协议付款",
+        progress: 100,
+      });
+      clearCheckoutChoice(jobKey);
+      logTask(jobKey, "任务进程已退出，无法继续协议付款", "warn");
+      return res.status(409).json({
+        success: false,
+        error: "任务已不在运行，无法继续协议付款",
+      });
+    }
+    setCheckoutChoice(jobKey, variant);
+    logTask(jobKey, `自定义付款已确认继续协议付款: ${variant}`);
+    return res.json({
+      success: true,
+      jobKey,
+      variant,
+      message: "已确认，任务将继续协议付款",
+    });
+  } catch (error) {
+    return res.status(400).json({ success: false, error: error.message });
   }
 });
 
@@ -3760,6 +3890,7 @@ function spawnCheckoutDebugWorker({
 }) {
   (async () => {
     const checkoutScript = path.join(__dirname, "index.js");
+    let settled = false;
     try {
       const proxy = await store.getActiveProxy();
       const hcaptchaCfg = await store.getHcaptchaConfig();
@@ -3798,13 +3929,12 @@ function spawnCheckoutDebugWorker({
             workerEnv,
             1,
             async (progress) => {
-              if (progress > 0) {
-                await store.updateTaskLog(task.jobKey, {
-                  status: "running",
-                  message: "浏览器调试进行中...",
-                  progress: Math.min(progress, 99),
-                });
-              }
+              if (settled || progress <= 0) return;
+              await store.updateTaskLog(task.jobKey, {
+                status: "running",
+                message: "浏览器调试进行中...",
+                progress: Math.min(progress, 99),
+              });
             },
           ),
       });
@@ -3823,6 +3953,7 @@ function spawnCheckoutDebugWorker({
           ? `支付链接: ${checkoutUrl}`
           : analysis.message || "支付链接调试失败";
 
+      settled = true;
       await store.updateTaskLog(task.jobKey, {
         status: finalStatus,
         message: finalMessage,
@@ -3838,6 +3969,7 @@ function spawnCheckoutDebugWorker({
     } catch (error) {
       console.error(`[Checkout Debug] ${task.jobKey}:`, error);
       logTask(task.jobKey, `调试任务异常: ${error.message}`, "error");
+      settled = true;
       await store.updateTaskLog(task.jobKey, {
         status: "failed",
         message: error.message,
@@ -3860,11 +3992,14 @@ function spawnCheckoutPaymentWorker({
   manualCard = null,
   manualAddress = null,
   taskLabel = "付款调试",
+  checkoutMode = "api",
+  checkoutUrl = "",
 }) {
   (async () => {
     const checkoutScript = path.join(__dirname, "index.js");
     const runningMessage = `${taskLabel}进行中...`;
     const failedMessage = `${taskLabel}失败`;
+    let settled = false;
     try {
       const proxy = await store.getActiveProxy();
       const hcaptchaCfg = await store.getHcaptchaConfig();
@@ -3873,7 +4008,11 @@ function spawnCheckoutPaymentWorker({
       const runtimeEnv = {
         ...process.env,
         ...hcaptchaEnv,
-        CHECKOUT_MODE: "api",
+        CHECKOUT_MODE: checkoutMode === "ui" ? "ui" : "api",
+        CHECKOUT_URL: checkoutUrl || "",
+        CHECKOUT_WAIT_USER:
+          checkoutMode === "ui" || checkoutUrl ? "1" : "",
+        JOB_KEY: task.jobKey,
         RECORD_VIDEO: recordVideo ? "1" : "0",
         CHATGPT_TOKEN: token,
         CHATGPT_SESSION_JSON: String(sessionRaw || "").startsWith("{")
@@ -3907,21 +4046,20 @@ function spawnCheckoutPaymentWorker({
             workerEnv,
             1,
             async (progress) => {
-              if (progress > 0) {
-                const runningProgress = Math.min(progress, 99);
-                await store.updateTaskLog(task.jobKey, {
-                  status: "running",
-                  message: runningMessage,
-                  progress: runningProgress,
-                });
-                broadcastToTask(task.jobKey, {
-                  type: "progress",
-                  jobKey: task.jobKey,
-                  status: "running",
-                  message: runningMessage,
-                  progress: runningProgress,
-                });
-              }
+              if (settled || progress <= 0) return;
+              const runningProgress = Math.min(progress, 99);
+              await store.updateTaskLog(task.jobKey, {
+                status: "running",
+                message: runningMessage,
+                progress: runningProgress,
+              });
+              broadcastToTask(task.jobKey, {
+                type: "progress",
+                jobKey: task.jobKey,
+                status: "running",
+                message: runningMessage,
+                progress: runningProgress,
+              });
             },
           ),
       });
@@ -3937,6 +4075,7 @@ function spawnCheckoutPaymentWorker({
           : Math.min(getCheckoutProgress(run.output, finalStatus), 99);
       const finalMessage = analysis.message || failedMessage;
 
+      settled = true;
       await store.updateTaskLog(task.jobKey, {
         status: finalStatus,
         message: finalMessage,
@@ -3959,6 +4098,7 @@ function spawnCheckoutPaymentWorker({
     } catch (error) {
       console.error(`[Checkout Payment] ${task.jobKey}:`, error);
       logTask(task.jobKey, `${taskLabel}任务异常: ${error.message}`, "error");
+      settled = true;
       await store.updateTaskLog(task.jobKey, {
         status: "failed",
         message: error.message,
@@ -4936,6 +5076,21 @@ async function start() {
   } catch (error) {
     console.error(`❌ [资产锁] 启动回收失败: ${error.message}`);
   }
+
+  try {
+    const reaped = await reapOrphanCheckoutTasks({ startup: true });
+    if (reaped.failed) {
+      console.warn(`[Checkout] 启动回收卡住的调试任务 ${reaped.failed} 个`);
+    }
+  } catch (error) {
+    console.error(`[Checkout] 启动回收失败: ${error.message}`);
+  }
+
+  setInterval(() => {
+    reapOrphanCheckoutTasks().catch((error) => {
+      console.warn(`[Checkout] 周期回收失败: ${error.message}`);
+    });
+  }, 60 * 1000).unref();
 
   // 每 60 秒兜底回收一次"超过 15 分钟仍未释放"的锁（防进程崩溃）
   setInterval(async () => {

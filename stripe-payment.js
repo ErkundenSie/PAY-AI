@@ -196,14 +196,16 @@ async function discoverCardInputs(page, timeout = 45000) {
 
 async function prepareCheckoutCardSection(page) {
     await page.waitForURL(/checkout\/openai_llc|pay\.openai|checkout\.stripe|stripe\.com/i, { timeout: 5000 }).catch(() => {});
-    await page.getByText(/Configure your plan|Card number|Pay with/i).first()
+    await page.getByText(/Configure your plan|配置套餐|Card number|Pay with/i).first()
         .waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
 
     const newCardOptions = [
         () => page.getByRole('button', { name: /^Card$/i }).first(),
+        () => page.getByRole('button', { name: /银行卡|信用卡/i }).first(),
         () => page.getByRole('tab', { name: /^Card$/i }).first(),
         () => page.locator('[data-testid*="payment-method-card" i]').first(),
         () => page.locator('[role="radio"][aria-label*="card" i]').first(),
+        () => page.getByText(/^银行卡$/).first(),
     ];
     for (const getOption of newCardOptions) {
         try {
@@ -468,12 +470,135 @@ async function fillLocatedInput(target, text) {
     await humanType(context, selector, text);
 }
 
+function resolveCheckoutPlanVariant(planType = '') {
+    const raw = String(planType || '').trim().toLowerCase();
+    if (!raw) return '';
+    if (/pro_5x|prolite|chatgptprolite|5x|5\s*倍/.test(raw)) return 'pro_5x';
+    if (/pro_20x|chatgptpro(?!lite)|20x|20\s*倍/.test(raw)) return 'pro_20x';
+    if (/^pro/.test(raw)) return 'pro_20x';
+    return '';
+}
+
+function checkoutPlanVariantPatterns(variant) {
+    if (variant === 'pro_5x') {
+        return [/多\s*5\s*倍/, /5\s*x\s*more/i, /5x more usage/i, /5x the usage/i];
+    }
+    if (variant === 'pro_20x') {
+        return [/多\s*20\s*倍/, /20\s*x\s*more/i, /20x more usage/i, /20x the usage/i];
+    }
+    return [];
+}
+
+async function selectCheckoutPlanVariant(page, planType = '') {
+    const variant = resolveCheckoutPlanVariant(planType);
+    if (!variant || !page) return false;
+
+    const headingVisible = await page
+        .getByText(/配置套餐|Configure your plan/i)
+        .first()
+        .isVisible({ timeout: 2500 })
+        .catch(() => false);
+    const patterns = checkoutPlanVariantPatterns(variant);
+    let matched = null;
+    for (const pattern of patterns) {
+        const candidates = [
+            page.getByRole('radio', { name: pattern }).first(),
+            page.getByRole('button', { name: pattern }).first(),
+            page.locator('[role="radio"]').filter({ hasText: pattern }).first(),
+            page.locator('[role="option"]').filter({ hasText: pattern }).first(),
+            page.locator('button, [role="button"], label').filter({ hasText: pattern }).first(),
+            page.getByText(pattern).first(),
+        ];
+        for (const candidate of candidates) {
+            if (await candidate.isVisible({ timeout: 700 }).catch(() => false)) {
+                matched = candidate;
+                break;
+            }
+        }
+        if (matched) break;
+    }
+
+    if (!matched) {
+        if (headingVisible) {
+            console.log(`[Stripe] 配置套餐页未找到 ${variant} 选项，继续当前档位`);
+        }
+        return false;
+    }
+
+    await matched.scrollIntoViewIfNeeded().catch(() => {});
+    await matched.click({ timeout: 4000 });
+    console.log(`[Stripe] ✅ 已选择 Checkout 套餐档位: ${variant}`);
+    await page.waitForTimeout(800);
+    return true;
+}
+
+async function checkoutHasPlanChoiceUi(page) {
+    if (!page) return false;
+    const heading = await page
+        .getByText(/配置套餐|Configure your plan/i)
+        .first()
+        .isVisible({ timeout: 5000 })
+        .catch(() => false);
+    if (!heading) return false;
+    const five = await page
+        .getByText(/多\s*5\s*倍|5x more/i)
+        .first()
+        .isVisible({ timeout: 800 })
+        .catch(() => false);
+    const twenty = await page
+        .getByText(/多\s*20\s*倍|20x more/i)
+        .first()
+        .isVisible({ timeout: 800 })
+        .catch(() => false);
+    return Boolean(five || twenty);
+}
+
+async function waitForCustomCheckoutUserContinue(page, options = {}) {
+    const {
+        writeCheckoutChoiceWait,
+        readCheckoutChoice,
+        clearCheckoutChoice,
+    } = require('./checkout-choice');
+    const jobKey = String(options.jobKey || process.env.JOB_KEY || '').trim();
+    const checkoutUrl = String(options.checkoutUrl || '').trim();
+    if (jobKey) writeCheckoutChoiceWait(jobKey);
+    await saveDebugScreenshot(page, 'await_user_choice').catch(() => null);
+    console.log(
+      `[自定义付款] 请用当前账号在浏览器打开付款链接并完成选择，然后在后台点继续协议付款${checkoutUrl ? ` ${checkoutUrl}` : ''} job=${jobKey || 'missing'}`,
+    );
+
+    const deadline = Date.now() + 10 * 60 * 1000;
+    let lastBeat = 0;
+    while (Date.now() < deadline) {
+        const now = Date.now();
+        if (now - lastBeat > 20000) {
+            console.log('[自定义付款] 仍在等待你在付款页完成选择...');
+            lastBeat = now;
+        }
+        const choice = jobKey ? readCheckoutChoice(jobKey) : null;
+        if (choice && choice.status === 'chosen') {
+            clearCheckoutChoice(jobKey);
+            console.log('[自定义付款] 已确认选择，刷新付款页后继续协议付款');
+            if (page && typeof page.reload === 'function') {
+                await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+                await page.waitForTimeout(1200);
+            }
+            return { waited: true };
+        }
+        await page.waitForTimeout(1000);
+    }
+
+    if (jobKey) clearCheckoutChoice(jobKey);
+    console.log('[自定义付款] 等待选择超时，继续协议付款');
+    return { waited: true };
+}
+
 /**
  * 在 Stripe Checkout 页面完成信用卡支付
  * @param {import('playwright').Page} page - Playwright Page 实例
  * @param {object} cardInfo - { number, expiry, cvc, holder }
  * @param {object} address - { line1, city, state, postal_code, country }
- * @param {object} [options] - { cardAttempt?: number, holderName?: string }
+ * @param {object} [options] - { cardAttempt?: number, holderName?: string, planType?: string }
  * @returns {Promise<{ success: boolean, error?: string, screenshot?: string, declined?: boolean, canRetryCard?: boolean }>}
  */
 async function completeStripeCardPayment(page, cardInfo, address, options = {}) {
@@ -481,6 +606,7 @@ async function completeStripeCardPayment(page, cardInfo, address, options = {}) 
     const cardAttempt = Number(options.cardAttempt) || 1;
     const isCardRetry = cardAttempt > 1;
     let holderName = String(options.holderName || '').trim();
+    const planType = String(options.planType || '').trim();
     let checkoutDue = null;
 
     try {
@@ -2819,6 +2945,10 @@ module.exports = {
     getTypingDelay,
     normalizeCardExpiry,
     normalizeCardNumber,
+    resolveCheckoutPlanVariant,
+    selectCheckoutPlanVariant,
+    checkoutHasPlanChoiceUi,
+    waitForCustomCheckoutUserContinue,
     // Internal helpers exported for testing
     humanTypeInFrame,
     saveDebugScreenshot,

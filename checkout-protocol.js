@@ -47,6 +47,7 @@ const STRIPE_API_BASE = "https://api.stripe.com/v1";
 const STRIPE_VERSION = "2025-03-31.basil";
 const STRIPE_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+const BROWSER_MAJOR = "136";
 
 const US_STATE_CODES = {
   oregon: "OR",
@@ -118,6 +119,11 @@ function normalizeCardForProtocol(card = {}) {
     exp_year: expiry.exp_year,
     holder: String(card.holder || card.card_holder || "").trim(),
   };
+}
+
+function isHostedStripeSession(sessionId = "", checkoutUrl = "") {
+  const url = String(checkoutUrl || "").trim();
+  return /checkout\.stripe\.com/i.test(url);
 }
 
 function parseCheckoutUrl(raw = "") {
@@ -429,6 +435,98 @@ function stripeHeaders() {
     Origin: "https://js.stripe.com",
     Referer: "https://js.stripe.com/",
     "User-Agent": STRIPE_UA,
+    priority: "u=1, i",
+    "sec-ch-ua": `"Not;A=Brand";v="8", "Chromium";v="${BROWSER_MAJOR}", "Google Chrome";v="${BROWSER_MAJOR}"`,
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-ch-ua-arch": '"x86"',
+    "sec-ch-ua-bitness": '"64"',
+    "sec-ch-ua-full-version": `"${BROWSER_MAJOR}.0.0.0"`,
+    "sec-ch-ua-full-version-list": `"Not;A=Brand";v="8", "Chromium";v="${BROWSER_MAJOR}.0.0.0", "Google Chrome";v="${BROWSER_MAJOR}.0.0.0"`,
+    "sec-ch-ua-platform-version": '"15.0.0"',
+  };
+}
+
+function toSameOriginPath(raw = "") {
+  const text = String(raw || "").trim();
+  if (!text) return "";
+  try {
+    const url = new URL(text, PLATFORM_BASE);
+    if (url.origin === PLATFORM_BASE) {
+      return `${url.pathname}${url.search}`;
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  return text.startsWith("/") ? text : "";
+}
+
+async function tryChallengeSdk(page, flow) {
+  if (!page || typeof page.evaluate !== "function") {
+    return { token: "", telemetry: "" };
+  }
+  return page
+    .evaluate(async (requestedFlow) => {
+      if (typeof window.ChallengeSDK === "undefined") {
+        return { token: "", telemetry: "" };
+      }
+      await window.ChallengeSDK.init(requestedFlow);
+      const tokenValue = await window.ChallengeSDK.token(requestedFlow);
+      let timingValue = "";
+      if (typeof window.ChallengeSDK.timing === "function") {
+        timingValue = await window.ChallengeSDK.timing();
+      }
+      return {
+        token: String(tokenValue || "").trim(),
+        telemetry: timingValue
+          ? JSON.stringify(timingValue)
+          : "[1,null]",
+      };
+    }, flow)
+    .catch(() => ({ token: "", telemetry: "" }));
+}
+
+async function collectProtocolApiHeaders({
+  page,
+  accessToken,
+  accountId,
+  flow,
+  targetPath,
+  referer,
+}) {
+  const chatgpt = require("./chatgpt");
+  const gpt = new chatgpt.ChatGPTService(
+    page && typeof page.context === "function" ? page.context().request : null,
+    accessToken,
+  );
+  const php = await gpt.collectPhpCheckoutContext(page, accountId);
+  const sdk = await tryChallengeSdk(page, flow);
+  const sentinel =
+    sdk.token ||
+    (await gpt.harvestPhpSentinel(page, { flow }).catch(() => ""));
+  const headers = chatgpt.buildPhpCheckoutHeaders({
+    token: accessToken,
+    accountId: php.accountId || accountId,
+    deviceId: php.deviceId,
+    clientVersion: php.clientVersion,
+    clientBuild: php.clientBuild,
+    attestation: php.attestation,
+    sentinel: chatgpt.isUsableCheckoutSentinel(sentinel) ? sentinel : "",
+    extra: {
+      "x-openai-target-path": targetPath,
+      "x-openai-target-route": targetPath,
+      ...(referer ? { Referer: referer } : {}),
+      ...(sdk.telemetry ? { "oai-telemetry": sdk.telemetry } : {}),
+    },
+  });
+  const sizes = chatgpt.summarizeCheckoutSentinel(sentinel);
+  return {
+    headers,
+    sentinel,
+    attestation: php.attestation,
+    deviceId: php.deviceId,
+    flow: sizes.flow || flow,
+    sentinelBytes: sizes.total,
   };
 }
 
@@ -444,8 +542,9 @@ function formatApiError(status, body) {
 }
 
 async function postSameOriginJson(page, { path, payload, headers, referer }) {
-  return page.evaluate(
-    async ({ path, payload, headers, referer }) => {
+  const args = { path, payload, headers, referer: referer || "" };
+  const run = () =>
+    page.evaluate(async ({ path, payload, headers, referer }) => {
       try {
         const requestHeaders = { ...headers };
         if (referer) requestHeaders.Referer = referer;
@@ -466,9 +565,28 @@ async function postSameOriginJson(page, { path, payload, headers, referer }) {
           error: String((err && err.message) || err),
         };
       }
-    },
-    { path, payload, headers, referer: referer || "" },
-  );
+    }, args);
+
+  try {
+    return await run();
+  } catch (err) {
+    const msg = String((err && err.message) || err);
+    if (!/Execution context was destroyed|navigation/i.test(msg)) throw err;
+    await page
+      .waitForLoadState("domcontentloaded", { timeout: 20000 })
+      .catch(() => {});
+    const now =
+      page && typeof page.url === "function" ? String(page.url() || "") : "";
+    if (!now.startsWith("https://chatgpt.com")) {
+      await page
+        .goto("https://chatgpt.com/", {
+          waitUntil: "domcontentloaded",
+          timeout: 60000,
+        })
+        .catch(() => {});
+    }
+    return run();
+  }
 }
 
 async function getSameOriginJson(page, { path, headers }) {
@@ -523,6 +641,10 @@ function expectedProtocolDueRange(currency, planName = "") {
 }
 
 function isExpectedProtocolDueAmount(dueAmount, currency, planName = "") {
+  if (String(process.env.CHECKOUT_WAIT_USER || "").trim() === "1") {
+    const amount = Number(dueAmount);
+    return Number.isFinite(amount) && amount > 0;
+  }
   const amount = Number(dueAmount);
   if (!Number.isFinite(amount) || amount <= 0) return false;
   const range = expectedProtocolDueRange(currency, planName);
@@ -733,6 +855,24 @@ async function completeProtocolCheckout({
     headers["chatgpt-account-id"] = resolvedAccountId;
     headers["openai-account-id"] = resolvedAccountId;
   }
+  const checkoutReferer = `${PLATFORM_BASE}/checkout/${ctx.processorEntity}/${ctx.sessionId}`;
+  let taxHeaders = headers;
+  try {
+    const taxChallenge = await collectProtocolApiHeaders({
+      page,
+      accessToken: token,
+      accountId: resolvedAccountId,
+      flow: "chatgpt_checkout",
+      targetPath: TAXES_PATH,
+      referer: checkoutReferer,
+    });
+    taxHeaders = taxChallenge.headers;
+    progress(
+      `税费风控: flow=${taxChallenge.flow || "chatgpt_checkout"} sentinel=${taxChallenge.sentinelBytes}B attest=${taxChallenge.attestation ? "yes" : "no"} did=${taxChallenge.deviceId ? "yes" : "no"}`,
+    );
+  } catch (err) {
+    progress(`税费风控跳过: ${String((err && err.message) || err).slice(0, 80)}`);
+  }
 
   const taxPayload = buildTaxesPayload({
     sessionId: ctx.sessionId,
@@ -748,7 +888,8 @@ async function completeProtocolCheckout({
   const taxResult = await postSameOriginJson(page, {
     path: TAXES_PATH,
     payload: taxPayload,
-    headers,
+    headers: taxHeaders,
+    referer: checkoutReferer,
   });
   if (taxResult.error && !taxResult.bodyText) {
     return { success: false, fallback: true, error: taxResult.error };
@@ -823,17 +964,42 @@ async function completeProtocolCheckout({
     };
   }
 
-  const referer = `${PLATFORM_BASE}/checkout/${ctx.processorEntity}/${ctx.sessionId}`;
+  const referer = checkoutReferer;
   progress("确认 Checkout...");
+  let confirmHeaders = headers;
+  try {
+    const confirmChallenge = await collectProtocolApiHeaders({
+      page,
+      accessToken: token,
+      accountId: resolvedAccountId,
+      flow: "checkout_session_approval",
+      targetPath: CONFIRM_PATH,
+      referer,
+    });
+    confirmHeaders = confirmChallenge.headers;
+    progress(
+      `确认风控: flow=${confirmChallenge.flow || "checkout_session_approval"} sentinel=${confirmChallenge.sentinelBytes}B attest=${confirmChallenge.attestation ? "yes" : "no"}`,
+    );
+  } catch (err) {
+    progress(`确认风控跳过: ${String((err && err.message) || err).slice(0, 80)}`);
+  }
   const confirmResult = await postSameOriginJson(page, {
     path: CONFIRM_PATH,
     payload: buildConfirmPayload({
       sessionId: ctx.sessionId,
       confirmToken,
     }),
-    headers,
+    headers: confirmHeaders,
     referer,
   });
+  if (confirmResult.error && !confirmResult.bodyText) {
+    return {
+      success: false,
+      fallback: true,
+      error: confirmResult.error,
+      holderName,
+    };
+  }
   const confirmData = parseJsonBody(confirmResult.bodyText);
   if (confirmResult.status !== 200) {
     return {
@@ -846,6 +1012,7 @@ async function completeProtocolCheckout({
 
   const clientSecret = String(confirmData.client_secret || "").trim();
   const confirmStatus = String(confirmData.status || "");
+  const confirmReturnUrl = String(confirmData.confirm_return_url || "").trim();
   if (!clientSecret) {
     if (/succeed|success|complete/i.test(confirmStatus)) {
       return {
@@ -864,7 +1031,9 @@ async function completeProtocolCheckout({
   }
 
   const piId = clientSecret.split("_secret_")[0];
-  const returnUrl = `${PLATFORM_BASE}/checkout/openai_llc/${ctx.sessionId}`;
+  const returnUrl =
+    confirmReturnUrl ||
+    `${PLATFORM_BASE}/checkout/verify?stripe_session_id=${encodeURIComponent(ctx.sessionId)}&processor_entity=${encodeURIComponent(ctx.processorEntity)}`;
   progress(`确认 PaymentIntent: ${piId}`);
   const piResult = await confirmPaymentIntent({
     piId,
@@ -888,12 +1057,21 @@ async function completeProtocolCheckout({
   }
 
   try {
-    await page
-      .goto(returnUrl, {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
-      })
-      .catch(() => {});
+    const verifyPath = toSameOriginPath(returnUrl);
+    if (verifyPath) {
+      progress(`回调 Verify: ${verifyPath}`);
+      await getSameOriginJson(page, {
+        path: verifyPath,
+        headers: confirmHeaders,
+      });
+    } else {
+      await page
+        .goto(returnUrl, {
+          waitUntil: "domcontentloaded",
+          timeout: 30000,
+        })
+        .catch(() => {});
+    }
     if (resolvedAccountId) {
       await getSameOriginJson(page, {
         path: `${SUBSCRIPTIONS_PATH}?account_id=${encodeURIComponent(resolvedAccountId)}`,
@@ -925,6 +1103,8 @@ module.exports = {
   hydrateCheckoutFromUrl,
   resolveProcessorEntity,
   normalizeUsStateCode,
+  stripeHeaders,
+  toSameOriginPath,
   parseCardExpiry,
   normalizeCardForProtocol,
   buildTaxesPayload,
@@ -933,4 +1113,5 @@ module.exports = {
   buildPaymentIntentConfirmForm,
   completeProtocolCheckout,
   isExpectedProtocolDueAmount,
+  isHostedStripeSession,
 };

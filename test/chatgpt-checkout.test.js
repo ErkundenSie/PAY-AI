@@ -216,6 +216,7 @@ describe("chatgpt checkout helpers", () => {
     });
     expect(headers.authorization).toBe("Bearer tok");
     expect(headers["chatgpt-account-id"]).toBe("acct-1");
+    expect(headers["openai-account-id"]).toBe("acct-1");
     expect(headers["oai-device-id"]).toBe("did-1");
     expect(headers["oai-client-version"]).toBe("prod-123");
     expect(headers["openai-sentinel-token"]).toBe('{"p":1}');
@@ -253,6 +254,17 @@ describe("chatgpt checkout helpers", () => {
     const body = buildCheckoutSentinelReqBody("did-1");
     expect(body.id).toBe("did-1");
     expect(body.flow).toBe("chatgpt_checkout");
+    expect(body.p.startsWith("gAAAAAC")).toBe(true);
+  });
+
+  it("builds checkout_session_approval sentinel/req body for confirm", () => {
+    const body = buildCheckoutSentinelReqBody(
+      "did-1",
+      null,
+      "checkout_session_approval",
+    );
+    expect(body.id).toBe("did-1");
+    expect(body.flow).toBe("checkout_session_approval");
     expect(body.p.startsWith("gAAAAAC")).toBe(true);
   });
 

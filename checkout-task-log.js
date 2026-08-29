@@ -2,9 +2,18 @@
 
 const SELF_PAY_CDK = "[self-pay]";
 const PAYMENT_DEBUG_CDK = "[payment-debug]";
+const CUSTOM_PAY_CDK = "[custom-pay]";
 
 function isPaymentDebugCdk(cdkCode) {
   return String(cdkCode || "") === PAYMENT_DEBUG_CDK;
+}
+
+function isCustomPayCdk(cdkCode) {
+  return String(cdkCode || "") === CUSTOM_PAY_CDK;
+}
+
+function isAdminPaymentCdk(cdkCode) {
+  return isPaymentDebugCdk(cdkCode) || isCustomPayCdk(cdkCode);
 }
 
 function resolvePublicCheckoutCdk() {
@@ -35,7 +44,11 @@ function buildCheckoutTaskUpdate({
   creditQuantity = 0,
   regionCode,
 } = {}) {
-  const taskLabel = isPaymentDebugCdk(cdkCode) ? "付款调试" : "自助开通";
+  const taskLabel = isCustomPayCdk(cdkCode)
+    ? "自定义付款"
+    : isPaymentDebugCdk(cdkCode)
+      ? "付款调试"
+      : "自助开通";
   return {
     status: "running",
     message: `${taskLabel}：${planType}${creditQuantity ? ` x${creditQuantity}` : ""} / ${regionCode}`,
@@ -46,7 +59,10 @@ function buildCheckoutTaskUpdate({
 module.exports = {
   SELF_PAY_CDK,
   PAYMENT_DEBUG_CDK,
+  CUSTOM_PAY_CDK,
   isPaymentDebugCdk,
+  isCustomPayCdk,
+  isAdminPaymentCdk,
   resolvePublicCheckoutCdk,
   buildCheckoutTaskCreate,
   buildCheckoutTaskUpdate,

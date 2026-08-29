@@ -113,6 +113,7 @@ async function attemptCardPayment(
     email,
     currency,
     progress,
+    planType,
   },
 ) {
   const checkoutContext = hydrateCheckoutFromUrl(
@@ -165,10 +166,22 @@ async function attemptCardPayment(
     page && typeof page.url === "function" ? String(page.url() || "") : "";
   if (checkoutUrl && currentUrl !== checkoutUrl) {
     progress("正在打开 Checkout 页面以继续 UI 支付...");
-    await page.goto(checkoutUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 90000,
-    });
+    try {
+      await page.goto(checkoutUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 90000,
+      });
+    } catch (err) {
+      await page
+        .waitForLoadState("domcontentloaded", { timeout: 20000 })
+        .catch(() => {});
+      const now = page && typeof page.url === "function" ? String(page.url() || "") : "";
+      if (/checkout\.stripe\.com|\/checkout\//i.test(now)) {
+        progress(`Checkout 导航被打断，已停留在付款页`);
+      } else {
+        throw err;
+      }
+    }
     await page
       .waitForLoadState("networkidle", { timeout: 30000 })
       .catch(() => {});
@@ -177,6 +190,7 @@ async function attemptCardPayment(
   return completeStripeCardPayment(page, cardInfo, address, {
     cardAttempt,
     holderName,
+    planType,
   });
 }
 
@@ -393,6 +407,7 @@ async function executePaymentWithRetry(page, options) {
         email,
         currency: billedCurrency,
         progress,
+        planType,
       });
 
       if (paymentResult.holderName) {

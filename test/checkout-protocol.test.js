@@ -10,6 +10,8 @@ const {
   extractCheckoutContext,
   hydrateCheckoutFromUrl,
   isExpectedProtocolDueAmount,
+  stripeHeaders,
+  toSameOriginPath,
 } = require("../checkout-protocol");
 
 describe("checkout protocol helpers", () => {
@@ -99,6 +101,16 @@ describe("checkout protocol helpers", () => {
         "token",
       ),
     ).toBe(true);
+    expect(
+      canUseProtocolCheckout(
+        {
+          sessionId: "cs_live_abc",
+          checkoutUrl:
+            "https://chatgpt.com/checkout/openai_llc/cs_live_abc",
+        },
+        "token",
+      ),
+    ).toBe(true);
   });
 
   it("uses oaicss session from checkout URL when sessionId is missing", () => {
@@ -184,5 +196,29 @@ describe("checkout protocol helpers", () => {
     expect(text).toContain("client_context%5Bmode%5D=subscription");
     expect(text).toContain("client_context%5Bcurrency%5D=php");
     expect(text).not.toContain("customer_session_client_secret");
+  });
+
+  it("sends Stripe client hints on confirmation-token requests", () => {
+    const headers = stripeHeaders();
+    expect(headers["sec-ch-ua"]).toContain("Chromium");
+    expect(headers["sec-ch-ua-platform"]).toBe('"Windows"');
+    expect(headers["sec-ch-ua-mobile"]).toBe("?0");
+    expect(headers.Origin).toBe("https://js.stripe.com");
+  });
+
+  it("converts confirm_return_url to a same-origin path", () => {
+    expect(
+      toSameOriginPath(
+        "https://chatgpt.com/checkout/verify?stripe_session_id=cs_live_abc&processor_entity=openai_llc",
+      ),
+    ).toBe(
+      "/checkout/verify?stripe_session_id=cs_live_abc&processor_entity=openai_llc",
+    );
+    expect(toSameOriginPath("/checkout/verify?x=1")).toBe(
+      "/checkout/verify?x=1",
+    );
+    expect(toSameOriginPath("https://checkout.stripe.com/c/pay/cs_live")).toBe(
+      "",
+    );
   });
 });

@@ -270,6 +270,14 @@ function isUsableCheckoutSentinel(raw) {
   );
 }
 
+function pickSentinelFlow(left, right, fallback = "chatgpt_checkout") {
+  const a = String(left || "").trim();
+  const b = String(right || "").trim();
+  if (b && b !== "chatgpt_checkout") return b;
+  if (a && a !== "chatgpt_checkout") return a;
+  return a || b || fallback;
+}
+
 function mergeCheckoutSentinelToken(base, extra) {
   const a = parseSentinelObject(base) || {};
   const b = parseSentinelObject(extra) || {};
@@ -278,7 +286,7 @@ function mergeCheckoutSentinelToken(base, extra) {
     t: pickLongerSentinelField(a.t, b.t),
     c: pickLongerSentinelField(a.c, b.c),
     id: String(a.id || b.id || "").trim(),
-    flow: String(a.flow || b.flow || "chatgpt_checkout").trim(),
+    flow: pickSentinelFlow(a.flow, b.flow),
   };
   if (!token.p || !token.id || !token.c) {
     return pickLongerSentinelField(base, extra);
@@ -286,12 +294,16 @@ function mergeCheckoutSentinelToken(base, extra) {
   return JSON.stringify(token);
 }
 
-function buildCheckoutSentinelReqBody(deviceId = "", fingerprint = null) {
+function buildCheckoutSentinelReqBody(
+  deviceId = "",
+  fingerprint = null,
+  flow = "chatgpt_checkout",
+) {
   const id = String(deviceId || "").trim() || crypto.randomUUID();
   return {
     p: generateSentinelRequirementsToken(fingerprint),
     id,
-    flow: "chatgpt_checkout",
+    flow: String(flow || "chatgpt_checkout").trim() || "chatgpt_checkout",
   };
 }
 
@@ -321,9 +333,7 @@ function assembleCheckoutSentinelToken(
       extractChallengeToken(challengeObj),
     ),
     id: deviceId,
-    flow: String(
-      capturedObj.flow || reqBody?.flow || "chatgpt_checkout",
-    ).trim(),
+    flow: pickSentinelFlow(capturedObj.flow, reqBody?.flow),
   };
   if (!token.p || !token.id || !token.c) {
     return String(captured || "").trim();
@@ -357,6 +367,7 @@ function buildPhpCheckoutHeaders({
   const aid = String(accountId || "").trim();
   if (aid) {
     headers["chatgpt-account-id"] = aid;
+    headers["openai-account-id"] = aid;
   }
   if (deviceId) headers["oai-device-id"] = deviceId;
   if (clientVersion) headers["oai-client-version"] = clientVersion;
@@ -1191,17 +1202,23 @@ class ChatGPTService {
     }
 
     const jsonText = JSON.stringify(data);
-    const sessionId =
-      data.checkout_session_id ||
-      data.session_id ||
-      jsonText.match(/cs_(?:live|test)_[A-Za-z0-9]+/)?.[0] ||
+    const explicitId = String(
+      data.checkout_session_id || data.session_id || "",
+    ).trim();
+    const oaicss =
+      (/^oaics_/i.test(explicitId) ? explicitId : "") ||
       jsonText.match(/oaics_[A-Za-z0-9]+/)?.[0] ||
+      "";
+    const sessionId =
+      oaicss ||
+      explicitId ||
+      jsonText.match(/cs_(?:live|test)_[A-Za-z0-9]+/)?.[0] ||
       null;
 
     const apiUrl = String(
       data.url || data.stripe_hosted_url || data.checkout_url || "",
     ).trim();
-    if (apiUrl.startsWith("http")) {
+    if (apiUrl.startsWith("http") && !oaicss) {
       return { sessionId, checkoutUrl: apiUrl };
     }
 
@@ -1241,12 +1258,19 @@ class ChatGPTService {
 
   async harvestPhpSentinel(page, options = {}) {
     await installSentinelCapture(page);
+    const flow =
+      String(options.flow || "chatgpt_checkout").trim() || "chatgpt_checkout";
     let token = String(options.sentinel || "").trim();
     if (!isUsableCheckoutSentinel(token)) {
       const captured = await readCapturedSentinel(page);
       token = mergeCheckoutSentinelToken(token, captured);
     }
-    if (isUsableCheckoutSentinel(token) && parseSentinelObject(token)?.t) {
+    const existing = parseSentinelObject(token);
+    if (
+      isUsableCheckoutSentinel(token) &&
+      existing?.t &&
+      String(existing.flow || "") === flow
+    ) {
       return token;
     }
 
@@ -1331,7 +1355,7 @@ class ChatGPTService {
         ];
       })
       .catch(() => buildDefaultSentinelFingerprint({ sid: deviceId }));
-    const reqBody = buildCheckoutSentinelReqBody(deviceId, fingerprint);
+    const reqBody = buildCheckoutSentinelReqBody(deviceId, fingerprint, flow);
     let challenge = null;
     const probe = await probePageSentinelEndpoint(
       page,
@@ -1346,7 +1370,7 @@ class ChatGPTService {
       challenge = probe.data;
     }
     console.log(
-      `[ChatGPT] sentinel/req flow=chatgpt_checkout HTTP ${probe?.status || 0}, body=${probe?.bytes || 0}B${probe?.error ? `, err=${probe.error}` : ""}`,
+      `[ChatGPT] sentinel/req flow=${flow} HTTP ${probe?.status || 0}, body=${probe?.bytes || 0}B${probe?.error ? `, err=${probe.error}` : ""}`,
     );
 
     const assembled = assembleCheckoutSentinelToken(

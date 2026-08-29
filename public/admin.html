@@ -2853,13 +2853,547 @@
         box-sizing: border-box;
       }
 
+      #checkout_debug.page-view {
+        max-width: none;
+        width: 100%;
+        display: none;
+        flex-direction: column;
+        gap: 12px;
+        height: calc(100vh - 72px);
+        max-height: calc(100vh - 72px);
+        overflow: hidden;
+      }
+
+      #checkout_debug.page-view.active {
+        display: flex;
+      }
+
+      #checkout_debug .page-header,
+      #checkout_debug .panel {
+        margin-bottom: 0;
+      }
+
+      .checkout-debug-page-header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 12px 16px;
+        flex-wrap: wrap;
+        flex-shrink: 0;
+      }
+
+      .checkout-debug-workspace {
+        display: grid;
+        grid-template-columns: minmax(260px, 1.05fr) minmax(220px, 0.81fr) minmax(300px, 1.2fr);
+        gap: 12px;
+        align-items: stretch;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .checkout-debug-col {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .checkout-debug-col .panel {
+        padding: 12px 14px;
+      }
+
+      .checkout-debug-col-form {
+        overflow: hidden;
+      }
+
+      .checkout-debug-col-form .panel {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        padding: 14px 16px;
+      }
+
+      .checkout-debug-col-form .panel-title {
+        font-size: 14px;
+        flex-shrink: 0;
+      }
+
+      .checkout-debug-col-form .panel-title::before {
+        height: 14px;
+      }
+
+      .checkout-debug-col-form .checkout-debug-body {
+        flex: 1;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        gap: 12px;
+        margin-top: 12px;
+        scrollbar-width: none;
+      }
+
+      .checkout-debug-col-form .checkout-debug-body::-webkit-scrollbar {
+        display: none;
+        width: 0;
+        height: 0;
+      }
+
+      .checkout-debug-col-form .asset-input,
+      .checkout-debug-col-form .ui-select-trigger {
+        min-height: 40px;
+        height: 40px;
+        padding: 10px 14px;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+
+      .checkout-debug-col-form textarea.asset-input {
+        height: 72px;
+        min-height: 72px;
+        padding: 10px 14px;
+        line-height: 1.5;
+        resize: none;
+      }
+
+      .checkout-debug-col-form .ui-select-trigger {
+        min-height: 40px;
+        height: 40px;
+        padding: 10px 12px 10px 14px;
+      }
+
+      .checkout-debug-col-history .panel,
+      .checkout-debug-col-log .panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .checkout-debug-body {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .checkout-debug-params {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px 12px;
+        align-items: start;
+      }
+
+      .checkout-debug-session {
+        padding-top: 2px;
+      }
+
+      #checkout_debug .form-group {
+        margin: 0;
+      }
+
+      .checkout-debug-hint {
+        font-size: 12px;
+        color: var(--text-dim);
+        margin: -4px 0 0;
+        line-height: 1.5;
+        min-height: 0;
+      }
+
+      .checkout-debug-hint:empty {
+        display: none;
+      }
+
+      .checkout-debug-session-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+        padding-right: 10px;
+      }
+
+      .checkout-debug-session-label label {
+        margin-bottom: 0;
+      }
+
+      .checkout-debug-clear-btn {
+        border: 0;
+        background: transparent;
+        padding: 0;
+        margin: 0;
+        height: auto;
+        min-height: 0;
+        min-width: 0;
+        flex-shrink: 0;
+        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 1;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-family: inherit;
+        box-shadow: none;
+      }
+
+      .checkout-debug-clear-btn:hover {
+        color: var(--primary);
+        background: transparent;
+      }
+
+      .checkout-debug-section-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        margin: 0 0 8px;
+        display: block;
+        letter-spacing: 0.02em;
+      }
+
+      .checkout-debug-address-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin: 0 -12px 8px 0;
+        padding-right: 10px;
+      }
+
+      .checkout-debug-address-head .checkout-debug-section-title {
+        margin: 0;
+      }
+
+      .checkout-debug-section-title::before {
+        display: none;
+      }
+
+      .checkout-debug-address-block {
+        flex: 1 0 auto;
+        min-height: auto;
+        display: flex;
+        flex-direction: column;
+        padding: 10px 12px 12px;
+        border: 1px solid var(--divider);
+        border-radius: var(--radius-md);
+        background: var(--surface-soft);
+      }
+
+      .checkout-debug-address-block::before {
+        content: "";
+        flex: 0.28 1 0;
+        min-height: 0;
+      }
+
+      .checkout-debug-address-block::after {
+        content: "";
+        flex: 1 1 0;
+        min-height: 0;
+      }
+
+      .checkout-debug-address-block .checkout-debug-params {
+        margin-bottom: 8px;
+      }
+
+      #checkout_debug label {
+        margin-bottom: 6px;
+      }
+
+      .checkout-debug-address-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px 12px;
+      }
+
+      .checkout-debug-optional {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 12px;
+        border: 1px dashed var(--border-strong);
+        border-radius: var(--radius-lg);
+        background: var(--surface-soft);
+      }
+
+      .checkout-debug-optional-label {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+
+      .checkout-debug-optional-label label {
+        margin-bottom: 0;
+      }
+
+      .checkout-debug-optional-label span {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-muted);
+      }
+
+      .checkout-debug-address-grid .form-group.span-2 {
+        grid-column: 1 / -1;
+      }
+
+      .checkout-debug-page-header .page-header {
+        margin: 0;
+        flex: 1;
+        min-width: 200px;
+      }
+
+      .checkout-debug-actions {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px 12px;
+        flex-wrap: wrap;
+        flex: 0 0 auto;
+      }
+
+      .checkout-debug-actions-main {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
       .checkout-debug-actions .btn {
-        width: 128px;
-        height: 38px;
-        min-height: 38px;
+        width: auto;
+        min-width: 100px;
+        height: 36px;
+        min-height: 36px;
         padding: 0 14px;
         justify-content: center;
         box-sizing: border-box;
+        box-shadow: none;
+      }
+
+      .checkout-debug-actions .btn-primary {
+        background: var(--primary);
+        color: var(--on-primary);
+        border-color: var(--primary);
+      }
+
+      .checkout-debug-actions .btn-secondary {
+        background: var(--surface);
+        color: var(--text-secondary);
+        border: 1px solid var(--glass-border);
+      }
+
+      .checkout-debug-actions .btn-secondary:hover:not(:disabled) {
+        background: var(--surface-soft);
+        color: var(--text-main);
+        border-color: var(--border-strong);
+      }
+
+      .checkout-debug-actions .btn-ghost {
+        background: transparent;
+        color: var(--text-dim);
+        border: 1px solid transparent;
+      }
+
+      .checkout-debug-actions .btn-ghost:hover:not(:disabled) {
+        background: var(--surface-hover);
+        color: var(--text-secondary);
+      }
+
+      .checkout-debug-job {
+        display: inline-flex;
+        align-items: center;
+        min-height: 32px;
+        max-width: 100%;
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+        border: 1px solid var(--glass-border);
+        font-size: 12px;
+        line-height: 1.4;
+        color: var(--text-dim);
+        font-family: var(--font-mono);
+        word-break: break-all;
+      }
+
+      .checkout-debug-job:empty {
+        display: none;
+      }
+
+      .checkout-debug-overlay-scroll {
+        scrollbar-width: thin;
+        scrollbar-color: transparent transparent;
+      }
+
+      .checkout-debug-overlay-scroll::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      .checkout-debug-overlay-scroll::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .checkout-debug-overlay-scroll::-webkit-scrollbar-thumb {
+        background: transparent;
+        border: 0;
+        border-radius: 999px;
+      }
+
+      .checkout-debug-overlay-scroll.is-scrolling,
+      .checkout-debug-overlay-scroll:hover {
+        scrollbar-color: #cbd5e1 transparent;
+      }
+
+      .checkout-debug-overlay-scroll.is-scrolling::-webkit-scrollbar-thumb,
+      .checkout-debug-overlay-scroll:hover::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+      }
+
+      .checkout-debug-history-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        overflow: auto;
+        min-height: 0;
+        flex: 1;
+        padding-right: 2px;
+      }
+
+      .checkout-debug-history-empty {
+        color: var(--text-dim);
+        font-size: 13px;
+        padding: 24px 8px;
+        text-align: center;
+      }
+
+      .checkout-debug-history-item {
+        width: 100%;
+        text-align: left;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius-md);
+        background: var(--surface);
+        padding: 8px 10px;
+        cursor: pointer;
+        font-family: inherit;
+        color: inherit;
+      }
+
+      .checkout-debug-history-item:hover {
+        border-color: var(--primary);
+        background: var(--primary-soft);
+      }
+
+      .checkout-debug-history-item.active {
+        border-color: var(--primary);
+        background: var(--primary-soft);
+        box-shadow: 0 0 0 1px var(--primary) inset;
+      }
+
+      .checkout-debug-history-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 4px;
+      }
+
+      .checkout-debug-history-type {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-main);
+      }
+
+      .checkout-debug-history-meta {
+        font-size: 12px;
+        color: var(--text-dim);
+        line-height: 1.4;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .checkout-debug-history-job {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      #checkout_debug .runtime-log-pre-wrap {
+        flex: 1;
+        min-height: 0;
+        max-height: none;
+        overflow-x: hidden;
+        overflow-y: auto;
+      }
+
+      #checkout_debug .runtime-log-pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .checkout-debug-col-log #checkout_result_box {
+        flex: 0 0 auto;
+        padding: 10px 14px;
+      }
+
+      .checkout-debug-col-log #checkout_result_box .panel-title {
+        font-size: 14px;
+      }
+
+      #checkout_result_status {
+        margin: 6px 0 4px !important;
+        font-size: 13px;
+      }
+
+      #checkout_result_email,
+      #checkout_result_url_wrap {
+        margin-bottom: 4px !important;
+      }
+
+      .checkout-debug-media-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 6px;
+      }
+
+      .checkout-debug-media-actions:empty {
+        display: none;
+      }
+
+      .checkout-debug-media-actions .btn {
+        height: 32px;
+        min-height: 32px;
+        min-width: 0;
+        padding: 0 12px;
+      }
+
+      @media (max-width: 1280px) {
+        .checkout-debug-workspace {
+          grid-template-columns: minmax(240px, 1fr) minmax(200px, 0.78fr) minmax(260px, 1.15fr);
+        }
+      }
+
+      @media (max-width: 1100px) {
+        .checkout-debug-workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .checkout-debug-col-form,
+        .checkout-debug-col-history,
+        .checkout-debug-col-log {
+          max-height: none;
+        }
+
+        .checkout-debug-col-history .panel,
+        .checkout-debug-col-log .panel {
+          min-height: 240px;
+        }
       }
 
       .runtime-log-actions {
@@ -2871,25 +3405,42 @@
         margin-left: auto;
       }
 
-      .checkout-debug-log-meta {
+      .checkout-debug-log-toolbar {
+        align-items: center;
+        margin-bottom: 12px;
+        gap: 12px 16px;
+      }
+
+      .checkout-debug-log-heading {
         display: flex;
-        align-items: flex-end;
-        justify-content: space-between;
-        gap: var(--space-md);
-        margin: 0 0 12px;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 0;
+        flex: 1;
+      }
+
+      .checkout-debug-log-heading .panel-title {
+        margin: 0;
       }
 
       .checkout-debug-log-hint {
         font-size: 12px;
         color: var(--text-dim);
         margin: 0;
-        line-height: 1;
-        padding-bottom: 0;
+        line-height: 1.5;
+      }
+
+      .checkout-debug-log-toolbar .btn {
+        align-self: center;
       }
 
       @media (max-width: 760px) {
         .checkout-debug-log-toolbar {
           align-items: flex-start;
+        }
+
+        .checkout-debug-log-toolbar .btn {
+          width: 100%;
         }
 
         .runtime-log-actions {
@@ -5012,173 +5563,338 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
 
       <!-- 支付调试 -->
       <div id="checkout_debug" class="page-view">
-        <div class="page-header">
-          <h1>支付调试</h1>
-          <p>使用 Session 验证支付链接，或直接发起卡池付款流程。</p>
-        </div>
-
-        <div class="panel">
-          <h2 class="panel-title">生成参数</h2>
-          <div
-            style="
-              display: grid;
-              grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-              gap: 12px;
-              margin-top: 16px;
-            "
-          >
-            <div class="form-group" style="margin-bottom: 0">
-              <label style="margin-bottom: 6px">套餐类型</label>
-              <select
-                id="checkout_plan_type"
-                class="asset-input"
-                onchange="syncCheckoutPlanName()"
-              >
-                <option value="plus">Plus — chatgptplusplan</option>
-                <option value="pro_5x">Pro 5x — chatgptprolite</option>
-                <option value="pro_20x">Pro 20x — chatgptpro</option>
-                <option value="credits">
-                  Codex 点数 — chatgptbusiness_usage_based
-                </option>
-              </select>
-            </div>
-            <div
-              class="form-group"
-              style="margin-bottom: 0"
-              id="checkout_credit_quantity_wrap"
-              hidden
-            >
-              <label style="margin-bottom: 6px">充值点数</label>
-              <select id="checkout_credit_quantity" class="asset-input">
-                <option value="250">250</option>
-                <option value="500">500</option>
-                <option value="1000">1000</option>
-                <option value="1500">1500</option>
-                <option value="2000">2000</option>
-              </select>
-            </div>
-            <div class="form-group" style="margin-bottom: 0">
-              <label style="margin-bottom: 6px"
-                >plan_name（自动跟随套餐，可手动改）</label
-              >
-              <input
-                type="text"
-                id="checkout_plan_name"
-                class="asset-input"
-                placeholder="chatgptplusplan"
-                autocomplete="off"
-              />
-            </div>
-            <div class="form-group" style="margin-bottom: 0">
-              <label style="margin-bottom: 6px">支付地区</label>
-              <input
-                id="checkout_region_selector"
-                type="search"
-                list="payment_region_options"
-                class="asset-input"
-                onchange="onCheckoutRegionChange()"
-                placeholder="搜索地区或输入 ISO 代码"
-                autocomplete="off"
-              />
-            </div>
+        <div class="checkout-debug-page-header">
+          <div class="page-header">
+            <h1>支付调试</h1>
+            <p>左侧配置充值、银行卡和付款地址，中间查看历史任务，右侧跟踪运行日志。</p>
           </div>
-          <p
-            id="checkout_region_hint"
-            style="font-size: 12px; color: var(--text-dim); margin-top: 10px"
-          ></p>
-
-          <div class="form-group" style="margin-top: 16px; margin-bottom: 0">
-            <label style="margin-bottom: 6px">Session JSON</label>
-            <textarea
-              id="checkout_session_input"
-              class="asset-input"
-              rows="8"
-              placeholder="粘贴完整 Session JSON（从 chatgpt.com/api/auth/session 复制）"
-              style="
-                font-family: ui-monospace, monospace;
-                font-size: 12px;
-                resize: vertical;
-              "
-            ></textarea>
-          </div>
-
           <div class="checkout-debug-actions">
-            <button
-              type="button"
-              class="btn btn-primary"
-              onclick="startCheckoutDebug()"
-              id="checkout_link_debug_btn"
-            >
-              <i data-lucide="play"></i>
-              链接调试
-            </button>
-            <button
-              type="button"
-              class="btn btn-success"
-              onclick="startCheckoutPayment()"
-              id="checkout_payment_debug_btn"
-            >
-              <i data-lucide="credit-card"></i>
-              支付调试
-            </button>
-            <button
-              type="button"
-              class="btn btn-secondary"
-              onclick="clearCheckoutDebugForm()"
-            >
-              <i data-lucide="eraser"></i>
-              清空文本
-            </button>
-            <span
-              id="checkout_job_hint"
-              style="font-size: 12px; color: var(--text-dim)"
-            ></span>
+            <div class="checkout-debug-actions-main">
+              <button
+                type="button"
+                class="btn btn-primary"
+                onclick="startCheckoutDebug()"
+                id="checkout_link_debug_btn"
+              >
+                <i data-lucide="play"></i>
+                链接调试
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                onclick="startCheckoutPayment()"
+                id="checkout_payment_debug_btn"
+              >
+                <i data-lucide="credit-card"></i>
+                支付调试
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                onclick="startCustomCheckoutPayment()"
+                id="checkout_custom_pay_btn"
+              >
+                <i data-lucide="log-in"></i>
+                自定义付款
+              </button>
+            </div>
           </div>
         </div>
 
-        <div
-          id="checkout_result_box"
-          class="panel"
-          style="display: none; margin-top: 24px"
-        >
-          <h2 class="panel-title">任务状态</h2>
-          <div
-            id="checkout_result_status"
-            style="font-weight: 600; margin-top: 12px; margin-bottom: 8px"
-          ></div>
-          <div
-            id="checkout_result_email"
-            style="font-size: 13px; color: var(--text-dim); margin-bottom: 8px"
-          ></div>
-          <div
-            id="checkout_result_url_wrap"
-            style="margin-bottom: 12px; word-break: break-all"
-          ></div>
-          <div id="checkout_screenshot_wrap" style="margin-bottom: 12px"></div>
-        </div>
+        <div class="checkout-debug-workspace">
+          <div class="checkout-debug-col checkout-debug-col-form">
+            <div class="panel checkout-debug-panel">
+              <h2 class="panel-title">充值配置</h2>
+              <div class="checkout-debug-body">
+                <div class="checkout-debug-params">
+                  <div class="form-group">
+                    <label>套餐类型</label>
+                    <select
+                      id="checkout_plan_type"
+                      class="asset-input"
+                      onchange="syncCheckoutPlanName()"
+                    >
+                      <option value="plus">Plus — chatgptplusplan</option>
+                      <option value="pro_5x">Pro 5x — chatgptprolite</option>
+                      <option value="pro_20x">Pro 20x — chatgptpro</option>
+                      <option value="credits">
+                        Codex 点数 — chatgptbusiness_usage_based
+                      </option>
+                    </select>
+                  </div>
+                  <div
+                    class="form-group"
+                    id="checkout_credit_quantity_wrap"
+                    hidden
+                  >
+                    <label>充值点数</label>
+                    <select id="checkout_credit_quantity" class="asset-input">
+                      <option value="250">250</option>
+                      <option value="500">500</option>
+                      <option value="1000">1000</option>
+                      <option value="1500">1500</option>
+                      <option value="2000">2000</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>plan_name</label>
+                    <input
+                      type="text"
+                      id="checkout_plan_name"
+                      class="asset-input"
+                      placeholder="chatgptplusplan"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label>支付地区</label>
+                    <input
+                      id="checkout_region_selector"
+                      type="search"
+                      list="payment_region_options"
+                      class="asset-input"
+                      onchange="onCheckoutRegionChange()"
+                      placeholder="搜索地区或输入 ISO 代码"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div class="form-group checkout-debug-card">
+                    <label>用卡方式</label>
+                    <select
+                      id="checkout_card_source"
+                      class="asset-input"
+                      onchange="onCheckoutCardSourceChange()"
+                    >
+                      <option value="pool">跟随系统（卡池自动选卡）</option>
+                      <option value="manual">手动输入新卡片</option>
+                    </select>
+                  </div>
+                </div>
+                <p id="checkout_region_hint" class="checkout-debug-hint"></p>
+                <div class="form-group" id="checkout_manual_card_wrap" hidden>
+                  <label>手动卡片</label>
+                  <input
+                    id="checkout_manual_card"
+                    class="asset-input"
+                    placeholder="卡号|月/年|CVC|持卡人（可选）"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                </div>
+                <div class="form-group checkout-debug-session">
+                  <div class="checkout-debug-session-label">
+                    <label>Session JSON</label>
+                    <button
+                      type="button"
+                      class="checkout-debug-clear-btn"
+                      onclick="clearCheckoutSessionText()"
+                    >
+                      清空文本
+                    </button>
+                  </div>
+                  <textarea
+                    id="checkout_session_input"
+                    class="asset-input"
+                    rows="3"
+                    placeholder="粘贴完整 Session JSON"
+                    spellcheck="false"
+                    autocomplete="off"
+                  ></textarea>
+                </div>
+                <div class="form-group">
+                  <label>自定义付款链接（可选）</label>
+                  <input
+                    id="checkout_url_input"
+                    class="asset-input"
+                    type="url"
+                    placeholder="https://chatgpt.com/checkout/..."
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                </div>
+                <div class="checkout-debug-address-block">
+                  <div class="checkout-debug-address-head">
+                    <div class="checkout-debug-section-title">地址信息</div>
+                    <button
+                      type="button"
+                      class="checkout-debug-clear-btn"
+                      onclick="refreshCheckoutDebugAddress()"
+                    >
+                      一键更换
+                    </button>
+                  </div>
+                  <div class="checkout-debug-params">
+                    <div class="form-group">
+                      <label>姓名</label>
+                      <input
+                        id="checkout_addr_name"
+                        class="asset-input"
+                        placeholder="持卡人姓名"
+                        autocomplete="off"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label>地址模板</label>
+                      <select
+                        id="checkout_address_source"
+                        class="asset-input"
+                        onchange="onCheckoutAddressSourceChange()"
+                      >
+                        <option value="auto">自动填充（免税地址池）</option>
+                        <option value="none">不指定，系统自动选</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="checkout-debug-address-grid">
+                  <div class="form-group span-2">
+                    <label>街道</label>
+                    <input
+                      id="checkout_addr_line1"
+                      class="asset-input"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label>城市</label>
+                    <input
+                      id="checkout_addr_city"
+                      class="asset-input"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label>州</label>
+                    <input
+                      id="checkout_addr_state"
+                      class="asset-input"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label>邮编</label>
+                    <input
+                      id="checkout_addr_postal"
+                      class="asset-input"
+                      autocomplete="off"
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label>国家</label>
+                    <input
+                      id="checkout_addr_country"
+                      class="asset-input"
+                      value="US"
+                      maxlength="2"
+                      style="text-transform: uppercase"
+                      autocomplete="off"
+                    />
+                  </div>
+                </div>
+                </div>
+              </div>
+            </div>
+          </div>
 
-        <div class="panel" style="margin-top: 24px">
-          <div class="panel-header checkout-debug-log-toolbar">
-            <h2 class="panel-title">运行日志</h2>
+          <div class="checkout-debug-col checkout-debug-col-history">
+            <div class="panel">
+              <div class="panel-header checkout-debug-log-toolbar">
+                <div class="checkout-debug-log-heading">
+                  <h2 class="panel-title">历史任务</h2>
+                  <p class="checkout-debug-log-hint">
+                    点击任务查看对应运行日志。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  onclick="loadCheckoutDebugHistory(true)"
+                >
+                  <i data-lucide="refresh-cw"></i>
+                  刷新
+                </button>
+              </div>
+              <div
+                id="checkout_debug_history_list"
+                class="checkout-debug-history-list checkout-debug-overlay-scroll"
+              ></div>
+            </div>
           </div>
-          <div class="checkout-debug-log-meta">
-            <p class="checkout-debug-log-hint">
-              仅显示当前调试任务的 Playwright 子进程输出；失败时会自动保存截图。
-            </p>
-            <button
-              type="button"
-              class="btn btn-secondary"
-              onclick="copyCheckoutDebugLogs()"
+
+          <div class="checkout-debug-col checkout-debug-col-log">
+            <div
+              id="checkout_result_box"
+              class="panel"
+              style="display: none"
             >
-              <i data-lucide="copy"></i> 复制日志
-            </button>
-          </div>
-          <div class="runtime-log-pre-wrap">
-            <pre
-              id="checkout_debug_log_pre"
-              class="runtime-log-pre"
-              spellcheck="false"
-            ></pre>
+              <h2 class="panel-title">任务状态</h2>
+              <div
+                id="checkout_result_status"
+                style="font-weight: 600; margin-top: 12px; margin-bottom: 8px"
+              ></div>
+              <div
+                id="checkout_result_email"
+                style="font-size: 13px; color: var(--text-dim); margin-bottom: 8px"
+              ></div>
+              <div
+                id="checkout_result_url_wrap"
+                style="margin-bottom: 12px; word-break: break-all"
+              ></div>
+              <div
+                id="checkout_plan_choice_wrap"
+                style="
+                  display: none;
+                  margin-bottom: 12px;
+                  padding: 12px;
+                  border: 1px solid var(--primary);
+                  border-radius: 10px;
+                  background: var(--primary-soft);
+                "
+              >
+                <p style="font-size: 13px; margin-bottom: 10px">
+                  请用当前账号在浏览器打开付款链接，自己选套餐/额度。选好后点继续，系统再走协议付款。
+                </p>
+                <div
+                  id="checkout_plan_choice_url"
+                  style="font-size: 12px; word-break: break-all; margin-bottom: 10px"
+                ></div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap">
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    onclick="submitCheckoutPlanChoice('continue')"
+                  >
+                    我已选好，继续协议付款
+                  </button>
+                </div>
+              </div>
+              <div id="checkout_screenshot_wrap" class="checkout-debug-media-actions"></div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header checkout-debug-log-toolbar">
+                <div class="checkout-debug-log-heading">
+                  <h2 class="panel-title">运行日志</h2>
+                  <p class="checkout-debug-log-hint">
+                    当前选中任务的 Playwright 输出。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  onclick="copyCheckoutDebugLogs()"
+                >
+                  <i data-lucide="copy"></i>
+                  复制日志
+                </button>
+              </div>
+              <div class="runtime-log-pre-wrap">
+                <pre
+                  id="checkout_debug_log_pre"
+                  class="runtime-log-pre"
+                  spellcheck="false"
+                ></pre>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -5734,6 +6450,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             <div class="task-filter-field">
               <label for="task_filter_type">任务类型</label>
               <select
+                <option value="自定义付款">自定义付款</option>
                 id="task_filter_type"
                 class="asset-input"
                 onchange="updateTaskLogFilter('type', this.value)"
