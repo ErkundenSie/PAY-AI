@@ -1281,6 +1281,7 @@ function parseManualBillingAddress(raw) {
       String(raw.country || "US")
         .trim()
         .toUpperCase() || "US",
+    name: String(raw.name || raw.holder || "").trim(),
   };
   if (
     !address.line1 ||

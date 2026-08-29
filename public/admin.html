@@ -557,7 +557,8 @@
         margin-top: 12px;
         color: var(--text-dim);
         font-size: 12px;
-        white-space: nowrap;
+        white-space: normal;
+        line-height: 1.55;
       }
 
       .browser-pool-config-row {
@@ -841,9 +842,176 @@
         flex-direction: column;
       }
 
+      #config.page-view {
+        max-width: 1280px;
+      }
+
+      #config.page-view.active {
+        display: flex;
+        flex-direction: column;
+        max-width: 1280px;
+        width: 100%;
+      }
+
+      .config-workspace {
+        display: grid;
+        grid-template-columns: 188px minmax(0, 1fr);
+        gap: 16px;
+        align-items: start;
+      }
+
+      .config-subnav {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 10px;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+        box-shadow: var(--shadow-sm);
+        overflow: auto;
+        position: sticky;
+        top: 0;
+        max-height: calc(100vh - 48px);
+      }
+
+      .config-subnav-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 10px 12px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: 13px;
+        font-weight: 600;
+        font-family: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .config-subnav-item i {
+        width: 16px;
+        height: 16px;
+        flex-shrink: 0;
+      }
+
+      .config-subnav-item:hover {
+        background: var(--surface-soft);
+        color: var(--text-main);
+      }
+
+      .config-subnav-item.active {
+        background: var(--primary-soft);
+        color: var(--primary);
+      }
+
+      .config-main {
+        min-width: 0;
+      }
+
+      .config-section {
+        display: none;
+      }
+
+      .config-section.active {
+        display: block;
+      }
+
+      .config-section > .panel {
+        margin-bottom: 0;
+      }
+
+      .config-section-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: wrap;
+        flex: 0 1 auto;
+        max-width: 100%;
+      }
+
+      .config-section .panel-header {
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .config-section-actions .btn {
+        height: 36px;
+        min-height: 36px;
+        padding: 0 12px;
+        font-size: 12px;
+      }
+
+      .config-basic-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px 16px;
+        margin-top: 22px;
+        align-items: start;
+      }
+
+      .config-basic-row .form-group {
+        margin: 0;
+        min-width: 0;
+      }
+
+      .config-basic-row .config-field-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+
+      .config-toggle-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px 16px;
+        margin-top: 16px;
+      }
+
+      .config-toggle-grid .toggle-field {
+        padding: 12px 14px;
+        border: 1px solid var(--divider);
+        border-radius: 10px;
+        background: var(--surface-soft);
+        min-width: 0;
+      }
+
+      .config-toggle-grid .toggle-label {
+        font-size: 13px;
+      }
+
+      .config-toggle-grid .toggle-label p {
+        font-weight: 500;
+      }
+
       @media (max-width: 1100px) {
         .config-grid {
           grid-template-columns: 1fr;
+        }
+
+        .config-workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .config-basic-row,
+        .config-toggle-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .config-subnav {
+          flex-direction: row;
+          flex-wrap: wrap;
+          overflow: visible;
+        }
+
+        .config-subnav-item {
+          width: auto;
         }
       }
 
@@ -1154,6 +1322,11 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        cursor: pointer;
+      }
+
+      #cards td.card-bound-address:hover {
+        color: var(--primary);
       }
 
       #cards .table-action-group {
@@ -3530,6 +3703,25 @@
         width: 100%;
       }
 
+      .admin-confirm-extra .card-bind-address-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .admin-confirm-extra .card-bind-address-row .asset-input,
+      .admin-confirm-extra .card-bind-address-row .ui-select {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .admin-confirm-extra .card-bind-address-row .btn {
+        flex: 0 0 auto;
+        height: 40px;
+        min-height: 40px;
+        padding: 0 12px;
+      }
+
       .admin-confirm-extra label {
         display: block;
         font-size: 12px;
@@ -4103,18 +4295,84 @@
       <div id="config" class="page-view">
         <div class="page-header">
           <h1>系统配置</h1>
-          <p>
-            自助开通并发与维护模式（保存后立即生效，无需重启服务）。Telegram /
-            hCaptcha 需分别点各自区域的「保存」按钮；配置写入
-            MySQL，重启容器不会丢失（请勿使用
-            <code>docker compose down -v</code>）。
-          </p>
+          <p>地区、时区与维护开关在「基本配置」；人机验证、代充、安全和通知在左侧切换后单独保存。</p>
         </div>
 
+        <div class="config-workspace">
+          <nav class="config-subnav" aria-label="配置分类">
+            <button
+              type="button"
+              class="config-subnav-item active"
+              data-config-section="config_ops"
+              onclick="switchConfigSection('config_ops', this)"
+            >
+              <i data-lucide="sliders-horizontal"></i>
+              基本配置
+            </button>
+            <button
+              type="button"
+              class="config-subnav-item"
+              data-config-section="config_hcaptcha"
+              onclick="switchConfigSection('config_hcaptcha', this)"
+            >
+              <i data-lucide="shield-check"></i>
+              人机验证
+            </button>
+            <button
+              type="button"
+              class="config-subnav-item"
+              data-config-section="config_gptapi"
+              onclick="switchConfigSection('config_gptapi', this)"
+            >
+              <i data-lucide="plug"></i>
+              代充对接
+            </button>
+            <button
+              type="button"
+              class="config-subnav-item"
+              data-config-section="config_security"
+              onclick="switchConfigSection('config_security', this)"
+            >
+              <i data-lucide="lock"></i>
+              安全设置
+            </button>
+            <button
+              type="button"
+              class="config-subnav-item"
+              data-config-section="config_telegram"
+              onclick="switchConfigSection('config_telegram', this)"
+            >
+              <i data-lucide="send"></i>
+              通知推送
+            </button>
+          </nav>
+          <div class="config-main">
+
         <!-- 第三方代充 API 设置 -->
+        <section id="config_gptapi" class="config-section">
         <div class="panel">
-          <h2 class="panel-title">第三方代充 API（协议对接）</h2>
-          <p style="font-size: 13px; color: var(--text-dim); margin-top: 10px">
+          <div class="panel-header">
+          <h2 class="panel-title">第三方代充 API</h2>
+          <div class="config-section-actions">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              onclick="testGptApiConnection()"
+            >
+              <i data-lucide="activity"></i>
+              测试
+            </button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              onclick="saveGptApiConfig()"
+            >
+              <i data-lucide="save"></i>
+              保存
+            </button>
+          </div>
+          </div>
+          <p style="font-size: 13px; color: var(--text-dim); margin-top: 0">
             开启后，前台兑换开通将调用第三方 GPT
             代充平台提交订单并轮询状态；将不再使用本地开通流程。
             银行卡与代理会从「银行卡池」「代理池」自动获取并随订单提交。
@@ -4256,88 +4514,81 @@
               style="font-size: 12px; color: var(--text-dim); margin-top: 10px"
             ></div>
           </div>
-          <div
-            style="
-              margin-top: 24px;
-              display: flex;
-              gap: 12px;
-              justify-content: flex-end;
-              flex-wrap: wrap;
-            "
-          >
-            <button
-              type="button"
-              class="btn btn-secondary"
-              onclick="testGptApiConnection()"
-            >
-              <i data-lucide="activity"></i>
-              测试
-            </button>
-            <button
-              type="button"
-              class="btn btn-primary"
-              onclick="saveGptApiConfig()"
-            >
-              <i data-lucide="save"></i>
-              保存配置
-            </button>
-          </div>
         </div>
+        </section>
 
+        <section id="config_ops" class="config-section active">
         <div class="config-grid">
-          <!-- 左：并发与维护 -->
           <div class="panel">
-            <h2 class="panel-title">并发与维护</h2>
-            <div class="form-group" style="margin-top: 24px">
-              <label>最大并发激活数</label>
-              <input
-                type="number"
-                id="max_concurrent_activations"
-                min="1"
-                step="1"
-                class="asset-input"
-                placeholder="1"
-              />
-              <p
-                style="
-                  font-size: 13px;
-                  color: var(--text-dim);
-                  margin-top: 10px;
-                "
-              >
-                超过该数量时，前台将提示「当前任务过多，请稍后再试」。
-              </p>
+            <div class="panel-header">
+            <h2 class="panel-title">基本配置</h2>
+            <div class="config-section-actions">
+              <button class="btn btn-primary" onclick="saveAllConfigs()">
+                <i data-lucide="save"></i>
+                保存
+              </button>
             </div>
-            <div class="form-group" style="margin-top: 22px">
-              <label>默认时区</label>
-              <select id="default_timezone" class="asset-input">
-                <option value="Asia/Shanghai">北京时间（Asia/Shanghai）</option>
-                <option value="Asia/Hong_Kong">
-                  香港时间（Asia/Hong_Kong）
-                </option>
-                <option value="Asia/Singapore">
-                  新加坡时间（Asia/Singapore）
-                </option>
-                <option value="Asia/Tokyo">东京时间（Asia/Tokyo）</option>
-                <option value="Europe/London">伦敦时间（Europe/London）</option>
-                <option value="America/New_York">
-                  纽约时间（America/New_York）
-                </option>
-                <option value="America/Los_Angeles">
-                  洛杉矶时间（America/Los_Angeles）
-                </option>
-              </select>
-              <p
-                style="
-                  font-size: 13px;
-                  color: var(--text-dim);
-                  margin-top: 10px;
-                "
-              >
-                用于后台日志、任务和账单时间展示；默认使用北京时间。
-              </p>
             </div>
-            <div class="form-group" style="margin-top: 22px">
+            <div class="config-basic-row">
+              <div class="form-group">
+                <label>支付地区</label>
+                <input
+                  id="region_selector"
+                  type="search"
+                  list="payment_region_options"
+                  class="asset-input"
+                  placeholder="搜索地区或输入 ISO 代码"
+                  autocomplete="off"
+                />
+                <datalist id="payment_region_options"></datalist>
+                <div class="config-field-meta">
+                  <span
+                    id="region_current_badge"
+                    class="status-badge status-success"
+                  ></span>
+                  <p
+                    style="
+                      font-size: 13px;
+                      color: var(--text-dim);
+                      margin: 0;
+                    "
+                  >
+                    Stripe 币种随地区切换，账单地址在「免税地址」管理。
+                  </p>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>默认时区</label>
+                <select id="default_timezone" class="asset-input">
+                  <option value="Asia/Shanghai">北京时间（Asia/Shanghai）</option>
+                  <option value="Asia/Hong_Kong">
+                    香港时间（Asia/Hong_Kong）
+                  </option>
+                  <option value="Asia/Singapore">
+                    新加坡时间（Asia/Singapore）
+                  </option>
+                  <option value="Asia/Tokyo">东京时间（Asia/Tokyo）</option>
+                  <option value="Europe/London">伦敦时间（Europe/London）</option>
+                  <option value="America/New_York">
+                    纽约时间（America/New_York）
+                  </option>
+                  <option value="America/Los_Angeles">
+                    洛杉矶时间（America/Los_Angeles）
+                  </option>
+                </select>
+                <p
+                  style="
+                    font-size: 13px;
+                    color: var(--text-dim);
+                    margin-top: 10px;
+                  "
+                >
+                  用于后台日志、任务和账单时间展示；默认使用北京时间。
+                </p>
+              </div>
+            </div>
+            <div class="config-toggle-grid">
+            <div class="form-group" style="margin: 0">
               <div class="toggle-field">
                 <div class="toggle-label">
                   <span>维护模式</span>
@@ -4362,7 +4613,7 @@
                 开启后立即拒绝所有新任务。
               </p>
             </div>
-            <div class="form-group" style="margin-top: 22px">
+            <div class="form-group" style="margin: 0">
               <div class="toggle-field">
                 <div class="toggle-label"><span>保存失败任务录像</span></div>
                 <label class="toggle-control">
@@ -4384,25 +4635,34 @@
                 默认关闭；成功任务不会保留截图或录像。
               </p>
             </div>
+            </div>
           </div>
         </div>
+        </section>
 
-        <div
-          style="
-            margin-top: 24px;
-            display: flex;
-            gap: 12px;
-            justify-content: flex-end;
-          "
-        >
-          <button class="btn btn-primary" onclick="saveAllConfigs()">
-            <i data-lucide="save"></i>
-            保存全局
-          </button>
-        </div>
-
-        <div class="panel" style="margin-top: 24px">
+        <section id="config_telegram" class="config-section">
+        <div class="panel" style="margin-top: 0">
+          <div class="panel-header">
           <h2 class="panel-title">Telegram 通知</h2>
+          <div class="config-section-actions">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              onclick="testTelegramNotification()"
+            >
+              <i data-lucide="send"></i>
+              测试发送
+            </button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              onclick="saveTelegramConfig()"
+            >
+              <i data-lucide="save"></i>
+              保存
+            </button>
+          </div>
+          </div>
           <p style="font-size: 13px; color: var(--text-dim); margin-top: 8px">
             开通成功、失败或卡池耗尽时可推送到管理员私聊和/或群组。消息包含邮箱与
             CDK。
@@ -4436,7 +4696,7 @@
             />
           </div>
 
-          <div style="margin-top: 20px; display: grid; gap: 14px">
+          <div class="config-toggle-grid">
             <div class="toggle-field">
               <div class="toggle-label"><span>通知管理员</span></div>
               <label class="toggle-control">
@@ -4459,9 +4719,6 @@
                 <span class="toggle-switch"></span>
               </label>
             </div>
-          </div>
-
-          <div style="margin-top: 22px; display: grid; gap: 14px">
             <div class="toggle-field">
               <div class="toggle-label"><span>开通成功时通知</span></div>
               <label class="toggle-control">
@@ -4496,44 +4753,63 @@
               </label>
             </div>
           </div>
+        </div>
+        </section>
 
-          <div
-            style="
-              margin-top: 24px;
-              display: flex;
-              gap: 12px;
-              justify-content: flex-end;
-              flex-wrap: wrap;
-            "
-          >
+        <section id="config_hcaptcha" class="config-section">
+        <div class="panel" style="margin-top: 0">
+          <div class="panel-header">
+          <h2 class="panel-title">hCaptcha 自动求解</h2>
+          <div class="config-section-actions">
             <button
               type="button"
               class="btn btn-secondary"
-              onclick="testTelegramNotification()"
+              onclick="refreshHcaptchaLogs()"
             >
-              <i data-lucide="send"></i>
-              测试发送
+              <i data-lucide="scroll-text"></i>
+              刷新日志
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              onclick="testHcaptchaSolver()"
+            >
+              <i data-lucide="activity"></i>
+              检测环境
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              onclick="testHcaptchaVlm()"
+            >
+              <i data-lucide="brain"></i>
+              测试 VLM
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              onclick="testHcaptchaCaptchaPlatform()"
+            >
+              <i data-lucide="shield-check"></i>
+              测试打码
             </button>
             <button
               type="button"
               class="btn btn-primary"
-              onclick="saveTelegramConfig()"
+              onclick="saveHcaptchaConfig()"
             >
               <i data-lucide="save"></i>
-              保存通知
+              保存
             </button>
           </div>
-        </div>
-
-        <div class="panel" style="margin-top: 24px">
-          <h2 class="panel-title">hCaptcha 自动求解</h2>
+          </div>
           <p style="font-size: 13px; color: var(--text-dim); margin-top: 8px">
             支付时遇到 Stripe「One more
             step」人机验证：优先使用打码平台（createTask/getTaskResult）兜底
             passive checkbox； 图片题可继续尝试内置视觉求解器（VLM +
             CLIP/OpenCV）。
           </p>
-          <div style="margin-top: 20px; display: grid; gap: 14px">
+          <div class="config-toggle-grid">
             <div class="toggle-field">
               <div class="toggle-label"><span>启用自动求解</span></div>
               <label class="toggle-control">
@@ -4714,60 +4990,23 @@
               "
             ></pre>
           </div>
-          <div
-            style="
-              margin-top: 24px;
-              display: flex;
-              gap: 12px;
-              justify-content: flex-end;
-              flex-wrap: wrap;
-            "
-          >
+        </div>
+        </section>
+
+        <section id="config_security" class="config-section">
+        <div class="panel" style="margin-top: 0">
+          <div class="panel-header">
+          <h2 class="panel-title">修改后台密码</h2>
+          <div class="config-section-actions">
             <button
-              type="button"
-              class="btn btn-secondary"
-              onclick="refreshHcaptchaLogs()"
-            >
-              <i data-lucide="scroll-text"></i>
-              刷新日志
-            </button>
-            <button
-              type="button"
-              class="btn btn-secondary"
-              onclick="testHcaptchaSolver()"
-            >
-              <i data-lucide="activity"></i>
-              检测环境
-            </button>
-            <button
-              type="button"
-              class="btn btn-secondary"
-              onclick="testHcaptchaVlm()"
-            >
-              <i data-lucide="brain"></i>
-              测试 VLM
-            </button>
-            <button
-              type="button"
-              class="btn btn-secondary"
-              onclick="testHcaptchaCaptchaPlatform()"
-            >
-              <i data-lucide="shield-check"></i>
-              测试打码
-            </button>
-            <button
-              type="button"
               class="btn btn-primary"
-              onclick="saveHcaptchaConfig()"
+              onclick="changeAdminPassword()"
             >
-              <i data-lucide="save"></i>
-              保存验证
+              <i data-lucide="key-round"></i>
+              修改密码
             </button>
           </div>
-        </div>
-
-        <div class="panel" style="margin-top: 24px">
-          <h2 class="panel-title">修改后台密码</h2>
+          </div>
           <div class="form-group" style="margin-top: 24px">
             <label>原密码</label>
             <input
@@ -4788,18 +5027,12 @@
               autocomplete="new-password"
             />
           </div>
-          <button
-            class="btn btn-primary"
-            style="margin-top: 16px"
-            onclick="changeAdminPassword()"
-          >
-            <i data-lucide="key-round"></i>
-            修改密码
-          </button>
         </div>
 
-        <div class="panel" style="margin-top: 24px">
+        <div class="panel" style="margin-top: 16px">
+          <div class="panel-header">
           <h2 class="panel-title">安全设置</h2>
+          </div>
           <p style="font-size: 13px; color: var(--text-dim); margin-top: 10px">
             登录支持 Google Authenticator 或 Telegram 验证码。
           </p>
@@ -4966,56 +5199,7 @@
             </div>
           </div>
         </div>
-
-        <!-- 支付地区设置 -->
-        <div class="panel" style="margin-top: 24px">
-          <h2 class="panel-title">支付地区设置</h2>
-          <p style="font-size: 13px; color: var(--text-dim); margin-top: 10px">
-            选择支付地区后，系统将使用对应的币种进行 Stripe
-            支付。账单地址请在左侧「免税地址」页面管理。
-          </p>
-          <div
-            style="
-              display: flex;
-              align-items: center;
-              gap: 12px;
-              margin-top: 18px;
-              flex-wrap: wrap;
-            "
-          >
-            <div
-              class="form-group"
-              style="
-                margin-bottom: 0;
-                flex: 1;
-                min-width: 180px;
-                max-width: 280px;
-              "
-            >
-              <label style="margin-bottom: 6px">当前支付地区</label>
-              <input
-                id="region_selector"
-                type="search"
-                list="payment_region_options"
-                class="asset-input"
-                placeholder="搜索地区或输入 ISO 代码"
-                autocomplete="off"
-              />
-              <datalist id="payment_region_options"></datalist>
-            </div>
-            <button
-              class="btn btn-primary"
-              style="margin-top: 20px"
-              onclick="savePaymentRegion()"
-            >
-              <i data-lucide="save"></i>
-              保存地区
-            </button>
-            <span
-              id="region_current_badge"
-              class="status-badge status-success"
-              style="margin-top: 20px"
-            ></span>
+        </section>
           </div>
         </div>
       </div>
@@ -5025,9 +5209,9 @@
         <div class="page-header">
           <h1>代理池</h1>
           <p>
-            管理 Playwright 自动化使用的代理。一行一条 URL，支持 http(s) /
-            socks5；用户名可含 <code>{session}</code> 占位符走 sticky
-            session。每次任务从「启用」的代理中随机抽取。
+            本地开通、支付调试和「代充对接」都从这里取代理。支持 http(s) /
+            socks5，用户名可含 <code>{session}</code> 走 sticky
+            session。每次任务从「启用」项随机抽一条，不绑定浏览器槽位；池为空时本地直连、代充走平台池。检测结果仅作参考，关闭「启用」才不参与抽取。
           </p>
         </div>
 
@@ -5185,7 +5369,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             <p style="margin: 0 0 12px">
               浏览器池 = 常驻 Chromium + 本地 Profile 缓存。任务通过 CDP
               接入，<strong>每单仍独立 Context</strong>（不串 Session）。每槽约
-              <strong>400–550 MB</strong> 内存。
+              <strong>400–550 MB</strong> 内存（本页按 420MB 估算）。
             </p>
             <p
               style="
@@ -5200,7 +5384,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               >池内槽位<strong>不绑定</strong>代理。每单任务启动时，从「代理池」随机抽一条启用代理，写入该单的
               <code>Context</code>（见运行日志 <code>proxy=yes</code>）。
               这样不同任务可用不同 IP，避免多账号共用一个住宅
-              IP。代理在左侧「代理池」管理，与浏览器池分开配置。
+              IP。代理在左侧「代理池」管理，与浏览器池分开配置。第三方代充不走浏览器池。
             </p>
             <table
               style="width: 100%; border-collapse: collapse; font-size: 13px"
@@ -5219,32 +5403,39 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               </thead>
               <tbody>
                 <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05)">
-                  <td style="padding: 8px 10px">日常单量</td>
-                  <td style="padding: 8px 10px"><code>4–8</code></td>
+                  <td style="padding: 8px 10px">日常</td>
                   <td style="padding: 8px 10px">
-                    稳妥，与系统配置里「前台并发」对齐即可
+                    <code id="bp_memo_daily_slots">—</code>
+                  </td>
+                  <td id="bp_memo_daily_note" style="padding: 8px 10px">
+                    进入页面后按本机内存填写
                   </td>
                 </tr>
                 <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05)">
-                  <td style="padding: 8px 10px">高峰 / 128G 独服</td>
-                  <td style="padding: 8px 10px"><code>8–16</code></td>
+                  <td style="padding: 8px 10px">加槽</td>
                   <td style="padding: 8px 10px">
-                    内存充裕时可加；注意 CPU 与其它项目占用的 ~28G
+                    <code id="bp_memo_extra_slots">看下方建议</code>
+                  </td>
+                  <td id="bp_memo_extra_note" style="padding: 8px 10px">
+                    以「主机内存与容量建议」为准，每加 1 槽约 0.5GB
                   </td>
                 </tr>
                 <tr>
                   <td style="padding: 8px 10px">上限</td>
-                  <td style="padding: 8px 10px"><code>≤24</code></td>
                   <td style="padding: 8px 10px">
-                    由 <code>BROWSER_POOL_MAX_SIZE</code> 控制，不建议无脑拉满
+                    <code id="bp_memo_max_slots">≤24</code>
+                  </td>
+                  <td style="padding: 8px 10px">
+                    由 <code>BROWSER_POOL_MAX_SIZE</code> 控制（硬顶 48），不建议拉满
                   </td>
                 </tr>
               </tbody>
             </table>
             <p style="margin: 14px 0 0; font-size: 13px">
               <strong>持久化：</strong
-              >本页重载会保存槽位数量，服务重启后自动恢复；
-              <code>BROWSER_POOL_MAX_SIZE</code> 仅用于设置可选上限。
+              >本页重载会把槽位数量写入数据库，服务重启后自动恢复。
+              <code>BROWSER_POOL_MAX_SIZE</code> 只限制可选上限，实际并行是
+              min(前台并发, 槽位数)。
             </p>
           </div>
         </div>
@@ -5360,6 +5551,18 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 class="asset-input"
               />
             </label>
+            <label class="browser-pool-size-field">
+              前台并发
+              <input
+                id="max_concurrent_activations"
+                type="number"
+                min="1"
+                step="1"
+                class="asset-input"
+                placeholder="1"
+                onchange="saveForegroundConcurrency()"
+              />
+            </label>
             <button
               type="button"
               class="btn btn-primary"
@@ -5370,7 +5573,8 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             <span id="bp_reload_hint" class="browser-pool-reload-hint"></span>
           </div>
           <p class="browser-pool-config-hint">
-            修改后立即重载，并保存到系统配置；重启服务后仍会生效。
+            <strong>槽位</strong>：常驻 Chromium 数量，每槽约 400–550MB，改完需点重载。<strong>前台并发</strong>：同时能跑的开通/付款数（支付调试付款也占 1 个）。实际并行是
+            min(前台并发, 槽位数)；槽位多于并发只会空转占内存。生成支付链接不占并发但会占槽位。第三方代充不走浏览器池。<span id="bp_config_mem_hint"></span>
           </p>
         </div>
 
@@ -6512,7 +6716,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             <div class="task-filter-field">
               <label for="task_filter_type">任务类型</label>
               <select
-                <option value="自定义付款">自定义付款</option>
                 id="task_filter_type"
                 class="asset-input"
                 onchange="updateTaskLogFilter('type', this.value)"
@@ -6522,6 +6725,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 <option value="自助开通">自助开通</option>
                 <option value="链接调试">链接调试</option>
                 <option value="支付调试">支付调试</option>
+                <option value="自定义付款">自定义付款</option>
               </select>
             </div>
             <div class="task-filter-field">

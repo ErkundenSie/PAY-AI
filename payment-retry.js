@@ -280,6 +280,7 @@ async function executePaymentWithRetry(page, options) {
           String(parsed.country || "US")
             .trim()
             .toUpperCase() || "US",
+        name: String(parsed.name || parsed.holder || "").trim(),
         generated: false,
       };
       if (
@@ -315,7 +316,7 @@ async function executePaymentWithRetry(page, options) {
   const declinedLast4s = [];
   let lastError = "";
   let lastCardLast4 = "";
-  let billingHolderName = "";
+  let billingHolderName = String(address.name || "").trim();
 
   let billedAmount = 0;
   let billedCurrency = currency;

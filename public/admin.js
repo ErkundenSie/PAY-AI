@@ -2758,6 +2758,20 @@
         return pId;
       }
 
+      function switchConfigSection(sectionId, el) {
+        const id = String(sectionId || "config_ops");
+        document.querySelectorAll("#config .config-section").forEach((sec) => {
+          sec.classList.toggle("active", sec.id === id);
+        });
+        document.querySelectorAll("#config .config-subnav-item").forEach((btn) => {
+          btn.classList.toggle(
+            "active",
+            btn.getAttribute("data-config-section") === id,
+          );
+        });
+        lucide.createIcons();
+      }
+
       function switchPageInternal(pId, el) {
         const requestedPageId = pId;
         pId = normalizePageId(pId);
@@ -2786,6 +2800,10 @@
           stopRuntimeLogStream();
         }
 
+        if (pId === "config") {
+          const current = document.querySelector("#config .config-section.active");
+          switchConfigSection(current?.id || "config_ops");
+        }
         if (pId === "billing") {
           loadBillingRecords(1).catch(() => {});
         }
@@ -3842,6 +3860,51 @@
         );
         document.getElementById("bp_stat_mem").textContent =
           pool.totals?.estimatedProcessText || "—";
+        const memHint = document.getElementById("bp_config_mem_hint");
+        if (memHint) {
+          const slots = Number(pool.configuredSize || pool.size || 0);
+          const memText = pool.totals?.estimatedProcessText || "";
+          memHint.textContent = slots
+            ? ` 当前 ${slots} 槽预估占用 ${memText || "—"}。`
+            : "";
+        }
+
+        const maxPoolSize = Number(pool.maxPoolSize || 24);
+        const totalGb =
+          mem.hostTotalGb == null ? NaN : Number(mem.hostTotalGb);
+        const freeGb = mem.hostFreeGb == null ? NaN : Number(mem.hostFreeGb);
+        const suggested = Number.isFinite(freeGb)
+          ? Math.min(maxPoolSize, Math.max(1, Math.floor(freeGb / 0.55)))
+          : maxPoolSize;
+        let dailyLow = 2;
+        let dailyHigh = 4;
+        if (Number.isFinite(totalGb) && totalGb >= 32) {
+          dailyLow = 8;
+          dailyHigh = 16;
+        } else if (Number.isFinite(totalGb) && totalGb >= 12) {
+          dailyLow = 4;
+          dailyHigh = 8;
+        }
+        dailyHigh = Math.min(dailyHigh, suggested, maxPoolSize);
+        dailyLow = Math.min(dailyLow, dailyHigh);
+        const dailyEl = document.getElementById("bp_memo_daily_slots");
+        const dailyNote = document.getElementById("bp_memo_daily_note");
+        const extraEl = document.getElementById("bp_memo_extra_slots");
+        const extraNote = document.getElementById("bp_memo_extra_note");
+        const maxEl = document.getElementById("bp_memo_max_slots");
+        if (dailyEl) dailyEl.textContent = `${dailyLow}–${dailyHigh}`;
+        if (dailyNote) {
+          dailyNote.textContent = Number.isFinite(totalGb)
+            ? `本机约 ${totalGb.toFixed(1)}GB，与「前台并发」对齐即可`
+            : "与本页「前台并发」对齐即可";
+        }
+        if (extraEl) extraEl.textContent = `≤${suggested}`;
+        if (extraNote) {
+          extraNote.textContent = Number.isFinite(freeGb)
+            ? `当前可用约 ${freeGb.toFixed(1)}GB，每加 1 槽约 0.5GB`
+            : "以「主机内存与容量建议」为准，每加 1 槽约 0.5GB";
+        }
+        if (maxEl) maxEl.textContent = `≤${maxPoolSize}`;
 
         const hostLines = [];
         if (mem.hostTotalGb != null) {
@@ -3908,6 +3971,26 @@
           if (hint) hint.textContent = error.message || "切换失败";
           const toggle = document.getElementById("bp_mode_enabled");
           if (toggle) toggle.checked = !enabled;
+        }
+      }
+
+      async function saveForegroundConcurrency() {
+        const el = document.getElementById("max_concurrent_activations");
+        const value = Math.max(1, parseInt(el?.value, 10) || 1);
+        if (el) el.value = String(value);
+        try {
+          const res = await authFetch("/api/admin/config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(buildConfigPayload()),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || "保存失败");
+          }
+          showMessage("前台并发已保存", "success");
+        } catch (error) {
+          showMessage(error.message || "保存失败", "error");
         }
       }
 
@@ -4961,7 +5044,7 @@
                           <td><code>${cardExpiry}</code></td>
                           <td><code>${cardCvc}</code></td>
                           <td>${importHolder}</td>
-                          <td class="card-bound-address" title="${boundAddress}">${boundAddress}</td>
+                          <td class="card-bound-address" title="${boundAddress}" onclick="copyCardBoundAddress(event)">${boundAddress}</td>
                           <td>${escapeHtml(cardGroupLabel(card))}</td>
                           <td style="text-align:center">${statusBadge}</td>
                           <td style="text-align:center">${escapeHtml(usageLabel)}</td>
@@ -5229,6 +5312,20 @@
         }
       }
 
+      async function copyCardBoundAddress(event) {
+        const text = String(event?.currentTarget?.getAttribute("title") || event?.currentTarget?.textContent || "").trim();
+        if (!text || text === "-") {
+          showMessage("没有可复制的地址", "warning");
+          return;
+        }
+        try {
+          await copyText(text);
+          showMessage("地址已复制", "success");
+        } catch (error) {
+          showMessage(error.message || "复制失败", "error");
+        }
+      }
+
       async function bindSelectedCardsAddress() {
         const cardIds = Array.from(selectedCardIds);
         if (!cardIds.length) {
@@ -5256,7 +5353,7 @@
         const extraHtml = `<label>支付姓名（可选，空白则保留原值）</label>
                 <input data-confirm-extra class="asset-input" placeholder="如 John Smith" />
                 <label>绑定地址</label>
-                <select data-confirm-value class="asset-input">${options}</select>`;
+                <select id="card_bind_address_select" data-confirm-value class="asset-input">${options}</select>`;
         const confirmed = await showAdminConfirm(
           `为选中的 ${cardIds.length} 张卡绑定免税地址。支付时将优先使用该地址。`,
           "绑定地址",
@@ -6199,6 +6296,10 @@
           const data = await res.json();
           if (!res.ok || !data.success) {
             throw new Error(data.message || "保存失败");
+          }
+          const regionSaved = await savePaymentRegion(true);
+          if (!regionSaved) {
+            throw new Error("基本配置已保存，但支付地区保存失败");
           }
           showMessage(data.message, "success");
           await loadData(true);
@@ -8199,12 +8300,17 @@
         }
       }
 
-      async function savePaymentRegion() {
+      async function savePaymentRegion(silent = false) {
         const sel = document.getElementById("region_selector");
-        const region = normalizePaymentRegion(sel?.value);
+        const raw = String(sel?.value || "").trim();
+        if (!raw) {
+          if (!silent) showMessage("请选择地区", "warning");
+          return Boolean(silent);
+        }
+        const region = normalizePaymentRegion(raw);
         if (!region) {
-          showMessage("请选择地区", "warning");
-          return;
+          if (!silent) showMessage("请选择地区", "warning");
+          return false;
         }
         try {
           const res = await authFetch("/api/admin/region", {
@@ -8221,11 +8327,14 @@
           if (badge)
             badge.textContent = `当前: ${data.label || currentRegion} (${data.currency || "USD"})`;
           updateCheckoutRegionHint(data.label, data.currency);
-          showMessage("支付地区已更新", "success");
+          if (!silent) showMessage("支付地区已更新", "success");
+          return true;
         } catch (e) {
           showMessage(e.message || "保存地区失败", "error");
+          return false;
+        } finally {
+          lucide.createIcons();
         }
-        lucide.createIcons();
       }
 
       function normalizePaymentRegion(value) {
