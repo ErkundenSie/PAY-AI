@@ -12,7 +12,7 @@ const WebSocket = require("ws");
 const axios = require("axios");
 const store = require("./mysql-store");
 const runtimeLog = require("./runtime-log");
-const { REGION_CONFIG, isSupportedRegion } = require("./region-config");
+const { REGION_CONFIG, isSupportedRegion, getRegionBrowserProfile } = require("./region-config");
 const { getPlanTypeLabel } = require("./credit-quantity");
 const {
   isCustomPayCdk,
@@ -34,6 +34,15 @@ const {
   extractAccessTokenFromRaw,
   parseSessionJson,
   extractEmailFromSession,
+  buildSessionCookieHeader,
+  formatCookieHeader,
+  installChatGptSession,
+  refreshSessionAccessToken,
+  refreshLiveChatGptAccessToken,
+  acquireFreshChatGptAccessToken,
+  fetchLiveChatGptSession,
+  captureLiveChatGptSessionExport,
+  CHATGPT_ORIGIN,
 } = require("./session-auth");
 const {
   notifyTelegramEvent,
@@ -61,15 +70,21 @@ const {
   resolveCaptchaPlatformCredentials,
 } = require("./captcha-platform");
 const browserPool = require("./browser-pool");
+const { preparePlaywrightProxy } = require("./playwright-proxy");
 const { buildWorkerRuntimeEnv } = require("./browser-runtime");
 const {
   querySubscriptionBySession,
   queryAccountStatusBySession,
+  queryAccountStatusWithBrowserPage,
+  createChatGptLiveStateTracker,
   resetCodexQuota,
+  resetCodexQuotaWithBrowserPage,
   validateSessionTokenForQuery,
   cancelAutoRenew,
   cancelAutoRenewAfterActivation,
+  cancelAutoRenewWithBrowserPage,
   resumeAutoRenew,
+  resumeAutoRenewWithBrowserPage,
 } = require("./subscription-check");
 const gptApi = require("./gpt-api-client");
 const cardValidator = require("./card-validator");
@@ -396,6 +411,7 @@ async function drainActivationQueue() {
           session,
           cdk,
           planType: cdkDetails.plan_type || "plus",
+          proxyGroupId: cdkDetails.proxy_group_id,
         }).catch((error) => {
           console.error(`[GPT API Worker] ${queued.jobKey}:`, error);
         });
@@ -1316,6 +1332,11 @@ function resolveCustomCheckoutUrl(raw) {
   return null;
 }
 
+async function pickTaskProxy(rawGroupId) {
+  const groupId = await store.resolveProxyGroupId(rawGroupId);
+  return store.getActiveProxy(groupId);
+}
+
 async function startPublicCheckoutPay(body = {}, options = {}) {
   const requireManualPayment = Boolean(options.requireManualPayment);
   const isCustomPay = isCustomPayCdk(body.cdk_code);
@@ -1441,6 +1462,7 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
     return { status: 400, payload: { success: false, error: err.message } };
   }
 
+  const cancelAutoRenew = parseCheckoutCancelAutoRenew(body.cancel_auto_renew);
   const checkoutUrl = resolveCustomCheckoutUrl(
     body.checkout_url || body.checkoutUrl || "",
   );
@@ -1512,7 +1534,7 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
   );
   logTask(
     task.jobKey,
-    `${taskLabel}任务已创建 plan=${planType} plan_name=${resolvedPlanName}${creditQuantity ? ` credits=${creditQuantity}` : ""} region=${regionCode} email=${email || "-"} mode=${checkoutMode}${checkoutUrl ? " checkout_url=yes" : ""}`,
+    `${taskLabel}任务已创建 plan=${planType} plan_name=${resolvedPlanName}${creditQuantity ? ` credits=${creditQuantity}` : ""} region=${regionCode} email=${email || "-"} mode=${checkoutMode}${checkoutUrl ? " checkout_url=yes" : ""} cancel_auto_renew=${cancelAutoRenew ? "yes" : "no"}`,
   );
   reserveForegroundSlot(task.jobKey);
   spawnCheckoutPaymentWorker({
@@ -1530,6 +1552,8 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
     taskLabel,
     checkoutMode,
     checkoutUrl,
+    cancelAutoRenew,
+    proxyGroupId: body.proxy_group_id ?? body.proxyGroupId ?? "",
   });
 
   return {
@@ -2069,9 +2093,7 @@ function normalizeTaskProgress(progress, status = "running", previous = 0) {
 }
 
 function timestampTaskOutput(chunk) {
-  const stamp = new Date()
-    .toLocaleString("zh-CN", { hour12: false })
-    .replace(/\//g, "-");
+  const stamp = store.formatStoreDateTime(new Date()) || new Date().toISOString();
   return String(chunk)
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
@@ -2234,9 +2256,9 @@ app.get("/api/admin/runtime-logs/export", authenticateAdmin, (req, res) => {
     });
     const content = entries
       .map((entry) => {
-        const timestamp = new Date(entry.ts).toLocaleString("zh-CN", {
-          hour12: false,
-        });
+        const timestamp =
+          store.formatStoreDateTime(entry.ts) ||
+          new Date(entry.ts).toISOString();
         return `[${timestamp}] [${entry.level || "log"}] [${entry.source || "server"}]${entry.jobKey ? ` [${entry.jobKey}]` : ""} ${entry.text}`;
       })
       .join("\n");
@@ -2604,6 +2626,347 @@ function adminSubscriptionActionErrorStatus(statusCode) {
   return Number(statusCode) === 401 ? 422 : Number(statusCode) || 502;
 }
 
+function hasAdminSessionCookies(rawSession) {
+  return /__Secure-next-auth\.session-token/i.test(
+    String(buildSessionCookieHeader(rawSession) || ""),
+  );
+}
+
+async function refreshAdminSessionWithBrowser(rawSession, preferredProxy) {
+  const proxyCandidates = String(preferredProxy || "").trim()
+    ? [String(preferredProxy).trim(), ""]
+    : [""];
+  let lastError = "浏览器 Session 刷新失败";
+
+  for (const proxy of proxyCandidates) {
+    const prepared = await preparePlaywrightProxy(proxy);
+    try {
+      const installed = await browserPool.withBrowserContext(
+        `admin-session-${crypto.randomUUID()}`,
+        {
+          proxy: prepared.proxyConfig || undefined,
+          locale: "en-US",
+          timezoneId: "America/Chicago",
+        },
+        async (context) => {
+          if (!context) {
+            throw new Error("浏览器池当前不可用");
+          }
+          const installed = await installChatGptSession(context, rawSession);
+          const cookies = await context.cookies("https://chatgpt.com");
+          return {
+            ...installed,
+            cookieHeader: formatCookieHeader(cookies),
+          };
+        },
+      );
+      const accessToken = String(installed?.accessToken || "").trim();
+      if (accessToken) {
+        return {
+          ok: true,
+          statusCode: 200,
+          accessToken,
+          refreshed:
+            accessToken !== String(normalizeSessionToken(rawSession) || "").trim(),
+          usedProxy: Boolean(proxy),
+          sessionData: installed.sessionData,
+          cookieHeader: installed.cookieHeader,
+        };
+      }
+      lastError = "浏览器 Session 未返回 AccessToken";
+    } catch (error) {
+      lastError = error.message || lastError;
+    } finally {
+      await prepared.cleanup().catch(() => {});
+    }
+  }
+
+  return { ok: false, statusCode: 502, error: lastError };
+}
+
+async function runAdminBrowserSessionAction(
+  rawSession,
+  preferredProxy,
+  action,
+  options = {},
+) {
+  const preferred = String(preferredProxy || "").trim();
+  const extraProxy =
+    options.retryWithNewProxy === false
+      ? ""
+      : await pickTaskProxy(options.proxyGroupId).catch(() => "");
+  const proxyCandidates = [];
+  const pushProxy = (value) => {
+    const next = String(value || "").trim();
+    if (next && !proxyCandidates.includes(next)) {
+      proxyCandidates.push(next);
+    }
+  };
+  if (options.preferDirect === true) {
+    proxyCandidates.push("");
+    pushProxy(preferred);
+  } else {
+    pushProxy(preferred);
+    pushProxy(extraProxy);
+    if (options.allowDirectFallback === true) {
+      proxyCandidates.push("");
+    }
+  }
+  if (!proxyCandidates.length) {
+    proxyCandidates.push("");
+  }
+  let lastResult = null;
+  const regionCode = await store.getPaymentRegion().catch(() => "PH");
+  const browserProfile = getRegionBrowserProfile(regionCode);
+
+  for (const proxy of proxyCandidates) {
+    const prepared = await preparePlaywrightProxy(proxy);
+    try {
+      console.log(
+        `[Account] 使用${proxy ? "代理池" : "直连"}浏览器查询 ChatGPT...`,
+      );
+      const result = await browserPool.withBrowserContext(
+        `admin-action-${crypto.randomUUID()}`,
+        {
+          proxy: prepared.proxyConfig || undefined,
+          locale: browserProfile.locale,
+          timezoneId: browserProfile.timezoneId,
+        },
+        async (context) => {
+          if (!context) {
+            return { ok: false, statusCode: 503, error: "浏览器池当前不可用" };
+          }
+          const installed = await installChatGptSession(context, rawSession, {
+            skipCookieVerify: options.skipCookieVerify === true,
+          });
+          const page = await context.newPage();
+          if (options.skipNavigate === true) {
+            await page
+              .goto(`${CHATGPT_ORIGIN}/`, {
+                waitUntil: "commit",
+                timeout: 20000,
+              })
+              .catch(() => {});
+          }
+          return action({
+            page,
+            accessToken: installed.accessToken,
+            sessionData: installed.sessionData,
+            proxy,
+            cookieVerified: installed.cookieVerified,
+            refreshAccessToken: () => refreshLiveChatGptAccessToken(page),
+          });
+        },
+      );
+      if (result?.ok) {
+        return result;
+      }
+      lastResult = result;
+      const statusCode = Number(result?.statusCode || 0);
+      const shouldRetryNetwork =
+        [401, 403, 502].includes(statusCode) ||
+        /cloudflare|风控拦截/i.test(String(result?.error || ""));
+      if (!shouldRetryNetwork) {
+        return result;
+      }
+    } catch (error) {
+      lastResult = {
+        ok: false,
+        statusCode: 502,
+        error: `浏览器 Session 操作失败：${error.message}`,
+      };
+    } finally {
+      await prepared.cleanup().catch(() => {});
+    }
+  }
+
+  return lastResult || {
+    ok: false,
+    statusCode: 502,
+    error: "浏览器 Session 操作失败",
+  };
+}
+
+async function resolveAdminSessionToken(rawSession, proxyOverride = null, options = {}) {
+  const proxy =
+    proxyOverride == null
+      ? await pickTaskProxy(options.proxyGroupId).catch(() => "")
+      : String(proxyOverride || "").trim();
+  const token = normalizeSessionToken(rawSession);
+  const tokenCheck = validateSessionTokenForQuery(token);
+  const skipRefresh =
+    options.skipRefresh === true ||
+    (options.skipRefresh !== false &&
+      tokenCheck.valid &&
+      hasAdminSessionCookies(rawSession));
+  if (skipRefresh) {
+    return {
+      token,
+      tokenCheck,
+      proxy,
+      cookieHeader: buildSessionCookieHeader(rawSession),
+      tokenRefreshed: false,
+      refreshError: "",
+    };
+  }
+  let refreshed = await refreshSessionAccessToken(rawSession, {
+    proxy,
+    timeoutMs: 12000,
+  }).catch((error) => ({ ok: false, error: error.message }));
+  if (!refreshed.ok) {
+    refreshed = await refreshAdminSessionWithBrowser(rawSession, proxy);
+  }
+  const effectiveProxy = refreshed.ok && refreshed.usedProxy === false ? "" : proxy;
+  if (refreshed.ok) {
+    console.log(
+      `[Session/Admin] session-token 校验通过，AccessToken ${refreshed.refreshed ? "已刷新" : "未变化"} proxy=${effectiveProxy ? "yes" : "no"}`,
+    );
+  } else {
+    console.warn(
+      `[Session/Admin] session-token 刷新失败 status=${refreshed.statusCode || 0} proxy=${proxy ? "yes" : "no"}: ${refreshed.error || "unknown"}`,
+    );
+  }
+  const nextToken = refreshed.ok && refreshed.accessToken ? refreshed.accessToken : token;
+  return {
+    token: nextToken,
+    tokenCheck: validateSessionTokenForQuery(nextToken),
+    proxy: effectiveProxy,
+    cookieHeader:
+      String(refreshed.cookieHeader || "").trim() ||
+      buildSessionCookieHeader(rawSession),
+    tokenRefreshed: Boolean(refreshed.ok && refreshed.refreshed),
+    refreshError: refreshed.ok ? "" : refreshed.error || "",
+  };
+}
+
+function respondAdminAccountAction(res, result, fallbackMessage) {
+  const session = String(result?.data?.session || "").trim();
+  if (!result?.ok) {
+    return res
+      .status(adminSubscriptionActionErrorStatus(result?.statusCode))
+      .json({
+        success: false,
+        message: result?.error || fallbackMessage,
+        ...(session ? { session } : {}),
+      });
+  }
+  return res.json({ success: true, data: result.data });
+}
+
+function attachExportedSession(result, exported, previousToken = "") {
+  const text = String(exported?.ok ? exported.text : "").trim();
+  if (!text) {
+    return result;
+  }
+  const next = result && typeof result === "object" ? result : { ok: false };
+  next.data = {
+    ...(next.data || {}),
+    session: text,
+    sessionRefreshed:
+      Boolean(exported.accessToken) &&
+      exported.accessToken !== String(previousToken || "").trim(),
+  };
+  return next;
+}
+
+async function persistExportedAdminSession(jobKey, result) {
+  const key = String(jobKey || "").trim();
+  const text = String(result?.data?.session || "").trim();
+  if (!key || !text) {
+    return;
+  }
+  try {
+    await store.updateTaskSessionPayload(
+      key,
+      text,
+      extractSessionPreview(text),
+    );
+  } catch (error) {
+    console.warn(`[Account] 写回 Session 存档失败: ${error.message}`);
+  }
+}
+
+async function runAdminCookiePageAction(rawSession, proxy, action, options = {}) {
+  if (!hasAdminSessionCookies(rawSession)) {
+    return null;
+  }
+  return runAdminBrowserSessionAction(rawSession, proxy, action, {
+    preferDirect: false,
+    allowDirectFallback: false,
+    skipCookieVerify: true,
+    skipNavigate: true,
+    ...options,
+  });
+}
+
+async function runAdminFreshSessionAction(rawSession, proxy, previousToken, action, options = {}) {
+  return runAdminCookiePageAction(
+    rawSession,
+    proxy,
+    async ({ page, accessToken, proxy: browserProxy }) => {
+      const tracker = createChatGptLiveStateTracker(page, {
+        previousToken: previousToken || accessToken,
+      });
+      try {
+        let liveToken = String(accessToken || previousToken || "").trim();
+        if (options.rotateSession === true) {
+          const fresh = await acquireFreshChatGptAccessToken(page, {
+            previousToken: previousToken || accessToken,
+            tracker,
+            maxAttempts: 2,
+            requireRotated: false,
+            allowNavigate: false,
+            onStatus: (message) => console.log(`[Account] ${message}`),
+          });
+          liveToken = String(fresh.accessToken || liveToken).trim();
+        }
+        if (!liveToken) {
+          return {
+            ok: false,
+            statusCode: 401,
+            error: "未拿到主界面 Session，已跳过用旧 Token 操作",
+          };
+        }
+        const result = await action({
+          page,
+          accessToken: liveToken,
+          proxy: browserProxy,
+          tracker,
+          refreshAccessToken: async () => {
+            const failedToken = String(liveToken || "").trim();
+            const rotated = String(tracker.getRotatedToken?.() || "").trim();
+            if (rotated && rotated !== failedToken) {
+              return rotated;
+            }
+            const captured = String(tracker.getToken?.() || "").trim();
+            if (captured && captured !== failedToken) {
+              return captured;
+            }
+            const live = await fetchLiveChatGptSession(page, {
+              forceRefresh: true,
+            });
+            return String(live.ok ? live.accessToken : "").trim();
+          },
+        });
+        if (options.captureSession === false) {
+          return result;
+        }
+        const exported = await captureLiveChatGptSessionExport(page, {
+          accessToken: liveToken,
+        }).catch(() => null);
+        return attachExportedSession(
+          result,
+          exported,
+          previousToken || accessToken,
+        );
+      } finally {
+        tracker.dispose();
+      }
+    },
+    options,
+  );
+}
+
 app.post("/api/admin/subscription/cancel-auto-renew", async (req, res) => {
   try {
     const rawSession = String(req.body?.session || req.body?.token || "")
@@ -2616,30 +2979,56 @@ app.post("/api/admin/subscription/cancel-auto-renew", async (req, res) => {
       });
     }
 
-    const token = normalizeSessionToken(rawSession);
-    const tokenCheck = validateSessionTokenForQuery(token);
+    const proxyGroupId =
+      req.body?.proxy_group_id ?? req.body?.proxyGroupId ?? "";
+    const resolved = await resolveAdminSessionToken(rawSession, null, {
+      proxyGroupId,
+    });
+    const { token, tokenCheck, proxy, cookieHeader } = resolved;
     if (!tokenCheck.valid) {
       return res
         .status(400)
         .json({ success: false, message: tokenCheck.message });
     }
 
-    const timezoneOffsetMin = Number(req.body?.timezone_offset_min);
-    const result = await cancelAutoRenew(token, {
-      timezoneOffsetMin: Number.isFinite(timezoneOffsetMin)
-        ? timezoneOffsetMin
-        : -new Date().getTimezoneOffset(),
-      email: extractEmailFromSession(rawSession) || tokenCheck.email || "",
-    });
-
-    if (!result.ok) {
-      return res.status(adminSubscriptionActionErrorStatus(result.statusCode)).json({
-        success: false,
-        message: result.error || "取消自动续费失败",
+    const timezoneOffsetMin = Number.isFinite(Number(req.body?.timezone_offset_min))
+      ? Number(req.body.timezone_offset_min)
+      : new Date().getTimezoneOffset();
+    const email = extractEmailFromSession(rawSession) || tokenCheck.email || "";
+    let result = await runAdminFreshSessionAction(
+      rawSession,
+      proxy,
+      token,
+      async ({ page, accessToken, refreshAccessToken, proxy: browserProxy }) => {
+        const browserTokenCheck = validateSessionTokenForQuery(accessToken);
+        return cancelAutoRenewWithBrowserPage(page, {
+          accountId: browserTokenCheck.accountId || tokenCheck.accountId,
+          accessToken,
+          email,
+          timezoneOffsetMin,
+          proxy: browserProxy,
+          cookieHeader,
+          refreshAccessToken,
+          maxAttempts: 6,
+          delayMs: 200,
+          verifyAttempts: 2,
+          verifyDelayMs: 300,
+          onStatus: (message) => console.log(`[Account] ${message}`),
+        });
+      },
+      { proxyGroupId },
+    );
+    if (!result && !hasAdminSessionCookies(rawSession)) {
+      result = await cancelAutoRenew(token, {
+        timezoneOffsetMin,
+        email,
+        proxy,
+        cookieHeader,
       });
     }
 
-    return res.json({ success: true, data: result.data });
+    await persistExportedAdminSession(req.body?.job_key, result);
+    return respondAdminAccountAction(res, result, "取消自动续费失败");
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -2657,36 +3046,57 @@ app.post("/api/admin/subscription/enable-auto-renew", async (req, res) => {
       });
     }
 
-    const token = normalizeSessionToken(rawSession);
-    const tokenCheck = validateSessionTokenForQuery(token);
+    const proxyGroupId =
+      req.body?.proxy_group_id ?? req.body?.proxyGroupId ?? "";
+    const resolved = await resolveAdminSessionToken(rawSession, null, {
+      proxyGroupId,
+    });
+    const { token, tokenCheck, proxy, cookieHeader } = resolved;
     if (!tokenCheck.valid) {
       return res
         .status(400)
         .json({ success: false, message: tokenCheck.message });
     }
 
-    const timezoneOffsetMin = Number(req.body?.timezone_offset_min);
-    const result = await resumeAutoRenew(token, {
-      timezoneOffsetMin: Number.isFinite(timezoneOffsetMin)
-        ? timezoneOffsetMin
-        : -new Date().getTimezoneOffset(),
-      email: extractEmailFromSession(rawSession) || tokenCheck.email || "",
-    });
-
-    if (!result.ok) {
-      return res.status(adminSubscriptionActionErrorStatus(result.statusCode)).json({
-        success: false,
-        message: result.error || "开启自动续费失败",
+    const timezoneOffsetMin = Number.isFinite(Number(req.body?.timezone_offset_min))
+      ? Number(req.body.timezone_offset_min)
+      : new Date().getTimezoneOffset();
+    const email = extractEmailFromSession(rawSession) || tokenCheck.email || "";
+    let result = await runAdminFreshSessionAction(
+      rawSession,
+      proxy,
+      token,
+      async ({ page, accessToken, refreshAccessToken, proxy: browserProxy }) => {
+        const browserTokenCheck = validateSessionTokenForQuery(accessToken);
+        return resumeAutoRenewWithBrowserPage(page, {
+          accountId: browserTokenCheck.accountId || tokenCheck.accountId,
+          accessToken,
+          email,
+          timezoneOffsetMin,
+          proxy: browserProxy,
+          cookieHeader,
+          refreshAccessToken,
+        });
+      },
+      { proxyGroupId },
+    );
+    if (!result && !hasAdminSessionCookies(rawSession)) {
+      result = await resumeAutoRenew(token, {
+        timezoneOffsetMin,
+        email,
+        proxy,
+        cookieHeader,
       });
     }
 
-    return res.json({ success: true, data: result.data });
+    await persistExportedAdminSession(req.body?.job_key, result);
+    return respondAdminAccountAction(res, result, "开启自动续费失败");
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 });
 
-function parseAdminSessionPayload(req) {
+async function parseAdminSessionPayload(req) {
   const rawSession = String(req.body?.session || req.body?.token || "")
     .trim()
     .replace(/^\uFEFF/, "");
@@ -2698,8 +3108,11 @@ function parseAdminSessionPayload(req) {
       },
     };
   }
-  const token = normalizeSessionToken(rawSession);
-  const tokenCheck = validateSessionTokenForQuery(token);
+  const proxyGroupId = req.body?.proxy_group_id ?? req.body?.proxyGroupId ?? "";
+  const resolved = await resolveAdminSessionToken(rawSession, null, {
+    proxyGroupId,
+  });
+  const { token, tokenCheck, proxy, cookieHeader } = resolved;
   if (!tokenCheck.valid) {
     return { error: { status: 400, message: tokenCheck.message } };
   }
@@ -2708,37 +3121,68 @@ function parseAdminSessionPayload(req) {
     rawSession,
     token,
     tokenCheck,
+    proxy,
+    cookieHeader,
+    tokenRefreshed: resolved.tokenRefreshed,
+    jobKey: String(req.body?.job_key || "").trim(),
+    proxyGroupId,
     timezoneOffsetMin: Number.isFinite(timezoneOffsetMin)
       ? timezoneOffsetMin
-      : -new Date().getTimezoneOffset(),
+      : new Date().getTimezoneOffset(),
   };
 }
 
 app.post("/api/admin/account/status", async (req, res) => {
   try {
-    const parsed = parseAdminSessionPayload(req);
+    const parsed = await parseAdminSessionPayload(req);
     if (parsed.error) {
       return res.status(parsed.error.status).json({
         success: false,
         message: parsed.error.message,
       });
     }
-    const result = await queryAccountStatusBySession(parsed.token, {
-      timezoneOffsetMin: parsed.timezoneOffsetMin,
-      email:
-        extractEmailFromSession(parsed.rawSession) ||
-        parsed.tokenCheck.email ||
-        "",
-    });
-    if (!result.ok) {
-      return res
-        .status(adminSubscriptionActionErrorStatus(result.statusCode))
-        .json({
-          success: false,
-          message: result.error || "查询账户状态失败",
-        });
+    const email =
+      extractEmailFromSession(parsed.rawSession) ||
+      parsed.tokenCheck.email ||
+      "";
+    let result = await runAdminFreshSessionAction(
+      parsed.rawSession,
+      parsed.proxy,
+      parsed.token,
+      async ({ page, accessToken, refreshAccessToken }) => {
+        let pageResult = await queryAccountStatusWithBrowserPage(
+          page,
+          accessToken,
+          {
+            timezoneOffsetMin: parsed.timezoneOffsetMin,
+            email,
+          },
+        );
+        if (!pageResult.ok && refreshAccessToken) {
+          const refreshed = String(
+            (await refreshAccessToken().catch(() => "")) || "",
+          ).trim();
+          if (refreshed) {
+            pageResult = await queryAccountStatusWithBrowserPage(page, refreshed, {
+              timezoneOffsetMin: parsed.timezoneOffsetMin,
+              email,
+            });
+          }
+        }
+        return pageResult;
+      },
+      { captureSession: false, proxyGroupId: parsed.proxyGroupId },
+    );
+    if (!result && !hasAdminSessionCookies(parsed.rawSession)) {
+      result = await queryAccountStatusBySession(parsed.token, {
+        timezoneOffsetMin: parsed.timezoneOffsetMin,
+        email,
+        proxy: parsed.proxy,
+        cookieHeader: parsed.cookieHeader,
+      });
     }
-    return res.json({ success: true, data: result.data });
+    await persistExportedAdminSession(parsed.jobKey, result);
+    return respondAdminAccountAction(res, result, "查询账户状态失败");
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -2746,29 +3190,43 @@ app.post("/api/admin/account/status", async (req, res) => {
 
 app.post("/api/admin/account/reset-codex-quota", async (req, res) => {
   try {
-    const parsed = parseAdminSessionPayload(req);
+    const parsed = await parseAdminSessionPayload(req);
     if (parsed.error) {
       return res.status(parsed.error.status).json({
         success: false,
         message: parsed.error.message,
       });
     }
-    const result = await resetCodexQuota(parsed.token, {
-      timezoneOffsetMin: parsed.timezoneOffsetMin,
-      email:
-        extractEmailFromSession(parsed.rawSession) ||
-        parsed.tokenCheck.email ||
-        "",
-    });
-    if (!result.ok) {
-      return res
-        .status(adminSubscriptionActionErrorStatus(result.statusCode))
-        .json({
-          success: false,
-          message: result.error || "重置 Codex 额度失败",
-        });
+    const email =
+      extractEmailFromSession(parsed.rawSession) ||
+      parsed.tokenCheck.email ||
+      "";
+    let result = await runAdminFreshSessionAction(
+      parsed.rawSession,
+      parsed.proxy,
+      parsed.token,
+      async ({ page, accessToken, refreshAccessToken }) =>
+        resetCodexQuotaWithBrowserPage(page, {
+          accessToken,
+          accountId: parsed.tokenCheck.accountId,
+          timezoneOffsetMin: parsed.timezoneOffsetMin,
+          email,
+          proxy: parsed.proxy,
+          cookieHeader: parsed.cookieHeader,
+          refreshAccessToken,
+        }),
+      { proxyGroupId: parsed.proxyGroupId },
+    );
+    if (!result && !hasAdminSessionCookies(parsed.rawSession)) {
+      result = await resetCodexQuota(parsed.token, {
+        timezoneOffsetMin: parsed.timezoneOffsetMin,
+        email,
+        proxy: parsed.proxy,
+        cookieHeader: parsed.cookieHeader,
+      });
     }
-    return res.json({ success: true, data: result.data });
+    await persistExportedAdminSession(parsed.jobKey, result);
+    return respondAdminAccountAction(res, result, "重置 Codex 额度失败");
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -2790,10 +3248,13 @@ app.post("/api/admin/subscription/batch-renewal-status", async (req, res) => {
     const timezoneOffsetMin = Number(req.body?.timezone_offset_min);
     const offset = Number.isFinite(timezoneOffsetMin)
       ? timezoneOffsetMin
-      : -new Date().getTimezoneOffset();
+      : new Date().getTimezoneOffset();
     const concurrency = 3;
     const results = {};
     let cursor = 0;
+    const proxy = await pickTaskProxy(
+      req.body?.proxy_group_id ?? req.body?.proxyGroupId,
+    ).catch(() => "");
 
     async function queryJobRenewalStatus(jobKey) {
       const session = await store.getSessionByJobKey(jobKey);
@@ -2803,8 +3264,8 @@ app.post("/api/admin/subscription/batch-renewal-status", async (req, res) => {
       }
 
       const rawSession = String(session.session_payload || "").trim();
-      const token = normalizeSessionToken(rawSession);
-      const tokenCheck = validateSessionTokenForQuery(token);
+      const resolved = await resolveAdminSessionToken(rawSession, proxy);
+      const { token, tokenCheck } = resolved;
       if (!tokenCheck.valid) {
         results[jobKey] = { ok: false, error: tokenCheck.message };
         return;
@@ -2813,6 +3274,7 @@ app.post("/api/admin/subscription/batch-renewal-status", async (req, res) => {
       const queryResult = await querySubscriptionBySession(token, {
         timezoneOffsetMin: offset,
         email: extractEmailFromSession(rawSession) || tokenCheck.email || "",
+        proxy,
       });
       if (!queryResult.ok) {
         results[jobKey] = { ok: false, error: queryResult.error || "查询失败" };
@@ -3442,6 +3904,7 @@ app.post("/api/admin/checkout/generate", async (req, res) => {
       planNameOverride: resolvedPlanName,
       creditQuantity,
       email,
+      proxyGroupId: req.body?.proxy_group_id ?? req.body?.proxyGroupId ?? "",
     });
 
     return res.json({
@@ -3561,7 +4024,9 @@ registerAdminAssetRoutes(app, {
 app.get("/api/admin/proxies", authenticateAdmin, async (req, res) => {
   try {
     await ensureStoreReady();
-    const proxies = await store.listProxyAssets();
+    const proxies = await store.listProxyAssets({
+      groupId: req.query?.group_id ?? req.query?.groupId ?? "all",
+    });
     res.json({ success: true, proxies });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -3573,7 +4038,9 @@ app.post("/api/admin/proxies", authenticateAdmin, async (req, res) => {
     await ensureStoreReady();
     const input =
       req.body?.proxies ?? req.body?.proxy_url ?? req.body?.proxy ?? "";
-    const result = await store.addProxyAssets(input);
+    const result = await store.addProxyAssets(input, {
+      groupId: req.body?.group_id ?? req.body?.groupId ?? null,
+    });
     if (!result.success) {
       return res.status(400).json(result);
     }
@@ -3888,12 +4355,13 @@ function spawnCheckoutDebugWorker({
   creditQuantity = 0,
   planNameOverride,
   email,
+  proxyGroupId = "",
 }) {
   (async () => {
     const checkoutScript = path.join(__dirname, "index.js");
     let settled = false;
     try {
-      const proxy = await store.getActiveProxy();
+      const proxy = await pickTaskProxy(proxyGroupId);
       const hcaptchaCfg = await store.getHcaptchaConfig();
       const recordVideo = await store.getRecordVideoEnabled();
       const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
@@ -3980,6 +4448,20 @@ function spawnCheckoutDebugWorker({
   })();
 }
 
+function parseCheckoutCancelAutoRenew(value) {
+  if (value === undefined || value === null || value === "") {
+    return true;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  const raw = String(value).trim().toLowerCase();
+  if (["0", "false", "no", "off", "n"].includes(raw)) {
+    return false;
+  }
+  return true;
+}
+
 function spawnCheckoutPaymentWorker({
   task,
   token,
@@ -3995,6 +4477,8 @@ function spawnCheckoutPaymentWorker({
   taskLabel = "付款调试",
   checkoutMode = "api",
   checkoutUrl = "",
+  cancelAutoRenew = true,
+  proxyGroupId = "",
 }) {
   (async () => {
     const checkoutScript = path.join(__dirname, "index.js");
@@ -4002,7 +4486,7 @@ function spawnCheckoutPaymentWorker({
     const failedMessage = `${taskLabel}失败`;
     let settled = false;
     try {
-      const proxy = await store.getActiveProxy();
+      const proxy = await pickTaskProxy(proxyGroupId);
       const hcaptchaCfg = await store.getHcaptchaConfig();
       const recordVideo = await store.getRecordVideoEnabled();
       const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
@@ -4031,6 +4515,7 @@ function spawnCheckoutPaymentWorker({
         PAYMENT_ADDRESS_MANUAL: manualAddress
           ? JSON.stringify(manualAddress)
           : "",
+        CANCEL_AUTO_RENEW: cancelAutoRenew ? "1" : "0",
       };
 
       logTask(
@@ -4157,7 +4642,14 @@ function parseCardExpiry(value) {
   return { month: Number(match[1]), year };
 }
 
-async function runGptApiWorker({ task, token, session, cdk, planType }) {
+async function runGptApiWorker({
+  task,
+  token,
+  session,
+  cdk,
+  planType,
+  proxyGroupId = "",
+}) {
   const { jobKey } = task;
   const sessionPayload =
     session && typeof session === "object" ? session : { access_token: token };
@@ -4212,7 +4704,7 @@ async function runGptApiWorker({ task, token, session, cdk, planType }) {
       "Session 本机格式／有效期检查通过；上游将在代充任务中验证登录状态",
     );
 
-    const proxy = await store.getActiveProxy();
+    const proxy = await pickTaskProxy(proxyGroupId);
     logTask(
       jobKey,
       proxy
@@ -4527,7 +5019,7 @@ function spawnActivationWorker({
           cdkCode: cdk,
         });
 
-        const proxy = await store.getActiveProxy();
+        const proxy = await pickTaskProxy(cdkDetails?.proxy_group_id);
         const hcaptchaCfg = await store.getHcaptchaConfig();
         const recordVideo = await store.getRecordVideoEnabled();
         const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
@@ -4998,6 +5490,7 @@ async function handleActivationRequest(req, res) {
         session: JSON.parse(storedSession),
         cdk,
         planType: cdkDetails.plan_type || "plus",
+        proxyGroupId: cdkDetails.proxy_group_id,
       }).catch((error) => {
         console.error(`[GPT API Worker] ${task.jobKey}:`, error);
       });

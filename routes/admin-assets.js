@@ -161,6 +161,84 @@ function registerAdminAssetRoutes(app, deps) {
     },
   );
 
+  app.get("/api/admin/proxy-groups", requireSecondaryAuth, async (req, res) => {
+    try {
+      await ensureStoreReady();
+      const groups = await store.listProxyGroups();
+      res.json({ success: true, groups });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post("/api/admin/proxy-groups", requireSecondaryAuth, async (req, res) => {
+    try {
+      await ensureStoreReady();
+      const group = await store.createProxyGroup({
+        name: req.body?.name,
+        proxyIds: req.body?.proxyIds || req.body?.proxy_ids || [],
+      });
+      res.json({ success: true, group, message: "分组已创建" });
+    } catch (error) {
+      res.status(400).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post(
+    "/api/admin/proxy-groups/assign",
+    requireSecondaryAuth,
+    async (req, res) => {
+      try {
+        await ensureStoreReady();
+        const result = await store.assignProxiesToGroup({
+          groupId: req.body?.groupId ?? req.body?.group_id ?? null,
+          proxyIds: req.body?.proxyIds || req.body?.proxy_ids || [],
+        });
+        res.json({
+          success: true,
+          ...result,
+          message: result.group_id ? "已加入分组" : "已移出分组",
+        });
+      } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+      }
+    },
+  );
+
+  app.delete(
+    "/api/admin/proxy-groups/:id",
+    requireSecondaryAuth,
+    async (req, res) => {
+      try {
+        await ensureStoreReady();
+        const result = await store.deleteProxyGroup(req.params.id);
+        res.json({ success: true, ...result, message: "分组已删除" });
+      } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+      }
+    },
+  );
+
+  app.post(
+    "/api/admin/proxies/batch-delete",
+    requireSecondaryAuth,
+    async (req, res) => {
+      try {
+        await ensureStoreReady();
+        const proxyIds = req.body?.proxyIds || req.body?.proxy_ids || [];
+        const result = await store.deleteProxyAssetsByIds(proxyIds);
+        auditAdminAction(req, "proxies_batch_deleted", `删除 ${result.deleted} 条代理`);
+        res.json({
+          success: true,
+          ...result,
+          message: `已删除 ${result.deleted} 条代理`,
+        });
+      } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+      }
+    },
+  );
+
   app.post(
     "/api/admin/cards/batch-delete",
     requireSecondaryAuth,
@@ -342,11 +420,14 @@ function registerAdminAssetRoutes(app, deps) {
       const planType = req.body?.plan_type || "plus";
       const cardGroupId =
         req.body?.card_group_id ?? req.body?.cardGroupId ?? null;
+      const proxyGroupId =
+        req.body?.proxy_group_id ?? req.body?.proxyGroupId ?? null;
       const newCdks = createCdks(count);
       const result = await store.insertCdks(newCdks, {
         type: "自助",
         plan_type: planType,
         card_group_id: cardGroupId,
+        proxy_group_id: proxyGroupId,
       });
       auditAdminAction(
         req,
@@ -360,6 +441,7 @@ function registerAdminAssetRoutes(app, deps) {
         insertedCount: result.insertedCount,
         plan_type: planType,
         card_group_id: cardGroupId || null,
+        proxy_group_id: proxyGroupId || null,
       });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
@@ -379,9 +461,12 @@ function registerAdminAssetRoutes(app, deps) {
       const planType = req.body?.plan_type || "plus";
       const cardGroupId =
         req.body?.card_group_id ?? req.body?.cardGroupId ?? null;
+      const proxyGroupId =
+        req.body?.proxy_group_id ?? req.body?.proxyGroupId ?? null;
       const summary = await store.insertCdks(cdks, {
         plan_type: planType,
         card_group_id: cardGroupId,
+        proxy_group_id: proxyGroupId,
       });
       auditAdminAction(
         req,

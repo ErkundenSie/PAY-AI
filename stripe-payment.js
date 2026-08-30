@@ -20,6 +20,7 @@ const {
     isCheckoutOverlayCaptchaVisible,
     hasAnyCheckoutCaptchaSignal
 } = require('./human-verification');
+const { isExpectedProtocolDueAmount } = require('./checkout-protocol');
 
 // ==================== Helper Functions ====================
 
@@ -349,6 +350,17 @@ function estimateTaxFreeAmount(taxedAmount) {
     return Math.round((n / (1 + PH_VAT_RATE)) * 100) / 100;
 }
 
+function isAlreadyTaxFreeCheckoutDue(due, baselineAmount = null) {
+    const currency = String(due?.currency || "").toUpperCase();
+    if (currency && currency !== "PHP") {
+        return false;
+    }
+    if (isExpectedProtocolDueAmount(due?.amount, "PHP", "plus")) {
+        return true;
+    }
+    return isExpectedProtocolDueAmount(baselineAmount, "PHP", "plus");
+}
+
 async function blurActiveBillingField(page) {
     try {
         await page.keyboard.press('Tab');
@@ -373,6 +385,10 @@ async function waitForCheckoutTaxRecalculation(page, options = {}) {
     while (Date.now() - started < maxWaitMs) {
         const due = await readCheckoutDueAmount(page);
         if (due?.amount) {
+            if (isAlreadyTaxFreeCheckoutDue(due, baselineAmount)) {
+                console.log(`  [Stripe] ✅ 当前应付已是免税价: ${due.currency || ''} ${due.amount}`);
+                return { ok: true, due };
+            }
             if (taxFreeTarget != null && due.amount <= taxFreeTarget + 0.05) {
                 console.log(`  [Stripe] ✅ 税区已更新，应付: ${due.currency || ''} ${due.amount}`);
                 return { ok: true, due };
@@ -401,6 +417,10 @@ async function waitForCheckoutTaxRecalculation(page, options = {}) {
 
 async function ensureCheckoutTaxFreeAmount(page, address, baselineAmount) {
     const due = await readCheckoutDueAmount(page);
+    if (isAlreadyTaxFreeCheckoutDue(due, baselineAmount)) {
+        console.log(`  [Stripe] ✅ 当前应付已是免税价: ${due?.currency || ''} ${due?.amount || baselineAmount}`);
+        return { ok: true, due: due || { amount: baselineAmount } };
+    }
     if (!baselineAmount || !due?.amount) {
         return { ok: true, due };
     }
@@ -2068,11 +2088,17 @@ async function fillOpenAiCheckoutBilling(page, address, fullName) {
     const preBillingDue = await readCheckoutDueAmount(page);
     const baselineAmount = preBillingDue?.amount || null;
     if (baselineAmount) {
-        const taxFree = estimateTaxFreeAmount(baselineAmount);
-        console.log(
-            `  [Stripe] 填地址前应付: ${preBillingDue.currency || ''} ${baselineAmount}`
-            + (taxFree ? `（免税州目标约 ${taxFree.toFixed(2)}）` : '')
-        );
+        if (isAlreadyTaxFreeCheckoutDue(preBillingDue, baselineAmount)) {
+            console.log(
+                `  [Stripe] 填地址前应付: ${preBillingDue.currency || ''} ${baselineAmount}（已是免税价）`
+            );
+        } else {
+            const taxFree = estimateTaxFreeAmount(baselineAmount);
+            console.log(
+                `  [Stripe] 填地址前应付: ${preBillingDue.currency || ''} ${baselineAmount}`
+                + (taxFree ? `（免税州目标约 ${taxFree.toFixed(2)}）` : '')
+            );
+        }
     }
 
     if (await isOpenAiBillingFormComplete(page)) {
@@ -2960,6 +2986,7 @@ module.exports = {
     prepareCheckoutCardSection,
     readCheckoutDueAmount,
     estimateTaxFreeAmount,
+    isAlreadyTaxFreeCheckoutDue,
     waitForCheckoutTaxRecalculation,
     ensureCheckoutTaxFreeAmount,
     captureCheckoutDueAmount

@@ -219,6 +219,10 @@ function registerPublicRoutes(app, deps) {
       await ensureStoreReady();
       const regionCode = await store.getPaymentRegion();
       const current = REGION_CONFIG[regionCode] || REGION_CONFIG.PH;
+      const proxyGroups = await store.listProxyGroups();
+      const defaultProxyGroupId = String(
+        (await store.getAppConfigValue("default_proxy_group_id", "")) || "",
+      ).trim();
       return res.json({
         success: true,
         plans: store.listCheckoutPlans(),
@@ -233,6 +237,9 @@ function registerPublicRoutes(app, deps) {
         default_region: regionCode,
         default_currency: current.currency,
         default_label: current.label,
+        proxy_groups: proxyGroups,
+        default_proxy_group_id: defaultProxyGroupId,
+        default_timezone: store.getDefaultTimeZone(),
       });
     } catch (error) {
       return res.status(500).json({ success: false, message: error.message });
@@ -491,14 +498,10 @@ function registerPublicRoutes(app, deps) {
             status: cdkStatus,
             type: cdkData.type || "自助",
             plan_type: cdkData.plan_type || "plus",
-            createdAt: cdkData.created_at,
+            createdAt: store.formatStoreDateTime(cdkData.created_at),
             jobKey: runningTask?.job_key || latest?.job_key || null,
             message: runningTask?.message || latest?.message || "",
-            usedAt: cdkData.used_at
-              ? new Date(cdkData.used_at)
-                  .toLocaleString("zh-CN", { hour12: false })
-                  .replace(/\//g, "-")
-              : null,
+            usedAt: store.formatStoreDateTime(cdkData.used_at),
           },
         });
       } catch (error) {

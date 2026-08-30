@@ -3066,6 +3066,16 @@
         box-sizing: border-box;
       }
 
+      .proxy-list-actions .filter-dropdown {
+        position: relative;
+      }
+
+      .proxy-list-actions .filter-dropdown .btn,
+      .proxy-list-actions .btn-danger {
+        width: auto;
+        min-width: 128px;
+      }
+
       #checkout_debug.page-view {
         max-width: none;
         width: 100%;
@@ -3213,7 +3223,7 @@
       .checkout-debug-hint {
         font-size: 12px;
         color: var(--text-dim);
-        margin: -4px 0 0;
+        margin: 6px 0 0;
         line-height: 1.5;
         min-height: 0;
       }
@@ -3222,17 +3232,48 @@
         display: none;
       }
 
+      #checkout_manual_card_wrap {
+        margin-top: 4px;
+      }
+
+      .checkout-debug-account-hint {
+        display: inline-block;
+        font-size: 12px;
+        color: var(--primary);
+        font-weight: 600;
+        margin: 0;
+        line-height: 1.2;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .checkout-debug-account-hint:empty {
+        display: none;
+      }
+
       .checkout-debug-session-label {
         display: flex;
-        align-items: center;
+        align-items: baseline;
         justify-content: space-between;
         gap: 8px;
         margin-bottom: 6px;
         padding-right: 10px;
       }
 
-      .checkout-debug-session-label label {
+      .checkout-debug-session-label-main {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        min-width: 0;
+        flex: 1;
+      }
+
+      #checkout_debug .checkout-debug-session-label label {
         margin-bottom: 0;
+        flex-shrink: 0;
+        line-height: 1.2;
       }
 
       .checkout-debug-clear-btn {
@@ -3247,7 +3288,7 @@
         white-space: nowrap;
         font-size: 12px;
         font-weight: 500;
-        line-height: 1;
+        line-height: 1.2;
         color: var(--text-secondary);
         cursor: pointer;
         font-family: inherit;
@@ -3270,7 +3311,7 @@
 
       .checkout-debug-address-head {
         display: flex;
-        align-items: center;
+        align-items: baseline;
         justify-content: space-between;
         gap: 8px;
         margin: 0 -12px 8px 0;
@@ -3680,6 +3721,30 @@
         display: flex;
       }
 
+      .account-loading-dialog {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        min-width: 220px;
+        background: var(--surface);
+        border: 1px solid var(--glass-border);
+        border-radius: 14px;
+        padding: 28px 32px;
+        box-shadow: var(--shadow-lg);
+      }
+
+      .account-loading-dialog i {
+        width: 32px;
+        height: 32px;
+        color: var(--primary);
+      }
+
+      .account-loading-text {
+        font-size: 14px;
+        color: var(--text-main);
+      }
+
       .admin-confirm-dialog {
         width: 100%;
         max-width: 520px;
@@ -3791,6 +3856,21 @@
           >
             确定
           </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      id="account_loading_overlay"
+      class="admin-confirm-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-hidden="true"
+    >
+      <div class="account-loading-dialog">
+        <i data-lucide="loader-circle" class="animate-spin"></i>
+        <div id="account_loading_text" class="account-loading-text">
+          正在处理，请稍候…
         </div>
       </div>
     </div>
@@ -4586,6 +4666,21 @@
                   用于后台日志、任务和账单时间展示；默认使用北京时间。
                 </p>
               </div>
+              <div class="form-group">
+                <label>默认代理分组</label>
+                <select id="default_proxy_group" class="asset-input">
+                  <option value="">全部代理</option>
+                </select>
+                <p
+                  style="
+                    font-size: 13px;
+                    color: var(--text-dim);
+                    margin-top: 10px;
+                  "
+                >
+                  支付调试、账户管理、自助开通未手动改分组时，从该分组随机抽取启用代理。
+                </p>
+              </div>
             </div>
             <div class="config-toggle-grid">
             <div class="form-group" style="margin: 0">
@@ -5248,7 +5343,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               onclick="saveProxyPool()"
             >
               <i data-lucide="plus"></i>
-              保存代理
+              导入代理
             </button>
             <button
               type="button"
@@ -5269,6 +5364,15 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
           <div class="panel-header">
             <h2 class="panel-title">已保存代理</h2>
             <div class="proxy-list-actions">
+              <select
+                id="proxy_group_filter"
+                class="asset-input"
+                style="width: 160px"
+                onchange="handleProxyGroupFilter(this.value)"
+              >
+                <option value="all">全部分组</option>
+                <option value="none">未分组</option>
+              </select>
               <button
                 type="button"
                 class="btn btn-secondary"
@@ -5305,6 +5409,43 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 <i data-lucide="circle-x"></i>
                 选中失效
               </button>
+              <div
+                class="filter-dropdown batch-action-dropdown"
+                data-filter="proxy_group_actions"
+              >
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  onclick="toggleFilterMenu('proxy_group_actions')"
+                >
+                  <i data-lucide="folder"></i>
+                  分组管理
+                  <i data-lucide="chevron-down"></i>
+                </button>
+                <div class="filter-menu">
+                  <button
+                    type="button"
+                    class="filter-option"
+                    onclick="closeFilterMenus(); createProxyGroupFromSelection()"
+                  >
+                    创建分组
+                  </button>
+                  <button
+                    type="button"
+                    class="filter-option"
+                    onclick="closeFilterMenus(); assignSelectedProxiesToGroup()"
+                  >
+                    加入已有分组
+                  </button>
+                  <button
+                    type="button"
+                    class="filter-option"
+                    onclick="closeFilterMenus(); clearSelectedProxyGroup()"
+                  >
+                    移出分组
+                  </button>
+                </div>
+              </div>
               <button
                 type="button"
                 class="btn btn-danger"
@@ -5327,6 +5468,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                   <th width="88px" style="text-align: center">延迟</th>
                   <th width="88px" style="text-align: center">协议</th>
                   <th>代理地址</th>
+                  <th width="120px">分组</th>
                   <th width="58px" style="text-align: center">编辑</th>
                   <th width="76px" style="text-align: center">检测</th>
                   <th width="58px" style="text-align: center">删除</th>
@@ -5334,7 +5476,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               </thead>
               <tbody id="proxy_pool_body">
                 <tr>
-                  <td colspan="10">加载中...</td>
+                  <td colspan="11">加载中...</td>
                 </tr>
               </tbody>
             </table>
@@ -5880,7 +6022,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                       <option value="2000">2000</option>
                     </select>
                   </div>
-                  <div class="form-group">
+                  <div class="form-group" hidden>
                     <label>plan_name</label>
                     <input
                       type="text"
@@ -5901,6 +6043,14 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                       placeholder="搜索地区或输入 ISO 代码"
                       autocomplete="off"
                     />
+                    <p id="checkout_region_hint" class="checkout-debug-hint"></p>
+                  </div>
+                  <div class="form-group">
+                    <label>代理分组</label>
+                    <select id="checkout_proxy_group" class="asset-input">
+                      <option value="">跟随系统默认</option>
+                      <option value="all">全部代理</option>
+                    </select>
                   </div>
                   <div class="form-group checkout-debug-card">
                     <label>用卡方式</label>
@@ -5914,7 +6064,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                     </select>
                   </div>
                 </div>
-                <p id="checkout_region_hint" class="checkout-debug-hint"></p>
                 <div class="form-group" id="checkout_manual_card_wrap" hidden>
                   <label>手动卡片</label>
                   <input
@@ -5927,7 +6076,13 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 </div>
                 <div class="form-group checkout-debug-session">
                   <div class="checkout-debug-session-label">
-                    <label>Session JSON</label>
+                    <div class="checkout-debug-session-label-main">
+                      <label>Session JSON</label>
+                      <span
+                        id="checkout_session_account"
+                        class="checkout-debug-account-hint"
+                      ></span>
+                    </div>
                     <button
                       type="button"
                       class="checkout-debug-clear-btn"
@@ -5943,6 +6098,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                     placeholder="粘贴完整 Session JSON"
                     spellcheck="false"
                     autocomplete="off"
+                    oninput="updateCheckoutSessionAccountHint()"
                   ></textarea>
                 </div>
                 <div class="form-group">
@@ -6391,6 +6547,13 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 oninput="handleCdkSearch(this.value)"
               />
               <select
+                id="cdk_proxy_group"
+                class="asset-input"
+                style="width: 160px"
+              >
+                <option value="">默认代理分组</option>
+              </select>
+              <select
                 id="cdk_card_group"
                 class="asset-input"
                 style="width: 160px"
@@ -6507,7 +6670,9 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 >
                   Pro 20x
                 </button>
-                <button250', 'Codex 250')"
+                <button
+                  class="filter-option"
+                  onclick="selectCdkPlanTypeFilter('credits_250', 'Codex 250')"
                 >
                   Codex 250
                 </button>
@@ -6519,27 +6684,19 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                 </button>
                 <button
                   class="filter-option"
-                  onclick="
-                    selectCdkPlanTypeFilter('credits_1000', 'Codex 1000')
-                  "
+                  onclick="selectCdkPlanTypeFilter('credits_1000', 'Codex 1000')"
                 >
                   Codex 1000
                 </button>
                 <button
                   class="filter-option"
-                  onclick="
-                    selectCdkPlanTypeFilter('credits_1500', 'Codex 1500')
-                  "
+                  onclick="selectCdkPlanTypeFilter('credits_1500', 'Codex 1500')"
                 >
-                  Codex 15
-                >
-                  Codex 1000
+                  Codex 1500
                 </button>
                 <button
                   class="filter-option"
-                  onclick="
-                    selectCdkPlanTypeFilter('credits_2000', 'Codex 2000')
-                  "
+                  onclick="selectCdkPlanTypeFilter('credits_2000', 'Codex 2000')"
                 >
                   Codex 2000
                 </button>
@@ -6582,6 +6739,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                   <th>激活码内容</th>
                   <th width="100px" style="text-align: center">套餐</th>
                   <th width="120px">银行卡分组</th>
+                  <th width="120px">代理分组</th>
                   <th width="200px">Session 记录</th>
                   <th width="140px">状态</th>
                   <th width="180px">使用时间</th>
@@ -6617,6 +6775,17 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
             placeholder="粘贴 Session JSON 或 AccessToken"
             style="font-family: ui-monospace, monospace; font-size: 12px"
           ></textarea>
+          <div class="form-group" style="margin: 12px 0 0">
+            <label>代理分组</label>
+            <select
+              id="account_proxy_group"
+              class="asset-input"
+              style="width: 220px"
+            >
+              <option value="">跟随系统默认</option>
+              <option value="all">全部代理</option>
+            </select>
+          </div>
           <div class="account-action-bar">
             <button
               type="button"
@@ -6662,10 +6831,6 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               <i data-lucide="eraser"></i>
               清空数据
             </button>
-            <span
-              id="cancel_renewal_hint"
-              style="font-size: 13px; color: var(--text-dim)"
-            ></span>
           </div>
         </div>
 

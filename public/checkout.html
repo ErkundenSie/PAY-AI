@@ -118,6 +118,13 @@
                     class="field-hint checkout-inline-hint"
                   ></p>
                 </div>
+                <div>
+                  <label class="field-label" for="proxyGroupSelect">代理分组</label>
+                  <select id="proxyGroupSelect">
+                    <option value="">跟随系统默认</option>
+                    <option value="all">全部代理</option>
+                  </select>
+                </div>
               </div>
               <div class="checkout-card-box">
                 <span class="checkout-card-box-title">银行卡信息</span>
@@ -309,6 +316,7 @@
       const creditQuantityWrap = document.getElementById("creditQuantityWrap");
       const creditQuantity = document.getElementById("creditQuantity");
       const regionSelect = document.getElementById("regionSelect");
+      const proxyGroupSelect = document.getElementById("proxyGroupSelect");
       const regionHint = document.getElementById("regionHint");
       const cardNumber = document.getElementById("cardNumber");
       const cardExpiry = document.getElementById("cardExpiry");
@@ -355,6 +363,7 @@
       const WS_HEARTBEAT_TIMEOUT_MS = 45000;
       const decodeJwtPart = window.JwtDecode?.decodeJwtPart;
       const parseSessionJsonInput = window.JwtDecode?.parseSessionJson;
+      let checkoutTimeZone = "Asia/Shanghai";
 
       function validateAccessToken(token) {
         const value = String(token || "").trim();
@@ -749,7 +758,10 @@
             time.className = "checkout-task-log-time";
             time.textContent = new Date(
               Number(entry.ts) || Date.now(),
-            ).toLocaleTimeString("zh-CN", { hour12: false });
+            ).toLocaleTimeString("zh-CN", {
+              hour12: false,
+              timeZone: checkoutTimeZone,
+            });
             const content = document.createElement("span");
             content.className = "checkout-task-log-text";
             content.textContent = text;
@@ -1017,6 +1029,9 @@
           const response = await fetch("/api/public/checkout/options");
           const data = await response.json();
           if (!data.success) throw new Error(data.message || "加载选项失败");
+          if (data.default_timezone) {
+            checkoutTimeZone = String(data.default_timezone);
+          }
           regionSelect.innerHTML = "";
           (data.regions || []).forEach((region) => {
             const option = document.createElement("option");
@@ -1056,6 +1071,33 @@
               creditQuantity.appendChild(option);
             });
           }
+          if (proxyGroupSelect) {
+            const current = proxyGroupSelect.value;
+            proxyGroupSelect.innerHTML = "";
+            const follow = document.createElement("option");
+            follow.value = "";
+            follow.textContent = "跟随系统默认";
+            proxyGroupSelect.appendChild(follow);
+            const all = document.createElement("option");
+            all.value = "all";
+            all.textContent = "全部代理";
+            proxyGroupSelect.appendChild(all);
+            (data.proxy_groups || []).forEach((group) => {
+              const option = document.createElement("option");
+              option.value = String(group.id);
+              option.textContent = group.name;
+              proxyGroupSelect.appendChild(option);
+            });
+            const defaultGroup = String(data.default_proxy_group_id || "");
+            const preferred = current || defaultGroup;
+            if (
+              [...proxyGroupSelect.options].some(
+                (item) => item.value === preferred,
+              )
+            ) {
+              proxyGroupSelect.value = preferred;
+            }
+          }
           syncCreditQuantityUi();
           updateRegionHint();
         } catch (error) {
@@ -1094,6 +1136,7 @@
                 ? Number(creditQuantity.value || 0)
                 : undefined,
               region: regionSelect.value,
+              proxy_group_id: proxyGroupSelect?.value || "",
               card: {
                 number: card.number,
                 expiry: card.expiry,

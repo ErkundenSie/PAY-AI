@@ -142,6 +142,16 @@ describe("checkout protocol helpers", () => {
     expect(isExpectedProtocolDueAmount(0, "PHP")).toBe(false);
   });
 
+  it("does not treat protocol PHP 982.14 as still-taxed UI due", () => {
+    const { isAlreadyTaxFreeCheckoutDue } = require("../stripe-payment");
+    expect(
+      isAlreadyTaxFreeCheckoutDue({ amount: 982.14, currency: "PHP" }),
+    ).toBe(true);
+    expect(isAlreadyTaxFreeCheckoutDue({ amount: 1100, currency: "PHP" })).toBe(
+      false,
+    );
+  });
+
   it("includes card, billing, and stripe version in confirmation token form", () => {
     const form = buildConfirmationTokenForm({
       card: {

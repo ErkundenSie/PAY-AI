@@ -7,4 +7,5 @@ opencv-python-headless
 numpy
 pillow
 requests
+curl-cffi>=0.13,<1
 playwright>=1.40,<2

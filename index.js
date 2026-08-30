@@ -10,6 +10,8 @@ const { buildBrowserFingerprint } = require("./browser-fingerprint");
 const {
   installChatGptSession,
   bootstrapChatGptSession,
+  acquireFreshChatGptAccessToken,
+  fetchLiveChatGptSession,
 } = require("./session-auth");
 const {
   connectTaskBrowser,
@@ -17,7 +19,10 @@ const {
   closeTaskBrowser,
 } = require("./browser-runtime");
 const { preparePlaywrightProxy } = require("./playwright-proxy");
-const { cancelAutoRenewWithBrowserPage } = require("./subscription-check");
+const {
+  cancelAutoRenewWithBrowserPage,
+  createChatGptLiveStateTracker,
+} = require("./subscription-check");
 const fs = require("fs");
 const path = require("path");
 
@@ -225,6 +230,15 @@ async function recoverConnectionClosed(page, fallbackUrl = "") {
   }
 
   return false;
+}
+
+async function preparePostPaymentSubscription(page, options = {}) {
+  return acquireFreshChatGptAccessToken(page, {
+    previousToken: options.accessToken,
+    tracker: options.tracker,
+    maxAttempts: Number(options.maxAttempts || 4),
+    onStatus: options.onStatus,
+  });
 }
 
 /**
@@ -750,7 +764,7 @@ async function run() {
 
     checkoutResult = hydrateCheckoutFromUrl(checkoutResult, page.url());
     const stripeSessionId = checkoutResult?.sessionId || null;
-    const accessToken = loginInfo.session?.accessToken || CONFIG.chatgptToken;
+    let accessToken = loginInfo.session?.accessToken || CONFIG.chatgptToken;
     let cardGroupId = null;
     if (cdkCode) {
       try {
@@ -795,21 +809,95 @@ async function run() {
       paymentSucceeded = true;
       const isCredits =
         store.isCreditsPlan(planType) || Number(CONFIG.creditQuantity || 0) > 0;
-      if (!isCredits) {
-        console.log("[步骤] 正在关闭自动续费...");
-        const cancelResult = await cancelAutoRenewWithBrowserPage(page, {
-          accountId: checkoutResult?.accountId || loginInfo.accountId,
-          email: email || loginInfo.email,
-        });
-        if (cancelResult.ok) {
-          console.log(
-            `✅ [步骤] ${cancelResult.data?.message || "已关闭自动续费"}`,
-          );
-        } else {
-          console.warn(
-            `⚠️ [步骤] 关闭自动续费失败: ${cancelResult.error || "未知错误"}`,
-          );
+      const cancelAutoRenewEnabled = !["0", "false", "no", "off"].includes(
+        String(process.env.CANCEL_AUTO_RENEW ?? "1")
+          .trim()
+          .toLowerCase(),
+      );
+      if (!isCredits && cancelAutoRenewEnabled) {
+        console.log("[步骤] 支付完成，正在换发 Session...");
+        const previousToken = accessToken;
+        const tracker = createChatGptLiveStateTracker(page, { previousToken });
+        try {
+          const fresh = await preparePostPaymentSubscription(page, {
+            accessToken: previousToken,
+            tracker,
+          });
+          const cancelToken = String(fresh.accessToken || "").trim();
+          if (!cancelToken || cancelToken === previousToken) {
+            console.warn(
+              "⚠️ [步骤] 未拿到支付后新 Session，已跳过用旧 Token 取消续费",
+            );
+          } else {
+            accessToken = cancelToken;
+            console.log("[步骤] 已拿到新 Session，正在关闭自动续费...");
+            const cancelResult = await cancelAutoRenewWithBrowserPage(page, {
+              accountId: checkoutResult?.accountId || loginInfo.accountId,
+              email: email || loginInfo.email,
+              accessToken: cancelToken,
+              maxAttempts: 6,
+              delayMs: 200,
+              verifyAttempts: 2,
+              verifyDelayMs: 300,
+              paymentFailureNote: true,
+              refreshAccessToken: async () => {
+                const failedToken = String(accessToken || "").trim();
+                const rotated = String(tracker.getRotatedToken?.() || "").trim();
+                if (rotated && rotated !== previousToken && rotated !== failedToken) {
+                  return rotated;
+                }
+                const captured = String(tracker.getToken?.() || "").trim();
+                if (
+                  captured &&
+                  captured !== previousToken &&
+                  captured !== failedToken
+                ) {
+                  return captured;
+                }
+                const live = await fetchLiveChatGptSession(page, {
+                  forceRefresh: true,
+                });
+                const liveToken = String(live.ok ? live.accessToken : "").trim();
+                if (
+                  liveToken &&
+                  liveToken !== previousToken &&
+                  liveToken !== failedToken
+                ) {
+                  return liveToken;
+                }
+                const next = await acquireFreshChatGptAccessToken(page, {
+                  previousToken,
+                  excludeToken: failedToken,
+                  tracker,
+                  maxAttempts: 1,
+                  allowNavigate: false,
+                });
+                return next.accessToken || "";
+              },
+              onStatus: (message) => console.log(`[步骤] ${message}`),
+            });
+            if (cancelResult.ok) {
+              const cancelMessage =
+                cancelResult.data?.message || "已提交取消自动续费请求";
+              if (
+                cancelResult.data?.confirmed ||
+                cancelResult.data?.alreadyCancelled
+              ) {
+                console.log(`✅ [步骤] ${cancelMessage}`);
+              } else {
+                console.warn(`⚠️ [步骤] ${cancelMessage}`);
+              }
+            } else {
+              console.warn(
+                `⚠️ [步骤] 关闭自动续费失败: ${cancelResult.error || "未知错误"}`,
+              );
+            }
+          }
+        } finally {
+          tracker.dispose();
         }
+      } else if (!isCredits) {
+        console.log("[步骤] 已按选项跳过关闭自动续费");
       }
       console.log("PAYMENT_SUCCESS");
       removeMediaFiles(paymentResult.screenshots);

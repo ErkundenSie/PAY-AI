@@ -72,11 +72,13 @@ CREATE TABLE IF NOT EXISTS cdk_codes (
     type VARCHAR(16) NOT NULL DEFAULT '自助',
     plan_type VARCHAR(16) NOT NULL DEFAULT 'plus' COMMENT 'plus/pro_5x/pro_20x',
     card_group_id BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '仅可使用该银行卡分组',
+    proxy_group_id BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '仅可使用该代理分组',
     fail_count INT DEFAULT 0,
     cooldown_until TIMESTAMP NULL DEFAULT NULL,
     refresh_count INT NOT NULL DEFAULT 0,
     UNIQUE KEY uniq_cdk_codes_code (cdk_code),
     KEY idx_cdk_codes_card_group (card_group_id),
+    KEY idx_cdk_codes_proxy_group (proxy_group_id),
     KEY idx_cdk_codes_list (is_active, type, created_at, id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
@@ -178,10 +180,20 @@ CREATE TABLE IF NOT EXISTS proxy_assets (
     last_check_error VARCHAR(512) NOT NULL DEFAULT '',
     usage_count INT NOT NULL DEFAULT 0,
     sort_order INT NOT NULL DEFAULT 0,
+    group_id BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '所属代理分组',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_proxy_url_hash (proxy_url_hash),
-    KEY idx_proxy_active (is_active, sort_order)
+    KEY idx_proxy_active (is_active, sort_order),
+    KEY idx_proxy_assets_group (group_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS proxy_groups (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(64) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_proxy_groups_name (name)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS billing_records (

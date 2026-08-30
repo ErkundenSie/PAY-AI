@@ -8,6 +8,8 @@ const {
   cancelAutoRenewWithBrowserPage,
   parseCodexQuotaPayload,
   parseAccountCheckResponse,
+  prepareLiveChatGptSubscription,
+  querySubscriptionBySession,
 } = require("../subscription-check");
 
 const ACCOUNT_ID = "acct-test-123";
@@ -116,6 +118,24 @@ describe("subscription cancellation", () => {
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
+  it("reports an upstream-revoked access token separately", async () => {
+    vi.spyOn(playwrightRequest, "newContext").mockResolvedValue({
+      get: vi.fn().mockResolvedValue(
+        response(401, {
+          error: { code: "token_expired" },
+          detail: { code: "token_expired" },
+        }),
+      ),
+      dispose: vi.fn().mockResolvedValue(),
+    });
+
+    const result = await querySubscriptionBySession(createToken());
+
+    expect(result).toMatchObject({ ok: false, statusCode: 401 });
+    expect(result.error).toContain("Session Cookie 仍有效");
+    expect(result.error).toContain("AccessToken");
+  });
+
   it("uses the active browser page to cancel with its session cookies", async () => {
     const evaluate = vi.fn().mockResolvedValue({ status: 200, data: {} });
     const result = await cancelAutoRenewWithBrowserPage(
@@ -128,7 +148,110 @@ describe("subscription cancellation", () => {
     expect(evaluate.mock.calls[0][1]).toEqual({
       url: "https://chatgpt.com/backend-api/subscriptions/cancel",
       targetAccountId: ACCOUNT_ID,
+      token: "",
     });
+  });
+
+  it("falls back to the browser context request when page fetch is unavailable", async () => {
+    const post = vi.fn().mockResolvedValue(response(200, {}));
+    const evaluate = vi.fn();
+    const result = await cancelAutoRenewWithBrowserPage(
+      {
+        isClosed: () => false,
+        context: () => ({ request: { post } }),
+        evaluate,
+      },
+      { accountId: ACCOUNT_ID },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: { cancelled: true, via: "browser-context" },
+    });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0][1]).toMatchObject({
+      data: { account_id: ACCOUNT_ID },
+    });
+    expect(evaluate).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses page fetch before the browser context request", async () => {
+    const post = vi.fn().mockResolvedValue(response(401, {}));
+    const evaluate = vi.fn().mockResolvedValue({
+      status: 200,
+      data: {},
+      via: "page-fetch",
+    });
+    const result = await cancelAutoRenewWithBrowserPage(
+      {
+        isClosed: () => false,
+        context: () => ({ request: { post } }),
+        evaluate,
+      },
+      { accountId: ACCOUNT_ID },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: { cancelled: true, via: "page-fetch" },
+    });
+    expect(post).not.toHaveBeenCalled();
+    expect(evaluate).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes the live token after page cancellation returns 401", async () => {
+    const freshToken = createToken() + "fresh";
+    const evaluate = vi
+      .fn()
+      .mockResolvedValueOnce({ status: 401, data: { error: "expired" } })
+      .mockResolvedValueOnce({ status: 401, data: { error: "expired" } })
+      .mockResolvedValueOnce({ status: 200, data: {}, via: "page-fetch" })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: activeSubscription(false),
+        via: "page-fetch",
+      });
+    const refreshAccessToken = vi.fn().mockResolvedValue(freshToken);
+
+    const result = await cancelAutoRenewWithBrowserPage(
+      { isClosed: () => false, evaluate, waitForTimeout: vi.fn() },
+      {
+        accountId: ACCOUNT_ID,
+        accessToken: createToken(),
+        maxAttempts: 2,
+        delayMs: 0,
+        refreshAccessToken,
+      },
+    );
+
+    expect(result).toMatchObject({ ok: true, data: { cancelled: true } });
+    expect(refreshAccessToken).toHaveBeenCalledTimes(1);
+    expect(evaluate.mock.calls[2][1].token).toBe(freshToken);
+  });
+
+  it("does not keep retrying 401 when the access token does not change", async () => {
+    const token = createToken();
+    const evaluate = vi.fn().mockResolvedValue({
+      status: 401,
+      data: {
+        error: { code: "token_expired" },
+        detail: { code: "token_expired" },
+      },
+    });
+    const result = await cancelAutoRenewWithBrowserPage(
+      { isClosed: () => false, evaluate },
+      {
+        accountId: ACCOUNT_ID,
+        accessToken: token,
+        maxAttempts: 4,
+        delayMs: 0,
+        refreshAccessToken: async () => token,
+      },
+    );
+
+    expect(result).toMatchObject({ ok: false, statusCode: 401 });
+    expect(result.error).toContain("AccessToken");
+    expect(evaluate.mock.calls.length).toBeLessThan(4);
   });
 
   it("retries when the subscription has not propagated after payment", async () => {
@@ -161,6 +284,70 @@ describe("subscription cancellation", () => {
 
     expect(result).toMatchObject({ ok: false, statusCode: 404 });
     expect(evaluate).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not fall back to AccessToken when cancel returns 404", async () => {
+    const evaluate = vi.fn().mockResolvedValue({
+      status: 404,
+      data: { detail: "no active subscription found for account" },
+    });
+    const newContext = vi.spyOn(playwrightRequest, "newContext");
+
+    const result = await cancelAutoRenewWithBrowserPage(
+      { isClosed: () => false, evaluate },
+      {
+        accountId: ACCOUNT_ID,
+        accessToken: createToken(),
+        maxAttempts: 3,
+        delayMs: 0,
+        fallbackAttempts: 1,
+      },
+    );
+
+    expect(result).toMatchObject({ ok: false, statusCode: 404 });
+    expect(evaluate).toHaveBeenCalledTimes(3);
+    expect(newContext).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the access token after a browser 401", async () => {
+    const evaluate = vi.fn().mockResolvedValue({
+      status: 401,
+      data: { error: "invalid_session" },
+    });
+    axios.defaults.adapter = async (config) => ({
+      status: 200,
+      statusText: "OK",
+      headers: {},
+      config,
+      data: {},
+    });
+    const get = vi
+      .fn()
+      .mockResolvedValue(response(200, activeSubscription(false)));
+    vi.spyOn(playwrightRequest, "newContext").mockResolvedValue({
+      get,
+      dispose: vi.fn().mockResolvedValue(),
+    });
+
+    const result = await cancelAutoRenewWithBrowserPage(
+      { isClosed: () => false, evaluate },
+      {
+        accountId: ACCOUNT_ID,
+        accessToken: createToken(),
+        maxAttempts: 1,
+        fallbackAttempts: 1,
+        verifyAttempts: 1,
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        cancelled: true,
+        confirmed: true,
+        via: "token-fallback",
+      },
+    });
   });
 
   it("returns a mapped forbidden error for HTTP 403", async () => {
@@ -223,7 +410,7 @@ describe("subscription cancellation", () => {
     });
 
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(get).toHaveBeenCalledTimes(2);
+    expect(get).toHaveBeenCalledTimes(4);
     expect(result).toMatchObject({ ok: true, data: { cancelled: true } });
     expect(result.data.message).toContain("请稍后刷新确认状态");
   });
@@ -282,5 +469,221 @@ describe("account status parsing", () => {
     );
     expect(quota.windows[0].resetAtText).not.toMatch(/1970|秒/);
     expect(quota.windows[1].resetAtText).toBe("—");
+  });
+
+  it("prefers an active Plus account over a free default account", () => {
+    const account = parseAccountCheckResponse(
+      {
+        accounts: {
+          default: {
+            account: { account_id: "acct-free" },
+            entitlement: {
+              has_active_subscription: false,
+              subscription_plan: "free",
+            },
+          },
+          personal: {
+            account: { account_id: ACCOUNT_ID },
+            entitlement: {
+              has_active_subscription: true,
+              subscription_plan: "chatgptplusplan",
+            },
+            last_active_subscription: {
+              will_renew: true,
+              purchase_origin_platform: "stripe",
+            },
+          },
+        },
+      },
+      { accountId: ACCOUNT_ID },
+    );
+    expect(account).toMatchObject({
+      accountId: ACCOUNT_ID,
+      plan: "ChatGPT Plus",
+      hasActiveSubscription: true,
+    });
+  });
+});
+
+describe("live ChatGPT subscription sync", () => {
+  it("opens the main page, reloads, and confirms an active Plus subscription", async () => {
+    const token = createToken();
+    const evaluate = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { accessToken: token },
+      })
+      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce({
+        status: 200,
+        data: activeSubscription(true),
+        via: "page-fetch",
+      });
+    const page = {
+      isClosed: () => false,
+      goto: vi.fn().mockResolvedValue(),
+      reload: vi.fn().mockResolvedValue(),
+      waitForTimeout: vi.fn().mockResolvedValue(),
+      evaluate,
+    };
+
+    const result = await prepareLiveChatGptSubscription(page, {
+      accessToken: "old-token",
+      requireActive: true,
+      maxAttempts: 1,
+      onStatus: () => {},
+    });
+
+    expect(page.goto).toHaveBeenCalledWith("https://chatgpt.com/", {
+      waitUntil: "domcontentloaded",
+      timeout: 90000,
+    });
+    expect(page.reload).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      synced: true,
+      accessToken: token,
+    });
+    expect(result.status.data.hasActiveSubscription).toBe(true);
+  });
+
+  it("treats cookie-only account-check Plus as synced when the bearer token still says free", async () => {
+    const token = createToken();
+    const evaluate = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { accessToken: token },
+      })
+      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          accounts: {
+            default: {
+              account: { account_id: ACCOUNT_ID },
+              entitlement: {
+                has_active_subscription: false,
+                subscription_plan: "free",
+              },
+            },
+          },
+        },
+        via: "page-fetch",
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: activeSubscription(true),
+        via: "page-fetch",
+      });
+    const page = {
+      isClosed: () => false,
+      goto: vi.fn().mockResolvedValue(),
+      reload: vi.fn().mockResolvedValue(),
+      waitForTimeout: vi.fn().mockResolvedValue(),
+      evaluate,
+    };
+
+    const result = await prepareLiveChatGptSubscription(page, {
+      accessToken: token,
+      accountId: ACCOUNT_ID,
+      requireActive: true,
+      maxAttempts: 1,
+      onStatus: () => {},
+    });
+
+    expect(result.synced).toBe(true);
+    expect(result.status.data.hasActiveSubscription).toBe(true);
+    expect(evaluate).toHaveBeenCalledTimes(4);
+  });
+
+  it("stops immediately when the live page account check is blocked", async () => {
+    const token = createToken();
+    const evaluate = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        data: { accessToken: token },
+      })
+      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce({
+        status: 403,
+        data: "<html>Cloudflare attention required</html>",
+        via: "page-fetch",
+      });
+    const page = {
+      isClosed: () => false,
+      goto: vi.fn().mockResolvedValue(),
+      reload: vi.fn().mockResolvedValue(),
+      waitForTimeout: vi.fn().mockResolvedValue(),
+      evaluate,
+    };
+
+    const result = await prepareLiveChatGptSubscription(page, {
+      accessToken: token,
+      requireActive: false,
+      maxAttempts: 4,
+      onStatus: () => {},
+    });
+
+    expect(result.synced).toBe(false);
+    expect(result.status).toMatchObject({
+      ok: false,
+      statusCode: 403,
+    });
+    expect(result.status.error).toContain("Cloudflare");
+    expect(page.waitForTimeout).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("browser cancel payment note", () => {
+  it("does not append the payment-success note on account-page 401 fallback", async () => {
+    const evaluate = vi.fn().mockResolvedValue({
+      status: 401,
+      data: {
+        error: { code: "token_expired" },
+        detail: { code: "token_expired" },
+      },
+    });
+    axios.defaults.adapter = async (config) => ({
+      status: 401,
+      statusText: "Unauthorized",
+      headers: {},
+      config,
+      data: {
+        error: { code: "token_expired" },
+        detail: { code: "token_expired" },
+      },
+    });
+    vi.spyOn(playwrightRequest, "newContext").mockResolvedValue({
+      get: vi.fn().mockResolvedValue(
+        response(401, {
+          error: { code: "token_expired" },
+          detail: { code: "token_expired" },
+        }),
+      ),
+      post: vi.fn().mockResolvedValue(
+        response(401, {
+          error: { code: "token_expired" },
+          detail: { code: "token_expired" },
+        }),
+      ),
+      dispose: vi.fn().mockResolvedValue(),
+    });
+
+    const result = await cancelAutoRenewWithBrowserPage(
+      { isClosed: () => false, evaluate },
+      {
+        accountId: ACCOUNT_ID,
+        accessToken: createToken(),
+        maxAttempts: 1,
+        fallbackAttempts: 1,
+        verifyAttempts: 1,
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.statusCode).toBe(401);
+    expect(result.error).not.toContain("支付已成功");
   });
 });

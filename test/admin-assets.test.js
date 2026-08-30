@@ -87,6 +87,52 @@ describe("admin asset routes", () => {
     expect(listed.json.groups).toEqual([{ id: 3, name: "fz1", card_count: 1 }]);
   });
 
+  it("generates CDKs with the selected proxy group", async () => {
+    const inserted = [];
+    const store = {
+      insertCdks: async (cdks, options) => {
+        inserted.push({ cdks, options });
+        return { insertedCount: cdks.length };
+      },
+    };
+    const app = createApp(store, () => ["KC-PROXYCODE1234"]);
+    const res = await request(app, "POST", "/api/admin/cdks/generate", {
+      count: 1,
+      plan_type: "plus",
+      proxy_group_id: 9,
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.success).toBe(true);
+    expect(res.json.proxy_group_id).toBe(9);
+    expect(inserted[0].options).toMatchObject({
+      type: "自助",
+      plan_type: "plus",
+      proxy_group_id: 9,
+    });
+  });
+
+  it("creates a proxy group and lists groups", async () => {
+    const store = {
+      createProxyGroup: async ({ name, proxyIds }) => ({
+        id: 4,
+        name,
+        proxy_count: proxyIds.length,
+      }),
+      listProxyGroups: async () => [{ id: 4, name: "us1", proxy_count: 2 }],
+    };
+    const app = createApp(store, () => []);
+    const created = await request(app, "POST", "/api/admin/proxy-groups", {
+      name: "us1",
+      proxyIds: [21, 22],
+    });
+    expect(created.status).toBe(200);
+    expect(created.json.group).toMatchObject({ id: 4, name: "us1" });
+    const listed = await request(app, "GET", "/api/admin/proxy-groups");
+    expect(listed.json.groups).toEqual([
+      { id: 4, name: "us1", proxy_count: 2 },
+    ]);
+  });
+
   it("passes CDK list pagination and filters to the store", async () => {
     const received = [];
     const store = {

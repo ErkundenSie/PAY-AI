@@ -1027,6 +1027,8 @@ async function completeProtocolCheckout({
       fallback: true,
       error: `确认响应缺少 client_secret (status=${confirmStatus || "unknown"})`,
       holderName,
+      dueAmount,
+      dueCurrency: String(billing.currency || "").toUpperCase(),
     };
   }
 

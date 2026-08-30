@@ -361,6 +361,31 @@ async function withBrowserSlot(jobKey, fn) {
     }
 }
 
+async function withBrowserContext(jobKey, contextOptions, fn) {
+    if (!isEnabled() || !initialized || !slots.length) {
+        return fn(null, null);
+    }
+    const reservation = await acquireSlot(jobKey);
+    if (!reservation) {
+        return fn(null, null);
+    }
+    let context = null;
+    try {
+        const slot = slots.find((item) => item.slotId === reservation.slotId);
+        const browser = slot?.persistentContext?.browser();
+        if (!browser) {
+            return fn(null, reservation);
+        }
+        context = await browser.newContext(contextOptions || {});
+        return await fn(context, reservation);
+    } finally {
+        if (context) {
+            await context.close().catch(() => {});
+        }
+        releaseSlot(reservation.slotId);
+    }
+}
+
 function buildPoolEnv(slot) {
     if (!slot) {
         return {};
@@ -398,6 +423,7 @@ module.exports = {
     setRuntimeEnabled,
     getRuntimeEnabled,
     withBrowserSlot,
+    withBrowserContext,
     buildPoolEnv,
     getStats,
     getDetailedStats,

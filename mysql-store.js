@@ -325,6 +325,7 @@ async function ensureAdminSecurityDefaults() {
     ["checkout_path", DEFAULT_CHECKOUT_PATH],
     ["record_video", "0"],
     ["default_timezone", "Asia/Shanghai"],
+    ["default_proxy_group_id", ""],
   ];
   for (const [key, value] of defaults) {
     await runExecute(
@@ -718,6 +719,11 @@ async function ensureLegacyColumns() {
   );
   await ensureColumn(
     "cdk_codes",
+    "proxy_group_id",
+    "BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '仅可使用该代理分组'",
+  );
+  await ensureColumn(
+    "cdk_codes",
     "refresh_count",
     "INT NOT NULL DEFAULT 0",
   );
@@ -880,6 +886,20 @@ async function ensureLegacyColumns() {
   await ensureColumn("proxy_assets", "sort_order", "INT NOT NULL DEFAULT 0");
   await ensureColumn(
     "proxy_assets",
+    "group_id",
+    "BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '所属代理分组'",
+  );
+  await runQuery(
+    `CREATE TABLE IF NOT EXISTS proxy_groups (
+         id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+         name VARCHAR(64) NOT NULL,
+         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+         UNIQUE KEY uniq_proxy_groups_name (name)
+     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  );
+  await ensureColumn(
+    "proxy_assets",
     "created_at",
     "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
   );
@@ -1040,6 +1060,7 @@ async function ensureReady() {
   await migrateLegacyProxyConfig();
   await seedTaxFreeAddresses();
   await cleanupStaleLegacyTasks();
+  await loadAdminConfigRows();
 }
 
 async function migrateTaskSessionPayloads() {
@@ -1419,7 +1440,7 @@ function formatAdminTaskLogRow(row) {
     jobKey: row.job_key,
     rowId: Number(row.id || 0),
     updatedAtMs: Number(row.updated_at_ms || 0),
-    time: row.display_time,
+    time: formatStoreDateTime(row.created_at) || row.display_time,
     token: row.token_preview,
     cdk: row.cdk_code || "",
     phone: row.phone,
@@ -1459,7 +1480,7 @@ async function listAdminTaskLogs(limitOrOptions = 200) {
 
   const rows = await runQuery(
     `SELECT l.id, l.job_key, l.display_time, l.token_preview, l.cdk_code, l.phone, l.card_last4,
-                l.status, l.message, l.progress, l.failure_screenshots,
+                l.status, l.message, l.progress, l.failure_screenshots, l.created_at,
                 GREATEST(0, TIMESTAMPDIFF(SECOND, l.created_at,
                   CASE WHEN l.status = 'running' THEN NOW() ELSE l.updated_at END)) AS duration_seconds,
                 UNIX_TIMESTAMP(l.updated_at) * 1000 AS updated_at_ms,
@@ -1541,6 +1562,10 @@ async function loadAdminConfigRows() {
   )
     .then((rows) => {
       adminConfigCache = { ts: Date.now(), rows, promise: null };
+      const tzRow = rows.find((row) => row.config_key === "default_timezone");
+      if (tzRow) {
+        rememberDefaultTimeZone(tzRow.config_value);
+      }
       return rows;
     })
     .catch((error) => {
@@ -1654,11 +1679,15 @@ async function getAdminData(options = {}) {
         Number(configMap.max_background_concurrent || 1),
       ),
       default_timezone:
-        normalizeTimeZone(configMap.default_timezone) || "Asia/Shanghai",
+        rememberDefaultTimeZone(configMap.default_timezone) ||
+        "Asia/Shanghai",
       maintenance_mode: String(configMap.maintenance_mode || "0") === "1",
       maintenance_mode_drain:
         String(configMap.maintenance_mode_drain || "0") === "1",
       record_video: String(configMap.record_video || "0") === "1",
+      default_proxy_group_id: String(
+        configMap.default_proxy_group_id || "",
+      ).trim(),
       email_source: ["random", "pool", "inbox"].includes(
         String(configMap.email_source || ""),
       )
@@ -1709,6 +1738,45 @@ function normalizeTimeZone(value) {
   }
 }
 
+const DEFAULT_DISPLAY_TIME_ZONE = "Asia/Shanghai";
+let cachedDefaultTimeZone = DEFAULT_DISPLAY_TIME_ZONE;
+
+function getDefaultTimeZone() {
+  return cachedDefaultTimeZone || DEFAULT_DISPLAY_TIME_ZONE;
+}
+
+function rememberDefaultTimeZone(value) {
+  try {
+    cachedDefaultTimeZone =
+      normalizeTimeZone(value) || DEFAULT_DISPLAY_TIME_ZONE;
+  } catch (_) {
+    cachedDefaultTimeZone = DEFAULT_DISPLAY_TIME_ZONE;
+  }
+  return cachedDefaultTimeZone;
+}
+
+function formatStoreDateTime(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date
+    .toLocaleString("zh-CN", {
+      timeZone: getDefaultTimeZone(),
+      hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+    .replace(/\//g, "-");
+}
+
 async function saveConfig(config = {}) {
   const hasOwn = (key) => Object.prototype.hasOwnProperty.call(config, key);
   const configEntries = [];
@@ -1745,6 +1813,14 @@ async function saveConfig(config = {}) {
   }
   if (hasOwn("record_video")) {
     configEntries.push(["record_video", config.record_video ? "1" : "0"]);
+  }
+  if (hasOwn("default_proxy_group_id")) {
+    const raw = config.default_proxy_group_id;
+    let value = "";
+    if (raw != null && String(raw).trim() !== "" && String(raw) !== "all") {
+      value = String(normalizeProxyGroupId(raw) || "");
+    }
+    configEntries.push(["default_proxy_group_id", value]);
   }
   if (hasOwn("email_source") || hasOwn("pool_email_enabled")) {
     const emailSource = ["random", "pool", "inbox"].includes(
@@ -1924,6 +2000,9 @@ async function saveConfig(config = {}) {
       }
     }
   });
+  if (hasOwn("default_timezone")) {
+    rememberDefaultTimeZone(config.default_timezone);
+  }
   invalidateAdminConfigCache();
 }
 
@@ -2424,14 +2503,6 @@ async function listAdminCardOptions() {
   });
 }
 
-function formatStoreDateTime(value) {
-  return value
-    ? new Date(value)
-        .toLocaleString("zh-CN", { hour12: false })
-        .replace(/\//g, "-")
-    : null;
-}
-
 async function listCdks(options = {}) {
   const pageSize = Math.max(1, Math.min(Number(options.pageSize) || 12, 100));
   const requestedPage = Math.max(1, Number(options.page) || 1);
@@ -2492,9 +2563,11 @@ async function listCdks(options = {}) {
 
   const rows = await runQuery(
     `SELECT c.cdk_code, c.shipped_at, c.used_at, c.type, c.plan_type, c.created_at,
-                c.card_group_id, g.name AS card_group_name
+                c.card_group_id, g.name AS card_group_name,
+                c.proxy_group_id, pg.name AS proxy_group_name
          FROM cdk_codes c
          LEFT JOIN card_groups g ON g.id = c.card_group_id
+         LEFT JOIN proxy_groups pg ON pg.id = c.proxy_group_id
          WHERE ${whereSql}
          ORDER BY c.created_at DESC, c.id DESC
          LIMIT ? OFFSET ?`,
@@ -2558,6 +2631,8 @@ async function listCdks(options = {}) {
       plan_type: row.plan_type || "plus",
       card_group_id: row.card_group_id ? Number(row.card_group_id) : null,
       card_group_name: row.card_group_name || "",
+      proxy_group_id: row.proxy_group_id ? Number(row.proxy_group_id) : null,
+      proxy_group_name: row.proxy_group_name || "",
       shipped: Boolean(row.shipped_at),
       shipped_at: formatStoreDateTime(row.shipped_at),
       used_at: formatStoreDateTime(row.used_at),
@@ -2590,7 +2665,7 @@ async function listSessions(options = {}) {
 
   return rows.map((row) => ({
     job_key: row.job_key,
-    time: row.display_time,
+    time: formatStoreDateTime(row.created_at) || row.display_time,
     token_preview: row.token_preview,
     has_session: Boolean(Number(row.has_session)),
     cdk_code: row.cdk_code || "",
@@ -2598,16 +2673,8 @@ async function listSessions(options = {}) {
     status: row.status,
     message: row.message || "",
     progress: Number(row.progress || 0),
-    created_at: row.created_at
-      ? new Date(row.created_at)
-          .toLocaleString("zh-CN", { hour12: false })
-          .replace(/\//g, "-")
-      : null,
-    updated_at: row.updated_at
-      ? new Date(row.updated_at)
-          .toLocaleString("zh-CN", { hour12: false })
-          .replace(/\//g, "-")
-      : null,
+    created_at: formatStoreDateTime(row.created_at),
+    updated_at: formatStoreDateTime(row.updated_at),
   }));
 }
 
@@ -2625,7 +2692,7 @@ async function getSessionByJobKey(jobKey) {
   }
   return {
     job_key: row.job_key,
-    time: row.display_time,
+    time: formatStoreDateTime(row.created_at) || row.display_time,
     token_preview: row.token_preview,
     session_payload: decryptSecret(row.session_payload || ""),
     cdk_code: row.cdk_code || "",
@@ -2633,8 +2700,8 @@ async function getSessionByJobKey(jobKey) {
     status: row.status,
     message: row.message || "",
     progress: Number(row.progress || 0),
-    created_at: row.created_at,
-    updated_at: row.updated_at,
+    created_at: formatStoreDateTime(row.created_at),
+    updated_at: formatStoreDateTime(row.updated_at),
   };
 }
 
@@ -2843,13 +2910,30 @@ async function insertCdks(cdks, options = {}) {
       throw new Error("银行卡分组不存在");
     }
   }
-  const values = normalized.map((cdk) => [cdk, 1, type, planType, cardGroupId]);
+  const proxyGroupId =
+    options.proxy_group_id == null || options.proxy_group_id === ""
+      ? null
+      : normalizeProxyGroupId(options.proxy_group_id);
+  if (proxyGroupId) {
+    const group = await getProxyGroupById(proxyGroupId);
+    if (!group) {
+      throw new Error("代理分组不存在");
+    }
+  }
+  const values = normalized.map((cdk) => [
+    cdk,
+    1,
+    type,
+    planType,
+    cardGroupId,
+    proxyGroupId,
+  ]);
   console.log(
     `正在插入 ${values.length} 个 CDK, 类型: ${type}, 套餐: ${planType}`,
   );
 
   const [result] = await getPool().query(
-    `INSERT INTO cdk_codes (cdk_code, is_active, type, plan_type, card_group_id) VALUES ?`,
+    `INSERT INTO cdk_codes (cdk_code, is_active, type, plan_type, card_group_id, proxy_group_id) VALUES ?`,
     [values],
   );
 
@@ -3273,10 +3357,10 @@ async function listPoolEmails() {
     has_password: Number(row.has_password || 0) === 1,
     has_oauth: Number(row.has_oauth || 0) === 1,
     registered: Number(row.registered || 0) === 1,
-    registered_at: row.registered_at,
+    registered_at: formatStoreDateTime(row.registered_at),
     in_use: Number(row.in_use || 0) === 1,
-    locked_at: row.locked_at,
-    created_at: row.created_at,
+    locked_at: formatStoreDateTime(row.locked_at),
+    created_at: formatStoreDateTime(row.created_at),
   }));
 }
 
@@ -3403,24 +3487,232 @@ function formatProxyAssetRow(row) {
     last_check_error: String(row.last_check_error || ""),
     usage_count: Number(row.usage_count || 0),
     sort_order: Number(row.sort_order || 0),
+    group_id: row.group_id ? Number(row.group_id) : null,
+    group_name: String(row.group_name || "").trim(),
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
   };
 }
 
-async function listProxyAssets() {
+function normalizeProxyGroupName(raw) {
+  const name = String(raw || "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!name) {
+    throw new Error("分组名称不能为空");
+  }
+  if (name.length > 32) {
+    throw new Error("分组名称不能超过 32 个字符");
+  }
+  return name;
+}
+
+function normalizeProxyGroupId(raw) {
+  if (raw == null || raw === "" || raw === "all") return null;
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error("无效的代理分组");
+  }
+  return id;
+}
+
+function formatProxyGroup(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    name: String(row.name || "").trim(),
+    proxy_count: Number(row.proxy_count || 0),
+    created_at: row.created_at || null,
+  };
+}
+
+async function listProxyGroups() {
   const rows = await runQuery(
-    `SELECT *
-         FROM proxy_assets
-         ORDER BY sort_order ASC, id ASC`,
+    `SELECT g.id, g.name, g.created_at,
+            COALESCE(COUNT(p.id), 0) AS proxy_count
+         FROM proxy_groups g
+         LEFT JOIN proxy_assets p ON p.group_id = g.id
+         GROUP BY g.id, g.name, g.created_at
+         ORDER BY g.created_at DESC, g.id DESC`,
+  );
+  return rows.map(formatProxyGroup);
+}
+
+async function getProxyGroupById(groupId) {
+  const id = normalizeProxyGroupId(groupId);
+  if (!id) return null;
+  const rows = await runQuery(
+    `SELECT g.id, g.name, g.created_at,
+            COALESCE(COUNT(p.id), 0) AS proxy_count
+         FROM proxy_groups g
+         LEFT JOIN proxy_assets p ON p.group_id = g.id
+         WHERE g.id = ?
+         GROUP BY g.id, g.name, g.created_at
+         LIMIT 1`,
+    [id],
+  );
+  return formatProxyGroup(rows[0] || null);
+}
+
+async function createProxyGroup({ name, proxyIds = [] } = {}) {
+  const groupName = normalizeProxyGroupName(name);
+  const ids = [
+    ...new Set(
+      (Array.isArray(proxyIds) ? proxyIds : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isInteger(id) && id > 0),
+    ),
+  ];
+  return withTransaction(async (connection) => {
+    let result;
+    try {
+      result = await runExecute(
+        `INSERT INTO proxy_groups (name) VALUES (?)`,
+        [groupName],
+        { connection },
+      );
+    } catch (error) {
+      if (String(error.message || "").includes("Duplicate")) {
+        throw new Error("分组名称已存在");
+      }
+      throw error;
+    }
+    const groupId = Number(result.insertId);
+    if (ids.length) {
+      const placeholders = ids.map(() => "?").join(", ");
+      await runExecute(
+        `UPDATE proxy_assets SET group_id = ? WHERE id IN (${placeholders})`,
+        [groupId, ...ids],
+        { connection },
+      );
+    }
+    const [rows] = await connection.query(
+      `SELECT g.id, g.name, g.created_at,
+              COALESCE(COUNT(p.id), 0) AS proxy_count
+           FROM proxy_groups g
+           LEFT JOIN proxy_assets p ON p.group_id = g.id
+           WHERE g.id = ?
+           GROUP BY g.id, g.name, g.created_at
+           LIMIT 1`,
+      [groupId],
+    );
+    return formatProxyGroup(rows[0]);
+  });
+}
+
+async function assignProxiesToGroup({ groupId, proxyIds = [] } = {}) {
+  const id =
+    groupId == null || groupId === "" ? null : normalizeProxyGroupId(groupId);
+  if (id) {
+    const group = await getProxyGroupById(id);
+    if (!group) {
+      throw new Error("代理分组不存在");
+    }
+  }
+  const ids = [
+    ...new Set(
+      (Array.isArray(proxyIds) ? proxyIds : [])
+        .map((item) => Number(item))
+        .filter((item) => Number.isInteger(item) && item > 0),
+    ),
+  ];
+  if (!ids.length) {
+    throw new Error("请选择要分组的代理");
+  }
+  const placeholders = ids.map(() => "?").join(", ");
+  await runExecute(
+    `UPDATE proxy_assets SET group_id = ? WHERE id IN (${placeholders})`,
+    [id, ...ids],
+  );
+  return { updated: ids.length, group_id: id };
+}
+
+async function deleteProxyGroup(groupId) {
+  const id = normalizeProxyGroupId(groupId);
+  return withTransaction(async (connection) => {
+    await runExecute(
+      `UPDATE proxy_assets SET group_id = NULL WHERE group_id = ?`,
+      [id],
+      { connection },
+    );
+    await runExecute(
+      `UPDATE cdk_codes SET proxy_group_id = NULL WHERE proxy_group_id = ?`,
+      [id],
+      { connection },
+    );
+    const result = await runExecute(
+      `DELETE FROM proxy_groups WHERE id = ?`,
+      [id],
+      { connection },
+    );
+    if (!result.affectedRows) {
+      throw new Error("代理分组不存在");
+    }
+    const currentDefault = String(
+      await getAppConfigValue("default_proxy_group_id", ""),
+    ).trim();
+    if (currentDefault && Number(currentDefault) === id) {
+      await setAppConfigValue("default_proxy_group_id", "");
+    }
+    return { success: true };
+  });
+}
+
+async function resolveProxyGroupId(raw) {
+  if (raw === "all" || raw === "0") {
+    return null;
+  }
+  if (raw != null && String(raw).trim() !== "") {
+    return normalizeProxyGroupId(raw);
+  }
+  const def = String(
+    (await getAppConfigValue("default_proxy_group_id", "")) || "",
+  ).trim();
+  if (!def || def === "all" || def === "0") {
+    return null;
+  }
+  try {
+    return normalizeProxyGroupId(def);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function listProxyAssets(options = {}) {
+  const groupFilter = options.groupId ?? options.group_id ?? "all";
+  let where = "1=1";
+  const params = [];
+  if (groupFilter === "none") {
+    where = "p.group_id IS NULL";
+  } else if (groupFilter && groupFilter !== "all") {
+    where = "p.group_id = ?";
+    params.push(Number(groupFilter));
+  }
+  const rows = await runQuery(
+    `SELECT p.*, g.name AS group_name
+         FROM proxy_assets p
+         LEFT JOIN proxy_groups g ON g.id = p.group_id
+         WHERE ${where}
+         ORDER BY p.sort_order ASC, p.id ASC`,
+    params,
   );
   return rows.map(formatProxyAssetRow);
 }
 
-async function addProxyAssets(input) {
+async function addProxyAssets(input, options = {}) {
   const lines = normalizeProxyLines(input);
   if (!lines.length) {
     return { success: false, error: "未提供代理 URL" };
+  }
+  const groupId =
+    options.groupId == null || options.groupId === ""
+      ? null
+      : normalizeProxyGroupId(options.groupId);
+  if (groupId) {
+    const group = await getProxyGroupById(groupId);
+    if (!group) {
+      return { success: false, error: "代理分组不存在" };
+    }
   }
 
   let added = 0;
@@ -3439,14 +3731,15 @@ async function addProxyAssets(input) {
     }
     const meta = parseProxyMeta(line);
     const result = await runExecute(
-      `INSERT INTO proxy_assets (proxy_url, proxy_url_hash, protocol, host, is_active, sort_order)
-             VALUES (?, ?, ?, ?, 1, ?)`,
+      `INSERT INTO proxy_assets (proxy_url, proxy_url_hash, protocol, host, is_active, sort_order, group_id)
+             VALUES (?, ?, ?, ?, 1, ?, ?)`,
       [
         line,
         urlHash,
         meta.protocol || "",
         meta.host || "",
         Date.now() % 1000000,
+        groupId,
       ],
     );
     added += 1;
@@ -3458,18 +3751,67 @@ async function addProxyAssets(input) {
     added,
     skipped,
     ids,
-    message: `已保存 ${added} 条代理${skipped ? `，跳过重复 ${skipped} 条` : ""}`,
+    group_id: groupId,
+    message: `已保存 ${added} 条代理${skipped ? `，跳过重复 ${skipped} 条` : ""}${groupId ? "到指定分组" : ""}`,
   };
 }
 
 async function deleteProxyAsset(id) {
-  const result = await runExecute(`DELETE FROM proxy_assets WHERE id = ?`, [
-    Number(id),
-  ]);
-  if (!result.affectedRows) {
-    return { success: false, error: "代理不存在" };
+  return deleteProxyAssetsByIds([id]);
+}
+
+async function deleteProxyAssetsByIds(proxyIds = []) {
+  const ids = [
+    ...new Set(
+      (Array.isArray(proxyIds) ? proxyIds : [proxyIds])
+        .map((item) => Number(item))
+        .filter((item) => Number.isInteger(item) && item > 0),
+    ),
+  ];
+  if (!ids.length) {
+    throw new Error("请选择要删除的代理");
   }
-  return { success: true };
+  const placeholders = ids.map(() => "?").join(", ");
+  return withTransaction(async (connection) => {
+    const groupRows = await runQuery(
+      `SELECT DISTINCT group_id
+           FROM proxy_assets
+           WHERE id IN (${placeholders})
+             AND group_id IS NOT NULL`,
+      ids,
+      { connection },
+    );
+    const groupIds = groupRows
+      .map((row) => Number(row.group_id))
+      .filter((item) => Number.isInteger(item) && item > 0);
+    const result = await runExecute(
+      `DELETE FROM proxy_assets WHERE id IN (${placeholders})`,
+      ids,
+      { connection },
+    );
+    const emptiedGroups = [];
+    for (const groupId of groupIds) {
+      const remainRows = await runQuery(
+        `SELECT COUNT(*) AS total FROM proxy_assets WHERE group_id = ?`,
+        [groupId],
+        { connection },
+      );
+      if (Number(remainRows[0]?.total || 0) > 0) continue;
+      const groupRowsById = await runQuery(
+        `SELECT id, name FROM proxy_groups WHERE id = ? LIMIT 1`,
+        [groupId],
+        { connection },
+      );
+      const group = groupRowsById[0];
+      if (!group) continue;
+      emptiedGroups.push({ id: groupId, name: group.name });
+    }
+    return {
+      success: true,
+      deleted: Number(result.affectedRows || 0),
+      emptied_groups: emptiedGroups,
+    };
+  });
 }
 
 async function setProxyAssetActive(id, isActive) {
@@ -3589,14 +3931,19 @@ async function migrateLegacyProxyConfig() {
 
 // 只取代理，不占用手机/卡资产；适合注册/协议提取这种只用代理的子流程
 // 支持 {session} 占位符；每次调用替换为新的随机 sticky session ID
-async function getActiveProxy() {
-  const rows = await runQuery(
-    `SELECT proxy_url
+async function getActiveProxy(groupId = null) {
+  const id =
+    groupId == null || groupId === "" ? null : normalizeProxyGroupId(groupId);
+  const params = [];
+  let sql = `SELECT proxy_url
          FROM proxy_assets
-         WHERE is_active = 1
-         ORDER BY RAND()
-         LIMIT 1`,
-  );
+         WHERE is_active = 1`;
+  if (id) {
+    sql += ` AND group_id = ?`;
+    params.push(id);
+  }
+  sql += ` ORDER BY RAND() LIMIT 1`;
+  const rows = await runQuery(sql, params);
   if (!rows.length) {
     return "";
   }
@@ -4549,7 +4896,7 @@ async function createTaskLog({
   progress = 0,
 }) {
   const now = new Date();
-  const displayTime = now.toLocaleString("zh-CN", { hour12: false });
+  const displayTime = formatStoreDateTime(now) || now.toISOString();
   const jobKey = `${now.getTime()}-${Math.random().toString(36).slice(2, 10)}`;
   const message = String(status) === "running" ? "正在开通中" : null;
 
@@ -4736,6 +5083,24 @@ async function updateTaskLog(
   );
 }
 
+async function updateTaskSessionPayload(jobKey, sessionPayload, tokenPreview) {
+  const payload = String(sessionPayload || "").trim();
+  if (!jobKey || !payload) {
+    return;
+  }
+  await runExecute(
+    `UPDATE task_logs
+         SET session_payload = ?,
+             token_preview = COALESCE(?, token_preview)
+         WHERE job_key = ?`,
+    [
+      encryptSecret(payload),
+      tokenPreview ? String(tokenPreview) : null,
+      String(jobKey),
+    ],
+  );
+}
+
 async function listProducts() {
   const rows = await runQuery(
     `SELECT p.id,
@@ -4763,9 +5128,7 @@ async function listProducts() {
   );
   return rows.map((row) => ({
     ...row,
-    time: new Date(row.created_at)
-      .toLocaleString("zh-CN", { hour12: false })
-      .replace(/\//g, "-"),
+    time: formatStoreDateTime(row.created_at),
   }));
 }
 
@@ -4882,9 +5245,7 @@ async function claimProductAccount(cdk) {
         "PRODUCT_CLAIM",
         cdk,
         `成品号兑换成功: ${product.email}`,
-        new Date()
-          .toLocaleString("zh-CN", { hour12: false })
-          .replace(/\//g, "-"),
+        formatStoreDateTime(new Date()) || new Date().toISOString(),
       ],
     );
 
@@ -5669,11 +6030,7 @@ async function exportBillingRecordsCSV(filters = {}) {
     "支付时间,卡号,卡片后四位,金额,币种,套餐类型,Stripe Session ID,CDK码,邮箱,状态,错误码,错误信息";
 
   const csvRows = rows.map((row) => {
-    const paymentTime = row.payment_time
-      ? new Date(row.payment_time)
-          .toLocaleString("zh-CN", { hour12: false })
-          .replace(/\//g, "-")
-      : "";
+    const paymentTime = formatStoreDateTime(row.payment_time) || "";
     return [
       paymentTime,
       row.card_number || "",
@@ -5760,6 +6117,8 @@ module.exports = {
   ensureReady,
   getAdminData,
   invalidateAdminConfigCache,
+  getDefaultTimeZone,
+  formatStoreDateTime,
   listAdminTaskLogs,
   getResumableAdminProductGeneration,
   saveConfig,
@@ -5816,9 +6175,16 @@ module.exports = {
   releaseStaleAssetLocks,
   resetAllAssetLocks,
   getActiveProxy,
+  resolveProxyGroupId,
+  listProxyGroups,
+  getProxyGroupById,
+  createProxyGroup,
+  assignProxiesToGroup,
+  deleteProxyGroup,
   listProxyAssets,
   addProxyAssets,
   deleteProxyAsset,
+  deleteProxyAssetsByIds,
   setProxyAssetActive,
   updateProxyAsset,
   updateProxyAssetCheck,
@@ -5851,6 +6217,7 @@ module.exports = {
   failOrphanRunningCheckoutTasks,
   getRunningTaskByCdk,
   updateTaskLog,
+  updateTaskSessionPayload,
   listRecentGptApiOrders,
   listProducts,
   addProduct,

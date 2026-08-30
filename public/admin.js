@@ -71,6 +71,9 @@
       let cardGroupFilter = "all";
       let cdkGroupFilter = "all";
       let cdkPlanTypeFilter = "all";
+      let proxyGroupList = [];
+      let proxyGroupFilter = "all";
+      let defaultProxyGroupId = "";
       const taskLogFilters = {
         type: "all",
         cdk: "",
@@ -152,6 +155,12 @@
       }
 
       function formatAdminDateTime(value, includeSeconds = false) {
+        if (value == null || value === "") return "-";
+        const raw = String(value).trim();
+        if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(raw) && !/[zZ]|[+-]\d{2}:\d{2}$/.test(raw)) {
+          const text = raw.replace("T", " ").slice(0, includeSeconds ? 19 : 16);
+          return includeSeconds ? text : text.slice(0, 16);
+        }
         const date = new Date(value);
         if (Number.isNaN(date.getTime())) return "-";
         return date
@@ -193,7 +202,7 @@
           Number(values.minute),
           Number(values.second),
         );
-        return Math.round((localAsUtc - now.getTime()) / 60000);
+        return Math.round((now.getTime() - localAsUtc) / 60000);
       }
 
       const RUNTIME_LOG_SOURCE_MAP = {
@@ -252,10 +261,18 @@
         ) {
           return { key: "error", label: "错误" };
         }
-        if (/warn|warning|回退|重试|retry|人工/.test(`${rawLevel} ${text}`)) {
+        if (
+          /warn|warning|回退|重试|retry|人工|已提交取消|暂未更新|未确认|请稍后刷新确认/.test(
+            `${rawLevel} ${text}`,
+          )
+        ) {
           return { key: "warning", label: "警告" };
         }
-        if (/success|完成|已保存|已启动|已关闭|payment_success/.test(text)) {
+        if (
+          /success|完成|已保存|已启动|已关闭|payment_success|取消续费成功|自动续费已关闭/.test(
+            text,
+          )
+        ) {
           return { key: "success", label: "完成" };
         }
         return { key: "info", label: "信息" };
@@ -1135,6 +1152,47 @@
         return text;
       }
 
+      function applyAccountSessionWriteback(payload) {
+        const session = String(
+          payload?.session || payload?.data?.session || "",
+        ).trim();
+        if (!session) {
+          return false;
+        }
+        try {
+          const parsed = JSON.parse(session);
+          const token = String(parsed.accessToken || "").trim();
+          const cookie = String(parsed.sessionToken || "").trim();
+          if (!token || token.split(".").length !== 3 || !parsed.user || !cookie) {
+            return false;
+          }
+        } catch (_) {
+          return false;
+        }
+        const input = document.getElementById("cancel_renewal_session");
+        if (!input) {
+          return false;
+        }
+        input.value = formatSessionPayload(session);
+        return true;
+      }
+
+      async function parseAccountActionResponse(res, fallbackMessage) {
+        const parsed = await readJsonResponse(res);
+        if (!parsed.ok) {
+          throw new Error(parsed.message);
+        }
+        const data = parsed.data;
+        applyAccountSessionWriteback(data);
+        if (!res.ok || !data.success) {
+          const error = new Error(data.message || fallbackMessage);
+          error.session = data.session || "";
+          throw error;
+        }
+        applyAccountSessionWriteback(data.data);
+        return data.data || {};
+      }
+
       async function fetchSessionPayload(jobKey) {
         const res = await authFetch(
           `/api/admin/sessions/${encodeURIComponent(jobKey)}`,
@@ -1342,16 +1400,21 @@
         }
         const already = Boolean(data.alreadyCancelled);
         const cancelled = Boolean(data.cancelled);
-        const statusText =
-          message ||
-          data.message ||
-          (already
-            ? "自动续费已关闭"
-            : cancelled
-              ? "已提交取消自动续费"
-              : "操作完成");
+        const confirmed = Boolean(data.confirmed || already);
+        const pending = Boolean(data.pendingVerify || (cancelled && !confirmed));
+        const statusText = already
+          ? "取消续费成功：自动续费已关闭"
+          : confirmed
+            ? "取消续费成功：已确认自动续费关闭"
+            : pending
+              ? data.message || "取消请求已提交，状态尚未确认"
+            : message || data.message || "操作完成";
         const color =
-          already || cancelled ? "var(--success)" : "var(--text-main)";
+          confirmed || /成功|已关闭/.test(statusText)
+            ? "var(--success)"
+            : pending
+              ? "var(--warning)"
+              : "var(--text-main)";
         statusEl.textContent = statusText;
         statusEl.style.color = color;
         detailEl.innerHTML = renderCancelRenewalDetail(data);
@@ -1360,20 +1423,32 @@
 
       function clearCancelRenewalPage() {
         const input = document.getElementById("cancel_renewal_session");
-        const hint = document.getElementById("cancel_renewal_hint");
         const box = document.getElementById("cancel_renewal_result");
         if (input) {
           input.value = "";
-        }
-        if (hint) {
-          hint.textContent = "";
         }
         if (box) {
           box.style.display = "none";
         }
       }
 
-      async function requestCancelAutoRenew(sessionRaw) {
+      function setAccountLoading(visible, text) {
+        const overlay = document.getElementById("account_loading_overlay");
+        const label = document.getElementById("account_loading_text");
+        if (label && text) {
+          label.textContent = text;
+        }
+        if (!overlay) {
+          return;
+        }
+        overlay.classList.toggle("is-open", Boolean(visible));
+        overlay.setAttribute("aria-hidden", visible ? "false" : "true");
+        if (visible) {
+          lucide.createIcons();
+        }
+      }
+
+      async function requestCancelAutoRenew(sessionRaw, jobKey = "") {
         const res = await authFetch(
           "/api/admin/subscription/cancel-auto-renew",
           {
@@ -1381,22 +1456,16 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               session: sessionRaw,
+              job_key: jobKey || undefined,
               timezone_offset_min: getAdminTimeZoneOffsetMinutes(),
+              proxy_group_id: getSelectedProxyGroupId("account_proxy_group"),
             }),
           },
         );
-        const parsed = await readJsonResponse(res);
-        if (!parsed.ok) {
-          throw new Error(parsed.message);
-        }
-        const data = parsed.data;
-        if (!res.ok || !data.success) {
-          throw new Error(data.message || "取消自动续费失败");
-        }
-        return data.data || {};
+        return parseAccountActionResponse(res, "取消自动续费失败");
       }
 
-      async function requestEnableAutoRenew(sessionRaw) {
+      async function requestEnableAutoRenew(sessionRaw, jobKey = "") {
         const res = await authFetch(
           "/api/admin/subscription/enable-auto-renew",
           {
@@ -1404,59 +1473,41 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               session: sessionRaw,
+              job_key: jobKey || undefined,
               timezone_offset_min: getAdminTimeZoneOffsetMinutes(),
+              proxy_group_id: getSelectedProxyGroupId("account_proxy_group"),
             }),
           },
         );
-        const parsed = await readJsonResponse(res);
-        if (!parsed.ok) {
-          throw new Error(parsed.message);
-        }
-        const data = parsed.data;
-        if (!res.ok || !data.success) {
-          throw new Error(data.message || "开启自动续费失败");
-        }
-        return data.data || {};
+        return parseAccountActionResponse(res, "开启自动续费失败");
       }
 
-      async function requestAccountStatus(sessionRaw) {
+      async function requestAccountStatus(sessionRaw, jobKey = "") {
         const res = await authFetch("/api/admin/account/status", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             session: sessionRaw,
+            job_key: jobKey || undefined,
             timezone_offset_min: getAdminTimeZoneOffsetMinutes(),
+            proxy_group_id: getSelectedProxyGroupId("account_proxy_group"),
           }),
         });
-        const parsed = await readJsonResponse(res);
-        if (!parsed.ok) {
-          throw new Error(parsed.message);
-        }
-        const data = parsed.data;
-        if (!res.ok || !data.success) {
-          throw new Error(data.message || "查询账户状态失败");
-        }
-        return data.data || {};
+        return parseAccountActionResponse(res, "查询账户状态失败");
       }
 
-      async function requestResetCodexQuota(sessionRaw) {
+      async function requestResetCodexQuota(sessionRaw, jobKey = "") {
         const res = await authFetch("/api/admin/account/reset-codex-quota", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             session: sessionRaw,
+            job_key: jobKey || undefined,
             timezone_offset_min: getAdminTimeZoneOffsetMinutes(),
+            proxy_group_id: getSelectedProxyGroupId("account_proxy_group"),
           }),
         });
-        const parsed = await readJsonResponse(res);
-        if (!parsed.ok) {
-          throw new Error(parsed.message);
-        }
-        const data = parsed.data;
-        if (!res.ok || !data.success) {
-          throw new Error(data.message || "重置 Codex 额度失败");
-        }
-        return data.data || {};
+        return parseAccountActionResponse(res, "重置 Codex 额度失败");
       }
 
       function applyRenewalStatusFromResult(jobKey, result = {}) {
@@ -1485,7 +1536,6 @@
       }) {
         const input = document.getElementById("cancel_renewal_session");
         const btn = document.getElementById(buttonId);
-        const hint = document.getElementById("cancel_renewal_hint");
         const sessionRaw = String(input?.value || "").trim();
         if (requireSession && !sessionRaw) {
           showMessage("请先粘贴 Session JSON 或 AccessToken", "warning");
@@ -1497,22 +1547,34 @@
         if (btn) {
           btn.disabled = true;
         }
-        if (hint) {
-          hint.textContent = hintText || "正在处理，请稍候…";
-        }
+        setAccountLoading(true, hintText || "正在处理，请稍候…");
         try {
           const result = await requestFn(sessionRaw);
-          showCancelRenewalResult(result, result.message || fallbackMessage);
-          showMessage(result.message || fallbackMessage || "操作完成", "success");
+          applyAccountSessionWriteback(result);
+          const pending = Boolean(
+            result.pendingVerify ||
+              (result.cancelled &&
+                !result.confirmed &&
+                !result.alreadyCancelled),
+          );
+          const displayMsg =
+            result.alreadyCancelled
+              ? "取消续费成功：自动续费已关闭"
+              : result.confirmed
+                ? "取消续费成功：已确认自动续费关闭"
+                : pending
+                  ? result.message || "取消请求已提交，状态尚未确认"
+                : result.message || fallbackMessage || "操作完成";
+          showCancelRenewalResult(result, displayMsg);
+          showMessage(displayMsg, pending ? "warning" : "success");
         } catch (error) {
+          applyAccountSessionWriteback(error);
           showMessage(error.message || errorMessage || "操作失败", "error");
         } finally {
           if (btn) {
             btn.disabled = false;
           }
-          if (hint) {
-            hint.textContent = "";
-          }
+          setAccountLoading(false);
           lucide.createIcons();
         }
       }
@@ -1534,7 +1596,7 @@
             "确认要关闭该账号的自动续费吗？当前计费周期内仍可继续使用。",
           hintText: "正在处理，请稍候…",
           requestFn: requestCancelAutoRenew,
-          fallbackMessage: "操作完成",
+          fallbackMessage: "取消续费成功",
           errorMessage: "取消自动续费失败",
         });
       }
@@ -1581,14 +1643,28 @@
             showMessage("该记录没有完整 Session，无法取消续费", "warning");
             return;
           }
-          const result = await requestCancelAutoRenew(sessionRaw);
-          const msg = result.message || "操作完成";
+          const result = await requestCancelAutoRenew(sessionRaw, jobKey);
+          applyAccountSessionWriteback(result);
+          const pending = Boolean(
+            result.pendingVerify ||
+              (result.cancelled &&
+                !result.confirmed &&
+                !result.alreadyCancelled),
+          );
+          const msg = result.alreadyCancelled
+            ? "取消续费成功：自动续费已关闭"
+            : result.confirmed
+              ? "取消续费成功：已确认自动续费关闭"
+              : pending
+                ? result.message || "取消请求已提交，状态尚未确认"
+                : result.message || "取消续费操作完成";
           applyRenewalStatusFromResult(jobKey, result);
           showMessage(
             `${msg}${result.email ? `（${result.email}）` : ""}`,
-            "success",
+            pending ? "warning" : "success",
           );
         } catch (error) {
+          applyAccountSessionWriteback(error);
           showMessage(error.message || "取消自动续费失败", "error");
         } finally {
           if (triggerBtn) {
@@ -1618,7 +1694,8 @@
             showMessage("该记录没有完整 Session，无法开启续费", "warning");
             return;
           }
-          const result = await requestEnableAutoRenew(sessionRaw);
+          const result = await requestEnableAutoRenew(sessionRaw, jobKey);
+          applyAccountSessionWriteback(result);
           const msg = result.message || "操作完成";
           applyRenewalStatusFromResult(jobKey, result);
           showMessage(
@@ -1626,6 +1703,7 @@
             "success",
           );
         } catch (error) {
+          applyAccountSessionWriteback(error);
           showMessage(error.message || "开启自动续费失败", "error");
         } finally {
           if (triggerBtn) {
@@ -2839,9 +2917,14 @@
         }
 
         if (pId === "cdks") {
+          loadProxyGroupList().catch(() => {});
           loadCdkList().catch((error) => {
             console.error("Failed to load CDK list", error);
           });
+        }
+
+        if (pId === "cancel_renewal") {
+          loadProxyGroupList().catch(() => {});
         }
 
         if (pId === "logs") {
@@ -2901,7 +2984,7 @@
                 '<span class="status-badge" style="background:rgba(239,68,68,0.12);color:#f87171;">缺失</span>';
             }
             const regAt = row.registered_at
-              ? String(row.registered_at).replace("T", " ").slice(0, 19)
+              ? formatAdminDateTime(row.registered_at, true)
               : "-";
             const safeEmail = escapeHtml(row.email || "");
             return `
@@ -3095,6 +3178,7 @@
           throw new Error(data.message || "加载系统配置失败");
         }
         applySystemConfigFromData(data);
+        await loadProxyGroupList();
         return data;
       }
 
@@ -3110,6 +3194,11 @@
         const timeZoneEl = document.getElementById("default_timezone");
         if (timeZoneEl) {
           timeZoneEl.value = adminDefaultTimeZone;
+        }
+        defaultProxyGroupId = String(cfg.default_proxy_group_id || "");
+        const defaultProxyEl = document.getElementById("default_proxy_group");
+        if (defaultProxyEl) {
+          defaultProxyEl.value = defaultProxyGroupId;
         }
         loadTelegramConfig(data.telegram || {});
         loadHcaptchaConfig(data.hcaptcha || {});
@@ -3275,6 +3364,7 @@
           if (isInitial) {
             applySystemConfigFromData(data);
             loadCardPoolList();
+            loadProxyGroupList().catch(() => {});
             lucide.createIcons();
           }
 
@@ -3660,6 +3750,259 @@
       const selectedProxyIds = new Set();
       let editingProxyId = null;
 
+      function proxyGroupLabel(item) {
+        return item?.group_name || "未分组";
+      }
+
+      function fillSelectOptions(select, optionsHtml, currentValue) {
+        if (!select) return;
+        select.innerHTML = optionsHtml;
+        const next = currentValue == null ? "" : String(currentValue);
+        if ([...select.options].some((option) => option.value === next)) {
+          select.value = next;
+        }
+      }
+
+      function proxyGroupTaskOptionsHtml(emptyLabel) {
+        return [
+          `<option value="">${escapeHtml(emptyLabel)}</option>`,
+          '<option value="all">全部代理</option>',
+          ...proxyGroupList.map(
+            (group) =>
+              `<option value="${escapeHtml(String(group.id))}">${escapeHtml(group.name)}</option>`,
+          ),
+        ].join("");
+      }
+
+      function fillProxyGroupSelects() {
+        fillSelectOptions(
+          document.getElementById("proxy_group_filter"),
+          [
+            '<option value="all">全部分组</option>',
+            '<option value="none">未分组</option>',
+            ...proxyGroupList.map(
+              (group) =>
+                `<option value="${escapeHtml(String(group.id))}">${escapeHtml(group.name)} (${Number(group.proxy_count || 0)})</option>`,
+            ),
+          ].join(""),
+          proxyGroupFilter,
+        );
+        fillSelectOptions(
+          document.getElementById("cdk_proxy_group"),
+          proxyGroupTaskOptionsHtml("默认代理分组"),
+          document.getElementById("cdk_proxy_group")?.value || "",
+        );
+        fillSelectOptions(
+          document.getElementById("default_proxy_group"),
+          [
+            '<option value="">全部代理</option>',
+            ...proxyGroupList.map(
+              (group) =>
+                `<option value="${escapeHtml(String(group.id))}">${escapeHtml(group.name)}</option>`,
+            ),
+          ].join(""),
+          defaultProxyGroupId,
+        );
+        fillSelectOptions(
+          document.getElementById("checkout_proxy_group"),
+          proxyGroupTaskOptionsHtml("跟随系统默认"),
+          document.getElementById("checkout_proxy_group")?.value || "",
+        );
+        fillSelectOptions(
+          document.getElementById("account_proxy_group"),
+          proxyGroupTaskOptionsHtml("跟随系统默认"),
+          document.getElementById("account_proxy_group")?.value || "",
+        );
+        enhanceAssetSelects();
+      }
+
+      async function loadProxyGroupList() {
+        try {
+          const res = await authFetch("/api/admin/proxy-groups");
+          const data = await res.json();
+          proxyGroupList = Array.isArray(data.groups) ? data.groups : [];
+          fillProxyGroupSelects();
+        } catch (error) {
+          console.error("loadProxyGroupList failed", error);
+        }
+      }
+
+      function handleProxyGroupFilter(value) {
+        proxyGroupFilter = String(value || "all");
+        loadProxyPool().catch((error) => {
+          console.error("Failed to load proxy pool", error);
+        });
+      }
+
+      function getSelectedProxyGroupId(selectId) {
+        return String(document.getElementById(selectId)?.value || "").trim();
+      }
+
+      async function createProxyGroupFromSelection() {
+        const proxyIds = Array.from(selectedProxyIds);
+        const extraHtml = `<input data-confirm-value class="asset-input" placeholder="输入分组名称" style="width:100%;margin-top:8px" />`;
+        const confirmed = await showAdminConfirm(
+          proxyIds.length
+            ? `将选中的 ${proxyIds.length} 条代理加入新分组`
+            : "创建空分组后可再把代理加入",
+          "创建代理分组",
+          extraHtml,
+        );
+        if (!confirmed) return;
+        const name =
+          typeof confirmed === "object"
+            ? String(confirmed.source || "").trim()
+            : "";
+        if (!name) {
+          showMessage("请输入分组名称", "warning");
+          return;
+        }
+        try {
+          const res = await authFetch("/api/admin/proxy-groups", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, proxyIds }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || "创建失败");
+          }
+          selectedProxyIds.clear();
+          showMessage(data.message || "分组已创建", "success");
+          await loadProxyPool();
+        } catch (error) {
+          showMessage(error.message || "创建失败", "error");
+        }
+      }
+
+      async function assignSelectedProxiesToGroup() {
+        const proxyIds = Array.from(selectedProxyIds);
+        if (!proxyIds.length) {
+          showMessage("请先选择代理", "warning");
+          return;
+        }
+        if (!proxyGroupList.length) {
+          showMessage("请先创建代理分组", "warning");
+          return;
+        }
+        const extraHtml = `<select data-confirm-value class="asset-input" style="width:100%;margin-top:8px">${proxyGroupList
+          .map(
+            (group) =>
+              `<option value="${escapeHtml(String(group.id))}">${escapeHtml(group.name)}</option>`,
+          )
+          .join("")}</select>`;
+        const confirmed = await showAdminConfirm(
+          `将选中的 ${proxyIds.length} 条代理加入分组`,
+          "加入代理分组",
+          extraHtml,
+        );
+        if (!confirmed) return;
+        const groupId = typeof confirmed === "object" ? confirmed.source : "";
+        try {
+          const res = await authFetch("/api/admin/proxy-groups/assign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ groupId, proxyIds }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || "加入失败");
+          }
+          selectedProxyIds.clear();
+          showMessage(data.message || "已加入分组", "success");
+          await loadProxyPool();
+        } catch (error) {
+          showMessage(error.message || "加入失败", "error");
+        }
+      }
+
+      async function clearSelectedProxyGroup() {
+        const proxyIds = Array.from(selectedProxyIds);
+        if (!proxyIds.length) {
+          showMessage("请先选择代理", "warning");
+          return;
+        }
+        const ok = await showAdminConfirm(
+          `确定将选中的 ${proxyIds.length} 条代理移出分组？`,
+          "移出分组",
+        );
+        if (!ok) return;
+        try {
+          const res = await authFetch("/api/admin/proxy-groups/assign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ groupId: null, proxyIds }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.message || "移出失败");
+          }
+          selectedProxyIds.clear();
+          showMessage(data.message || "已移出分组", "success");
+          await loadProxyPool();
+        } catch (error) {
+          showMessage(error.message || "移出失败", "error");
+        }
+      }
+
+      async function confirmDeleteEmptyProxyGroups(emptiedGroups) {
+        const groups = Array.isArray(emptiedGroups) ? emptiedGroups : [];
+        if (!groups.length) return false;
+        const names = groups
+          .map((group) => group.name || `#${group.id}`)
+          .join("、");
+        return showAdminConfirm(
+          `删除后，分组「${names}」将变成空分组。是否同时删除这些分组？`,
+          "删除空分组",
+        );
+      }
+
+      async function deleteProxiesAndMaybeEmptyGroups(proxyIds) {
+        const ids = (Array.isArray(proxyIds) ? proxyIds : [])
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0);
+        if (!ids.length) {
+          throw new Error("请选择要删除的代理");
+        }
+        const firstRes = await authFetch("/api/admin/proxies/batch-delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ proxyIds: ids }),
+        });
+        const firstData = await firstRes.json();
+        if (!firstRes.ok || !firstData.success) {
+          throw new Error(firstData.message || firstData.error || "删除失败");
+        }
+        const emptiedGroups = firstData.emptied_groups || [];
+        if (!emptiedGroups.length) {
+          return firstData;
+        }
+        const deleteGroups = await confirmDeleteEmptyProxyGroups(emptiedGroups);
+        if (!deleteGroups) {
+          return {
+            ...firstData,
+            message: `${firstData.message || "代理已删除"}。空分组已保留。`,
+          };
+        }
+        let deletedGroups = 0;
+        for (const group of emptiedGroups) {
+          const groupRes = await authFetch(
+            `/api/admin/proxy-groups/${group.id}`,
+            { method: "DELETE" },
+          );
+          const groupData = await groupRes.json().catch(() => ({}));
+          if (!groupRes.ok || groupData.success === false) {
+            throw new Error(groupData.message || "删除空分组失败");
+          }
+          deletedGroups += 1;
+        }
+        return {
+          ...firstData,
+          deleted_groups: deletedGroups,
+          message: `已删除 ${firstData.deleted || ids.length} 条代理，并删除 ${deletedGroups} 个空分组`,
+        };
+      }
+
       function renderProxyCheckBadge(item) {
         if (item.last_check_ok === true) {
           return '<span class="status-badge status-success">活跃</span>';
@@ -3677,7 +4020,7 @@
 
         if (!proxyPoolList.length) {
           tbody.innerHTML =
-            '<tr><td colspan="10">暂无代理，请在上方粘贴 URL 后点击「保存代理」</td></tr>';
+            '<tr><td colspan="11">暂无代理，请在上方粘贴 URL 后点击「导入代理」</td></tr>';
           if (summary) summary.textContent = "共 0 条，启用 0 条";
           return;
         }
@@ -3709,6 +4052,7 @@
                               <td style="text-align:center;" id="proxy_lat_${item.id}">${latency}</td>
                               <td style="text-align:center;"><code>${escapeHtml(item.protocol || "-")}</code></td>
                               <td><code style="font-size:12px; word-break:break-all;">${escapeHtml(item.proxy_url || "")}</code></td>
+                              <td>${escapeHtml(proxyGroupLabel(item))}</td>
                               <td style="text-align:center;">
                                 <button type="button" class="btn btn-secondary" style="min-width:32px; padding:6px 8px; justify-content:center;" onclick="editSavedProxy(${item.id})" title="编辑代理">
                                   <i data-lucide="pencil"></i>
@@ -4023,7 +4367,10 @@
       }
 
       async function loadProxyPool() {
-        const res = await authFetch("/api/admin/proxies");
+        const params = new URLSearchParams({
+          group_id: String(proxyGroupFilter || "all"),
+        });
+        const res = await authFetch(`/api/admin/proxies?${params.toString()}`);
         const data = await res.json();
         if (!res.ok || !data.success) {
           throw new Error(data.message || "加载代理池失败");
@@ -4033,6 +4380,7 @@
         Array.from(selectedProxyIds).forEach((id) => {
           if (!validIds.has(id)) selectedProxyIds.delete(id);
         });
+        await loadProxyGroupList();
         renderProxyPoolTable();
       }
 
@@ -4044,12 +4392,51 @@
           showMessage("请先粘贴至少一条代理 URL", "warning");
           return;
         }
+        await loadProxyGroupList();
+        const extraHtml = `<label>导入到分组</label>
+          <select data-confirm-value class="asset-input" style="width:100%;margin-top:8px">
+            <option value="">不分组</option>
+            ${proxyGroupList
+              .map(
+                (group) =>
+                  `<option value="${escapeHtml(String(group.id))}">${escapeHtml(group.name)}</option>`,
+              )
+              .join("")}
+          </select>
+          <input data-confirm-extra class="asset-input" placeholder="或输入新分组名称" style="width:100%;margin-top:8px" />`;
+        const confirmed = await showAdminConfirm(
+          "选择已有分组，或填写新分组名称后创建。",
+          "导入代理",
+          extraHtml,
+        );
+        if (!confirmed) return;
+        let groupId =
+          typeof confirmed === "object" ? String(confirmed.source || "") : "";
+        const newName =
+          typeof confirmed === "object"
+            ? String(confirmed.extra || "").trim()
+            : "";
         if (hint) hint.textContent = "保存中...";
         try {
+          if (newName) {
+            const created = await authFetch("/api/admin/proxy-groups", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: newName }),
+            });
+            const createdData = await created.json();
+            if (!created.ok || !createdData.success) {
+              throw new Error(createdData.message || "创建分组失败");
+            }
+            groupId = createdData.group?.id || "";
+          }
           const res = await authFetch("/api/admin/proxies", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ proxies: lines.split(/\r?\n/) }),
+            body: JSON.stringify({
+              proxies: lines.split(/\r?\n/),
+              group_id: groupId || null,
+            }),
           });
           const data = await res.json();
           if (!res.ok || !data.success) {
@@ -4057,6 +4444,7 @@
           }
           if (input) input.value = "";
           if (hint) hint.textContent = data.message || "已保存";
+          if (groupId) proxyGroupFilter = String(groupId);
           showMessage(data.message || "代理已保存", "success");
           await loadProxyPool();
         } catch (error) {
@@ -4200,19 +4588,9 @@
         if (!ok) return;
 
         try {
-          const results = await Promise.all(
-            ids.map(async (id) => {
-              const res = await authFetch(`/api/admin/proxies/${id}`, {
-                method: "DELETE",
-              });
-              const data = await res.json();
-              if (!res.ok || !data.success) {
-                throw new Error(data.error || data.message || "删除失败");
-              }
-            }),
-          );
+          const data = await deleteProxiesAndMaybeEmptyGroups(ids);
           selectedProxyIds.clear();
-          showMessage(`已删除 ${results.length} 条代理`, "success");
+          showMessage(data.message || `已删除 ${ids.length} 条代理`, "success");
           await loadProxyPool();
         } catch (error) {
           showMessage(error.message || "批量删除失败", "error");
@@ -4290,16 +4668,12 @@
       }
 
       async function deleteSavedProxy(id) {
-        if (!confirm("确定删除这条代理？")) return;
+        const ok = await showAdminConfirm("确定删除这条代理？", "删除代理");
+        if (!ok) return;
         try {
-          const res = await authFetch(`/api/admin/proxies/${id}`, {
-            method: "DELETE",
-          });
-          const data = await res.json();
-          if (!res.ok || !data.success) {
-            throw new Error(data.error || data.message || "删除失败");
-          }
-          showMessage("代理已删除", "success");
+          const data = await deleteProxiesAndMaybeEmptyGroups([id]);
+          selectedProxyIds.delete(Number(id));
+          showMessage(data.message || "代理已删除", "success");
           await loadProxyPool();
         } catch (error) {
           showMessage(error.message || "删除失败", "error");
@@ -4324,6 +4698,8 @@
           default_timezone:
             document.getElementById("default_timezone")?.value ||
             "Asia/Shanghai",
+          default_proxy_group_id:
+            document.getElementById("default_proxy_group")?.value || "",
           record_video:
             document.getElementById("record_video")?.checked || false,
         };
@@ -4562,6 +4938,7 @@
                           <td><span class="cdk-copy" title="复制兑换链接" onclick="copyCDK('${code}')"><code>${code}</code><i data-lucide="copy"></i></span></td>
                           <td style="text-align:center"><span class="status-badge" style="background: ${planTypeBg}; color: ${planTypeColor}">${planTypeLabel}</span></td>
                           <td>${escapeHtml(typeof cdk === "string" ? "不限分组" : cdk.card_group_name || "不限分组")}</td>
+                          <td>${escapeHtml(typeof cdk === "string" ? "默认代理" : cdk.proxy_group_name || "默认代理")}</td>
                           <td><code>${sessionPreview ? escapeHtml(sessionPreview) : "-"}</code></td>
                           <td>${
                             status === "processing"
@@ -5591,6 +5968,8 @@
           document.getElementById("cdk_plan_type").value || "plus";
         const card_group_id =
           document.getElementById("cdk_card_group")?.value || "";
+        const proxy_group_id =
+          document.getElementById("cdk_proxy_group")?.value || "";
         const original = btn.innerHTML;
         btn.innerHTML =
           '<i data-lucide="loader" class="animate-spin"></i> 生成中...';
@@ -5600,7 +5979,7 @@
           const res = await authFetch("/api/admin/cdks/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ count, plan_type, card_group_id }),
+            body: JSON.stringify({ count, plan_type, card_group_id, proxy_group_id }),
           });
           const data = await res.json();
           if (!res.ok || !data.success) {
@@ -5876,6 +6255,8 @@
               plan_type: document.getElementById("cdk_plan_type")?.value || "plus",
               card_group_id:
                 document.getElementById("cdk_card_group")?.value || "",
+              proxy_group_id:
+                document.getElementById("cdk_proxy_group")?.value || "",
             }),
           });
           const data = await res.json();
@@ -7304,6 +7685,7 @@
         stopCheckoutDebugLogStream();
         const input = document.getElementById("checkout_session_input");
         if (input) input.value = "";
+        updateCheckoutSessionAccountHint();
         const checkoutUrlInput = document.getElementById("checkout_url_input");
         if (checkoutUrlInput) checkoutUrlInput.value = "";
         const box = document.getElementById("checkout_result_box");
@@ -7497,8 +7879,13 @@
             statusEl.style.color = "var(--error, #ef4444)";
           }
         }
-        if (emailEl && data.email) {
-          emailEl.textContent = `账号: ${data.email}`;
+        if (emailEl) {
+          const email =
+            data.email ||
+            parseCheckoutSessionEmail(
+              document.getElementById("checkout_session_input")?.value,
+            );
+          emailEl.textContent = email || "";
         }
         updateCheckoutPlanChoiceUi(data);
         if (urlWrap) {
@@ -7677,9 +8064,77 @@
         return { source, extra };
       }
 
+      function decodeJwtPayloadSafe(token) {
+        const parts = String(token || "").split(".");
+        if (parts.length < 2) {
+          return null;
+        }
+        try {
+          const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+          const json = decodeURIComponent(
+            atob(padded)
+              .split("")
+              .map((ch) => `%${`00${ch.charCodeAt(0).toString(16)}`.slice(-2)}`)
+              .join(""),
+          );
+          return JSON.parse(json);
+        } catch (_) {
+          return null;
+        }
+      }
+
+      function parseCheckoutSessionEmail(raw) {
+        const text = String(raw || "").trim();
+        if (!text) {
+          return "";
+        }
+        const fromJwt = (token) => {
+          const payload = decodeJwtPayloadSafe(token);
+          if (!payload || typeof payload !== "object") {
+            return "";
+          }
+          const profile = payload["https://api.openai.com/profile"] || {};
+          return String(
+            profile.email || payload.email || payload.preferred_username || "",
+          ).trim();
+        };
+        if (text.startsWith("{")) {
+          try {
+            const obj = JSON.parse(text);
+            const email = String(
+              obj?.user?.email ||
+                obj?.account?.email ||
+                obj?.email ||
+                obj?.session?.user?.email ||
+                "",
+            ).trim();
+            if (email) {
+              return email;
+            }
+            return fromJwt(obj?.accessToken || obj?.access_token || "");
+          } catch (_) {
+            return "";
+          }
+        }
+        return fromJwt(text);
+      }
+
+      function updateCheckoutSessionAccountHint() {
+        const hint = document.getElementById("checkout_session_account");
+        if (!hint) {
+          return "";
+        }
+        const email = parseCheckoutSessionEmail(
+          document.getElementById("checkout_session_input")?.value,
+        );
+        hint.textContent = email || "";
+        return email;
+      }
+
       function clearCheckoutSessionText() {
         const input = document.getElementById("checkout_session_input");
         if (input) input.value = "";
+        updateCheckoutSessionAccountHint();
       }
 
       function randomCheckoutHolderName() {
@@ -8026,7 +8481,24 @@
           showMessage("请填写手动卡片：卡号|月/年|CVC", "warning");
           return;
         }
-        await startCheckoutTask("payment", payload);
+        const extraHtml = `<label>是否取消自动续费</label>
+          <select data-confirm-value class="asset-input">
+            <option value="yes" selected>是</option>
+            <option value="no">否</option>
+          </select>`;
+        const confirmed = await showAdminConfirm(
+          "支付成功后是否取消自动续费？",
+          "支付调试",
+          extraHtml,
+        );
+        if (!confirmed) {
+          return;
+        }
+        const cancelAutoRenew =
+          typeof confirmed === "object"
+            ? String(confirmed.source || "yes").toLowerCase() !== "no"
+            : true;
+        await startCheckoutTask("payment", { ...payload, cancelAutoRenew });
       }
 
       async function startCustomCheckoutPayment() {
@@ -8128,8 +8600,18 @@
                       ).trim();
                     }
                   }
+                  if (
+                    isPayment &&
+                    !isCustom &&
+                    typeof cardChoice?.cancelAutoRenew === "boolean"
+                  ) {
+                    requestBody.cancel_auto_renew = cardChoice.cancelAutoRenew;
+                  }
                   const address = getCheckoutDebugAddress();
                   if (address) requestBody.address = address;
+                  requestBody.proxy_group_id = getSelectedProxyGroupId(
+                    "checkout_proxy_group",
+                  );
                   return requestBody;
                 })(),
               ),
@@ -8179,6 +8661,7 @@
       async function loadCheckoutDebugPage() {
         await loadRegionConfig();
         await loadCheckoutPlans();
+        await loadProxyGroupList();
         const sel = document.getElementById("checkout_region_selector");
         if (sel) sel.value = currentRegion;
         onCheckoutRegionChange();
@@ -8187,6 +8670,7 @@
           loadCheckoutDebugAddresses(),
           loadCheckoutDebugHistory(),
         ]);
+        updateCheckoutSessionAccountHint();
         bindCheckoutDebugHistoryOverlayScroll();
         lucide.createIcons();
       }
