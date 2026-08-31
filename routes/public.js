@@ -1,17 +1,7 @@
 "use strict";
 
 const path = require("path");
-
-function redactPublicCheckoutLog(value) {
-  return String(value || "")
-    .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)\S+/gi, "$1[REDACTED]")
-    .replace(
-      /(["']?(?:access_?token|session|cookie|card_(?:number|cvc)|CHATGPT_TOKEN|CHATGPT_SESSION_JSON|PAYMENT_CARD_MANUAL)["']?\s*[:=]\s*["']?)[^\s,"'}]+/gi,
-      "$1[REDACTED]",
-    )
-    .replace(/\b\d{12,19}\b/g, "[REDACTED_CARD]")
-    .slice(0, 500);
-}
+const { redactPublicCheckoutLog } = require("../log-redact");
 
 function listPublicCheckoutLogs(runtimeLog, jobKey, after, limit) {
   const cap = Math.min(200, Math.max(1, Number(limit) || 80));

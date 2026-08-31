@@ -12,6 +12,13 @@ const WebSocket = require("ws");
 const axios = require("axios");
 const store = require("./mysql-store");
 const runtimeLog = require("./runtime-log");
+const mediaCleanup = require("./media-cleanup");
+const { rejectCrossOriginAdmin } = require("./admin-csrf");
+const {
+  redactSensitiveText,
+  redactInternalErrorForLog,
+  redactTaskDetailOutput,
+} = require("./log-redact");
 const { REGION_CONFIG, isSupportedRegion, getRegionBrowserProfile } = require("./region-config");
 const { getPlanTypeLabel } = require("./credit-quantity");
 const {
@@ -688,14 +695,15 @@ async function sendTaskSnapshot(ws, jobKey) {
 }
 
 function logTask(jobKey, message, level = "log") {
+  const text = String(message || "");
   runtimeLog.push({
     jobKey,
     level,
     source: "task",
-    text: String(message || ""),
+    text,
   });
   const logger = console[level] || console.log;
-  logger(`[Task ${jobKey}] ${message}`);
+  logger(`[Task ${jobKey}] ${redactSensitiveText(text, { maxLen: 8192 })}`);
 }
 
 function logTaskChunk(jobKey, attempt, source, chunk) {
@@ -710,6 +718,7 @@ function logTaskChunk(jobKey, attempt, source, chunk) {
     if (!line.trim()) {
       continue;
     }
+    const lineText = line.replace(/^CAPTCHA_LOG:\s*/, "");
     runtimeLog.push({
       jobKey,
       level:
@@ -722,9 +731,11 @@ function logTaskChunk(jobKey, attempt, source, chunk) {
         line.includes("CAPTCHA_LOG:") || line.includes("[Captcha/")
           ? "captcha"
           : `spawn/a${attempt}/${source}`,
-      text: line.replace(/^CAPTCHA_LOG:\s*/, ""),
+      text: lineText,
     });
-    console.log(`[Task ${jobKey}][Attempt ${attempt}][${source}] ${line}`);
+    console.log(
+      `[Task ${jobKey}][Attempt ${attempt}][${source}] ${redactSensitiveText(lineText, { maxLen: 8192 })}`,
+    );
   }
 }
 
@@ -755,32 +766,6 @@ function resolveJsonBodyLimit() {
 }
 
 const JSON_BODY_LIMIT = resolveJsonBodyLimit();
-const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-
-function requestOriginHost(req) {
-  const origin = String(req.headers.origin || "").trim();
-  if (origin) {
-    try {
-      return new URL(origin).host.toLowerCase();
-    } catch (_) {
-      return "";
-    }
-  }
-  const referer = String(req.headers.referer || "").trim();
-  if (!referer) return "";
-  try {
-    return new URL(referer).host.toLowerCase();
-  } catch (_) {
-    return "";
-  }
-}
-
-function requestHost(req) {
-  const raw = TRUST_PROXY
-    ? String(req.headers["x-forwarded-host"] || req.headers.host || "")
-    : String(req.headers.host || "");
-  return raw.split(",")[0].trim().toLowerCase();
-}
 
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -806,26 +791,16 @@ app.use((req, res, next) => {
       "max-age=31536000; includeSubDomains",
     );
   }
-  if (MUTATING_METHODS.has(req.method) && req.path.startsWith("/api/admin")) {
-    const originHost = requestOriginHost(req);
-    const host = requestHost(req);
-    if (originHost && host && originHost !== host) {
-      return res.status(403).json({
-        success: false,
-        message: "拒绝跨源请求",
-      });
-    }
+  const blocked = rejectCrossOriginAdmin(req, { trustProxy: TRUST_PROXY });
+  if (blocked) {
+    return res.status(blocked.status).json({
+      success: false,
+      message: blocked.message,
+    });
   }
   next();
 });
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
-
-function redactInternalErrorForLog(value) {
-  return String(value || "")
-    .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)\S+/gi, "$1[REDACTED]")
-    .replace(/((?:token|secret|password|cookie|api[_-]?key)\s*[:=]\s*)\S+/gi, "$1[REDACTED]")
-    .slice(0, 1000);
-}
 
 app.use((req, res, next) => {
   const sendJson = res.json.bind(res);
@@ -2128,6 +2103,7 @@ function runCheckoutScript(
     const cleanup = () => {
       activeProcesses.delete(child);
       if (idleTimer) clearTimeout(idleTimer);
+      browserPool.releaseSlotByJobKey(jobKey);
     };
 
     const finish = (result) => {
@@ -2140,6 +2116,7 @@ function runCheckoutScript(
     };
 
     const resetIdleTimer = () => {
+      browserPool.touchJob(jobKey);
       if (idleTimer) {
         clearTimeout(idleTimer);
       }
@@ -2415,17 +2392,6 @@ app.get("/api/admin/task-logs", requireSecondaryAuth, async (req, res) => {
   }
 });
 
-function redactTaskDetailOutput(value) {
-  return String(value || "")
-    .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)\S+/gi, "$1[REDACTED]")
-    .replace(
-      /(["']?(?:access_?token|session|cookie|card_(?:number|cvc))["']?\s*[:=]\s*["']?)[^\s,"'}]+/gi,
-      "$1[REDACTED]",
-    )
-    .replace(/\b\d{12,19}\b/g, "[REDACTED_CARD]")
-    .slice(-200000);
-}
-
 app.get("/api/admin/task-logs/:jobKey", requireSecondaryAuth, async (req, res) => {
   try {
     await ensureStoreReady();
@@ -2652,7 +2618,9 @@ async function refreshAdminSessionWithBrowser(rawSession, preferredProxy) {
           if (!context) {
             throw new Error("浏览器池当前不可用");
           }
-          const installed = await installChatGptSession(context, rawSession);
+          const installed = await installChatGptSession(context, rawSession, {
+            proxy,
+          });
           const cookies = await context.cookies("https://chatgpt.com");
           return {
             ...installed,
@@ -2738,6 +2706,7 @@ async function runAdminBrowserSessionAction(
           }
           const installed = await installChatGptSession(context, rawSession, {
             skipCookieVerify: options.skipCookieVerify === true,
+            proxy,
           });
           const page = await context.newPage();
           if (options.skipNavigate === true) {
@@ -5603,6 +5572,49 @@ async function start() {
       console.warn(`⚠️  [资产锁] 周期清理失败: ${error.message}`);
     }
   }, 60 * 1000).unref();
+
+  const runDebugMediaCleanup = (reason) => {
+    const result = mediaCleanup.purgeOldMedia(
+      path.join(__dirname, "debug_screenshots"),
+      {
+        maxAgeMs:
+          Math.max(1, Number(process.env.MEDIA_RETENTION_DAYS || 7)) *
+          24 *
+          60 *
+          60 *
+          1000,
+        maxTotalBytes:
+          Math.max(0, Number(process.env.MEDIA_MAX_GB || 2)) * 1024 ** 3,
+      },
+    );
+    if (result.deleted > 0) {
+      const text = `[MediaCleanup] ${reason}删除 ${result.deleted} 个截图/录像，释放 ${result.freedText}`;
+      console.log(text);
+      runtimeLog.push({
+        jobKey: "",
+        level: "system",
+        source: "server",
+        text,
+      });
+    }
+    return result;
+  };
+
+  setTimeout(() => {
+    try {
+      runDebugMediaCleanup("启动");
+    } catch (error) {
+      console.warn(`[MediaCleanup] 启动清理失败: ${error.message}`);
+    }
+  }, 20 * 1000).unref();
+
+  setInterval(() => {
+    try {
+      runDebugMediaCleanup("周期");
+    } catch (error) {
+      console.warn(`[MediaCleanup] 周期清理失败: ${error.message}`);
+    }
+  }, 6 * 60 * 60 * 1000).unref();
 
   const server = app.listen(PORT, () => {
     sampleCpuPercent();

@@ -1095,6 +1095,62 @@
           deleteCDK(deleteCdkBtn.getAttribute("data-delete-cdk") || "");
           return;
         }
+        const productStatusBtn = event.target.closest("[data-toggle-product]");
+        if (productStatusBtn) {
+          event.preventDefault();
+          toggleProductStatus(
+            productStatusBtn.getAttribute("data-toggle-product") || "",
+            productStatusBtn.getAttribute("data-product-status") || "",
+          );
+          return;
+        }
+        const exportProductBtn = event.target.closest("[data-export-product]");
+        if (exportProductBtn) {
+          event.preventDefault();
+          exportSingleProduct(
+            exportProductBtn.getAttribute("data-export-product") || "",
+            exportProductBtn.getAttribute("data-export-email") || "",
+          );
+          return;
+        }
+        const deleteProductBtn = event.target.closest("[data-delete-product]");
+        if (deleteProductBtn) {
+          event.preventDefault();
+          deleteProduct(
+            deleteProductBtn.getAttribute("data-delete-product") || "",
+          );
+          return;
+        }
+        const deletePhoneBtn = event.target.closest("[data-delete-phone-index]");
+        if (deletePhoneBtn) {
+          event.preventDefault();
+          const idx = Number(
+            deletePhoneBtn.getAttribute("data-delete-phone-index"),
+          );
+          if (Number.isInteger(idx) && idx >= 0) {
+            phonePool.splice(idx, 1);
+            renderPhoneTable();
+          }
+          return;
+        }
+        const billingCardBtn = event.target.closest("[data-card-billing]");
+        if (billingCardBtn) {
+          event.preventDefault();
+          showCardBillingSummary(
+            billingCardBtn.getAttribute("data-card-billing") || "",
+          );
+          return;
+        }
+        const debugHistoryBtn = event.target.closest(
+          ".checkout-debug-history-item[data-job-key]",
+        );
+        if (debugHistoryBtn) {
+          event.preventDefault();
+          selectCheckoutDebugHistory(
+            debugHistoryBtn.getAttribute("data-job-key") || "",
+          );
+          return;
+        }
         const viewSessionBtn = event.target.closest("[data-view-session]");
         if (viewSessionBtn) {
           event.preventDefault();
@@ -1150,14 +1206,29 @@
         const input = event.target.closest(
           "input[data-select-type][data-select-key]",
         );
-        if (!input || input.type !== "checkbox") {
+        if (input && input.type === "checkbox") {
+          toggleSelection(
+            input.getAttribute("data-select-type") || "",
+            input.getAttribute("data-select-key") || "",
+            input.checked,
+          );
           return;
         }
-        toggleSelection(
-          input.getAttribute("data-select-type") || "",
-          input.getAttribute("data-select-key") || "",
-          input.checked,
+        const phoneInput = event.target.closest(
+          "input[data-phone-index][data-phone-field]",
         );
+        if (!phoneInput) {
+          return;
+        }
+        const idx = Number(phoneInput.getAttribute("data-phone-index"));
+        const field = phoneInput.getAttribute("data-phone-field");
+        if (
+          Number.isInteger(idx) &&
+          phonePool[idx] &&
+          (field === "phone" || field === "key")
+        ) {
+          phonePool[idx][field] = phoneInput.value;
+        }
       });
 
       let sessionModalPayload = "";
@@ -6087,18 +6158,19 @@
           "phone_pool",
         );
         document.getElementById("phone_pool_body").innerHTML = pageData.items
-          .map((item, index) => {
+          .map((item) => {
             const actualIndex = phonePool.indexOf(item);
             const isActive = isAssetActive(item);
             const key = item.phone || "";
+            const safeKey = escapeHtml(key);
             return `
                       <tr>
-                          <td class="select-cell"><input type="checkbox" ${selectedItems.phone_pool.has(key) ? "checked" : ""} onchange="toggleSelection('phone_pool', '${key}', this.checked)"></td>
-                          <td><input type="text" class="asset-input" value="${item.phone}" onchange="phonePool[${actualIndex}].phone=this.value" placeholder="13800000000"></td>
-                          <td><input type="text" class="asset-input" value="${item.key}" onchange="phonePool[${actualIndex}].key=this.value" placeholder="API Key"></td>
+                          <td class="select-cell"><input type="checkbox" data-select-type="phone_pool" data-select-key="${safeKey}" ${selectedItems.phone_pool.has(key) ? "checked" : ""}></td>
+                          <td><input type="text" class="asset-input" value="${escapeHtml(item.phone || "")}" data-phone-index="${actualIndex}" data-phone-field="phone" placeholder="13800000000"></td>
+                          <td><input type="text" class="asset-input" value="${escapeHtml(item.key || "")}" data-phone-index="${actualIndex}" data-phone-field="key" placeholder="API Key"></td>
                           <td style="text-align:center">${Number(item.usage_count || 0)}</td>
                           <td style="text-align:center">${renderAssetStatus(isActive)}</td>
-                          <td style="text-align:center"><button class="btn-delete" onclick="phonePool.splice(${actualIndex},1);renderPhoneTable()" title="删除"><i data-lucide="trash-2"></i></button></td>
+                          <td style="text-align:center"><button type="button" class="btn-delete" data-delete-phone-index="${actualIndex}" title="删除"><i data-lucide="trash-2"></i></button></td>
                       </tr>
                   `;
           })
@@ -6807,31 +6879,36 @@
         tbody.innerHTML = pageData.items
           .map((p) => {
             const isActive = p.status === "正常";
+            const safeId = escapeHtml(String(p.id || ""));
+            const safeEmail = escapeHtml(p.email || "");
+            const safeCdk = escapeHtml(p.claimed_cdk || "");
+            const safeImap = escapeHtml(p.imap_key || "");
+            const safeStatus = escapeHtml(p.status || "");
             return `
                       <tr>
-                          <td class="select-cell"><input type="checkbox" ${selectedItems.product.has(String(p.id)) ? "checked" : ""} onchange="toggleSelection('product', '${p.id}', this.checked)"></td>
-                          <td><code>${p.email}</code></td>
-                          <td>${p.claimed_cdk ? `<code>${p.claimed_cdk}</code>` : '<span style="color: var(--text-dim);">-</span>'}</td>
+                          <td class="select-cell"><input type="checkbox" data-select-type="product" data-select-key="${safeId}" ${selectedItems.product.has(String(p.id)) ? "checked" : ""}></td>
+                          <td><code>${safeEmail}</code></td>
+                          <td>${p.claimed_cdk ? `<code>${safeCdk}</code>` : '<span style="color: var(--text-dim);">-</span>'}</td>
                           <td>
                               ${
                                 p.imap_key
-                                  ? `<a href="https://imap.chiyiyi.cloud/?key=${encodeURIComponent(p.imap_key)}" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: none; font-family: monospace;">${p.imap_key}</a>`
+                                  ? `<a href="https://imap.chiyiyi.cloud/?key=${encodeURIComponent(p.imap_key)}" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: none; font-family: monospace;">${safeImap}</a>`
                                   : '<span style="color: var(--text-dim);">-</span>'
                               }
                           </td>
-                          <td>${p.time}</td>
+                          <td>${escapeHtml(p.time || "")}</td>
                           <td style="text-align:center">
-                              <span class="status-badge ${isActive ? "status-success" : "status-failed"}" style="cursor: pointer;" onclick="toggleProductStatus('${p.id}', '${p.status}')" title="${isActive ? "点击封禁" : "点击恢复"}">${p.status}</span>
+                              <span class="status-badge ${isActive ? "status-success" : "status-failed"}" style="cursor: pointer;" data-toggle-product="${safeId}" data-product-status="${safeStatus}" title="${isActive ? "点击封禁" : "点击恢复"}">${safeStatus}</span>
                           </td>
                           <td style="text-align:center">
                               <span class="readonly-switch ${p.shipped ? "active" : ""}" title="${p.shipped ? "已出库" : "未出库"}"></span>
                           </td>
                           <td>
                               <div style="display: flex; justify-content: center; gap: 8px;">
-                                  <button class="btn-delete" style="background: rgba(16, 185, 129, 0.12); color: var(--success);" onclick="exportSingleProduct('${p.id}', '${p.email}')" title="单个出库下载">
+                                  <button type="button" class="btn-delete" style="background: rgba(16, 185, 129, 0.12); color: var(--success);" data-export-product="${safeId}" data-export-email="${safeEmail}" title="单个出库下载">
                                       <i data-lucide="download"></i>
                                   </button>
-                                  <button class="btn-delete" onclick="deleteProduct('${p.id}')" title="删除">
+                                  <button type="button" class="btn-delete" data-delete-product="${safeId}" title="删除">
                                       <i data-lucide="trash-2"></i>
                                   </button>
                               </div>
@@ -7318,7 +7395,7 @@
             );
             return `<tr>
                           <td>${escapeHtml(time)}</td>
-                          <td><a href="javascript:void(0)" onclick="showCardBillingSummary('${cardSummaryKey}')" style="cursor:pointer; color:var(--primary); font-weight:600; font-family:monospace;">${cardDisplay}</a></td>
+                          <td><a href="javascript:void(0)" data-card-billing="${cardSummaryKey}" style="cursor:pointer; color:var(--primary); font-weight:600; font-family:monospace;">${cardDisplay}</a></td>
                           <td>${escapeHtml(r.amount != null ? Number(r.amount).toFixed(2) : "-")}</td>
                           <td>${escapeHtml(r.currency || "-")}</td>
                           <td>${escapeHtml(planLabel)}</td>
@@ -8460,7 +8537,7 @@
                 ? " active"
                 : "";
             const key = escapeHtml(task.jobKey || "");
-            return `<button type="button" class="checkout-debug-history-item${active}" data-job-key="${key}" onclick="selectCheckoutDebugHistory('${key}')">
+            return `<button type="button" class="checkout-debug-history-item${active}" data-job-key="${key}">
               <div class="checkout-debug-history-top">
                 <span class="checkout-debug-history-type">${escapeHtml(type)}</span>
                 <span class="status-badge ${status.class}">${escapeHtml(status.label)}</span>

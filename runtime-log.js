@@ -2,6 +2,8 @@
  * 进程内环形运行日志（供管理后台「运行日志」页展示）。
  * 重启后清空；与 task_logs 表独立。
  */
+const { redactSensitiveText } = require("./log-redact");
+
 const MAX_ENTRIES = 15000;
 const MAX_LINE = 8192;
 
@@ -9,9 +11,9 @@ let seq = 1;
 const buffer = [];
 
 function push(entry) {
-  const text = String(entry.text || "")
-    .replace(/\r/g, "")
-    .slice(0, MAX_LINE);
+  const text = redactSensitiveText(String(entry.text || "").replace(/\r/g, ""), {
+    maxLen: MAX_LINE,
+  });
   if (!text.trim()) {
     return;
   }

@@ -56,4 +56,54 @@ describe("browser pool recovery", () => {
     expect(recovered).toMatchObject({ enabled: true, size: 1 });
     expect(launchPersistentContext).toHaveBeenCalledTimes(2);
   });
+
+  it("reclaims a stale slot without invalidating a newer lease", async () => {
+    vi.stubEnv("BROWSER_POOL_STALE_MS", "40");
+    vi.stubEnv("BROWSER_POOL_STALE_SWEEP_MS", "60000");
+    delete require.cache[require.resolve("../browser-pool")];
+    browserPool = require("../browser-pool");
+    await browserPool.initBrowserPool();
+
+    const first = await browserPool.acquireSlot("job-old");
+    expect(first.leaseId).toBeGreaterThan(0);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(browserPool.reclaimStaleSlots()).toBe(1);
+    const second = await browserPool.acquireSlot("job-new");
+    expect(second.slotId).toBe(first.slotId);
+    expect(second.leaseId).not.toBe(first.leaseId);
+
+    expect(browserPool.releaseSlot(first.slotId, first.leaseId)).toBe(false);
+    expect(browserPool.getStats()).toMatchObject({ idle: 0, busy: 1 });
+    expect(browserPool.releaseSlot(second.slotId, second.leaseId)).toBe(true);
+    expect(browserPool.getStats()).toMatchObject({ idle: 1, busy: 0 });
+  });
+
+  it("keeps a busy slot when the job is still heartbeating", async () => {
+    vi.stubEnv("BROWSER_POOL_STALE_MS", "200");
+    vi.stubEnv("BROWSER_POOL_STALE_SWEEP_MS", "60000");
+    delete require.cache[require.resolve("../browser-pool")];
+    browserPool = require("../browser-pool");
+    await browserPool.initBrowserPool();
+
+    await browserPool.acquireSlot("job-live");
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(browserPool.touchJob("job-live")).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(browserPool.reclaimStaleSlots()).toBe(0);
+    expect(browserPool.getStats()).toMatchObject({ busy: 1, idle: 0 });
+    expect(browserPool.releaseSlotByJobKey("job-live")).toBe(true);
+    expect(browserPool.getStats()).toMatchObject({ busy: 0, idle: 1 });
+  });
+
+  it("rejects waiters on acquire timeout without leaking the queue", async () => {
+    vi.stubEnv("BROWSER_POOL_ACQUIRE_TIMEOUT_MS", "30");
+    delete require.cache[require.resolve("../browser-pool")];
+    browserPool = require("../browser-pool");
+    await browserPool.initBrowserPool();
+
+    await browserPool.acquireSlot("job-hold");
+    await expect(browserPool.acquireSlot("job-wait")).rejects.toThrow(/繁忙/);
+    expect(browserPool.getStats()).toMatchObject({ busy: 1, waiting: 0 });
+  });
 });

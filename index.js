@@ -330,7 +330,9 @@ async function run() {
 
   context = await browser.newContext(contextOptions);
   const sessionRaw = CONFIG.chatgptSessionJson || CONFIG.chatgptToken;
-  const installResult = await installChatGptSession(context, sessionRaw);
+  const installResult = await installChatGptSession(context, sessionRaw, {
+    proxy: CONFIG.proxy,
+  });
   const sessionData = installResult?.sessionData || installResult;
   const cookieVerified = Boolean(installResult?.cookieVerified);
 

@@ -7,6 +7,7 @@ const {
   fetchLiveChatGptSession,
   installChatGptSession,
   isChallengeLike,
+  isTransportSessionFailure,
   openLiveChatGptMainPage,
   refreshLiveChatGptAccessToken,
   acquireFreshChatGptAccessToken,
@@ -145,6 +146,136 @@ describe("session-auth cookie helpers", () => {
         bodyText: "{}",
       }),
     ).toBe(false);
+  });
+
+  it("treats HTTP 599 and proxy failures as transport errors", () => {
+    expect(isTransportSessionFailure({ status: 599 })).toBe(true);
+    expect(isTransportSessionFailure({ status: 502 })).toBe(true);
+    expect(
+      isTransportSessionFailure({ error: "net::ERR_PROXY_CONNECTION_FAILED" }),
+    ).toBe(true);
+    expect(
+      isTransportSessionFailure({ status: 200, bodyText: "{}" }),
+    ).toBe(false);
+  });
+
+  it("does not abort install when session verify hits a proxy 599", async () => {
+    const token = createToken("user@example.com", "proxy599");
+    const context = {
+      addCookies: vi.fn().mockResolvedValue(),
+      cookies: vi.fn().mockResolvedValue([
+        {
+          name: "__Secure-next-auth.session-token",
+          value: "s".repeat(120),
+        },
+      ]),
+      request: {
+        get: vi.fn().mockResolvedValue({
+          status: () => 599,
+          headers: () => ({}),
+          text: async () => "",
+        }),
+      },
+      addInitScript: vi.fn().mockResolvedValue(),
+      route: vi.fn().mockResolvedValue(),
+    };
+    vi.spyOn(playwrightRequest, "newContext").mockResolvedValue({
+      get: vi.fn().mockResolvedValue({
+        status: () => 599,
+        headers: () => ({}),
+        text: async () => "",
+      }),
+      dispose: vi.fn().mockResolvedValue(),
+    });
+
+    const result = await installChatGptSession(
+      context,
+      JSON.stringify({
+        user: { email: "user@example.com" },
+        accessToken: token,
+        sessionToken: "s".repeat(120),
+      }),
+      { verifyAttempts: 2, verifyRetryDelayMs: 0 },
+    );
+
+    expect(result.cookieVerified).toBe(false);
+    expect(context.addInitScript).toHaveBeenCalledTimes(1);
+    expect(context.request.get).toHaveBeenCalledTimes(2);
+  });
+
+  it("verifies cookies through a standalone proxy request after context 599", async () => {
+    const oldToken = createToken("user@example.com", "old599");
+    const freshToken = createToken("user@example.com", "fresh599");
+    const context = {
+      addCookies: vi.fn().mockResolvedValue(),
+      cookies: vi.fn().mockResolvedValue([
+        {
+          name: "__Secure-next-auth.session-token",
+          value: "s".repeat(120),
+        },
+      ]),
+      request: {
+        get: vi.fn().mockResolvedValue({
+          status: () => 599,
+          headers: () => ({}),
+          text: async () => "",
+        }),
+      },
+      addInitScript: vi.fn().mockResolvedValue(),
+      route: vi.fn().mockResolvedValue(),
+    };
+    vi.spyOn(playwrightRequest, "newContext").mockResolvedValue({
+      get: vi.fn().mockResolvedValue(
+        apiResponse(200, {
+          user: { email: "user@example.com" },
+          accessToken: freshToken,
+        }),
+      ),
+      dispose: vi.fn().mockResolvedValue(),
+    });
+
+    const result = await installChatGptSession(
+      context,
+      JSON.stringify({
+        user: { email: "user@example.com" },
+        accessToken: oldToken,
+        sessionToken: "s".repeat(120),
+      }),
+      { verifyAttempts: 1, verifyRetryDelayMs: 0, proxy: "http://proxy.example:8080" },
+    );
+
+    expect(result.cookieVerified).toBe(true);
+    expect(result.accessToken).toBe(freshToken);
+    expect(context.addInitScript).not.toHaveBeenCalled();
+  });
+
+  it("still rejects a real empty ChatGPT session", async () => {
+    const token = createToken("user@example.com", "empty");
+    const context = {
+      addCookies: vi.fn().mockResolvedValue(),
+      cookies: vi.fn().mockResolvedValue([
+        {
+          name: "__Secure-next-auth.session-token",
+          value: "s".repeat(120),
+        },
+      ]),
+      request: {
+        get: vi.fn().mockResolvedValue(apiResponse(200, {})),
+      },
+      addInitScript: vi.fn().mockResolvedValue(),
+      route: vi.fn().mockResolvedValue(),
+    };
+
+    await expect(
+      installChatGptSession(
+        context,
+        JSON.stringify({
+          user: { email: "user@example.com" },
+          accessToken: token,
+          sessionToken: "s".repeat(120),
+        }),
+      ),
+    ).rejects.toThrow(/未被 ChatGPT 接受/);
   });
 
   it("refreshes a stale access token from a valid session-token cookie", async () => {

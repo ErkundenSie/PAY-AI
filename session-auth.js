@@ -464,7 +464,83 @@ function isChallengeLike({ status = 0, headerText = "", bodyText = "" } = {}) {
   );
 }
 
-async function verifyRealSessionApi(context) {
+function isTransportSessionFailure({ status = 0, bodyText = "", error = "" } = {}) {
+  const code = Number(status) || 0;
+  if (
+    code === 0 ||
+    code === 407 ||
+    code === 502 ||
+    code === 503 ||
+    code === 504 ||
+    code === 522 ||
+    code === 523 ||
+    code === 524 ||
+    code === 525 ||
+    code === 599
+  ) {
+    return true;
+  }
+  const message = String(error || "");
+  if (
+    /timeout|timed out|net::|econnreset|econnrefused|enotfound|socket|proxy/i.test(
+      message,
+    )
+  ) {
+    return true;
+  }
+  const body = String(bodyText || "").trim();
+  return code >= 500 && !body.startsWith("{") && !body.startsWith("[");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function interpretSessionApiResult({ status = 0, headerText = "", bodyText = "" } = {}) {
+  const data = parseSessionPayload(bodyText);
+  if (hasSessionUser(data)) {
+    return { ok: true, data, status };
+  }
+  if (isChallengeLike({ status, headerText, bodyText })) {
+    return {
+      ok: false,
+      status,
+      challenge: true,
+      error: `Cloudflare 人机验证拦截（HTTP ${status}）。当前出口/代理 IP 被 ChatGPT 风控，请更换干净的住宅代理后重试`,
+    };
+  }
+  if (isTransportSessionFailure({ status, bodyText })) {
+    const snippet = String(bodyText || "")
+      .replace(/\s+/g, " ")
+      .slice(0, 80);
+    return {
+      ok: false,
+      status,
+      transport: true,
+      error: `代理/网络未能访问 ChatGPT（HTTP ${status}${snippet ? `，响应: ${snippet}` : ""}）`,
+    };
+  }
+  const snippet = String(bodyText || "")
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
+  return {
+    ok: false,
+    status,
+    error: `session-token 未被 ChatGPT 接受（/api/auth/session 无用户信息，HTTP ${status}${snippet ? `，响应: ${snippet}` : ""}）`,
+  };
+}
+
+async function readSessionApiResponse(response) {
+  const status = Number(response.status() || 0);
+  const headerText = Object.entries(response.headers() || {})
+    .map(([key, value]) => `${key}:${value}`)
+    .join("\n")
+    .toLowerCase();
+  const bodyText = await response.text().catch(() => "");
+  return interpretSessionApiResult({ status, headerText, bodyText });
+}
+
+async function verifyRealSessionApiOnce(context) {
   try {
     const response = await context.request.get(
       `${CHATGPT_COOKIE_URL}/api/auth/session`,
@@ -473,33 +549,90 @@ async function verifyRealSessionApi(context) {
         headers: { accept: "application/json" },
       },
     );
-    const status = Number(response.status() || 0);
-    const headerText = Object.entries(response.headers() || {})
-      .map(([key, value]) => `${key}:${value}`)
-      .join("\n")
-      .toLowerCase();
-    const bodyText = await response.text().catch(() => "");
-    const data = parseSessionPayload(bodyText);
-    if (hasSessionUser(data)) {
-      return { ok: true, data, status };
-    }
-    if (isChallengeLike({ status, headerText, bodyText })) {
-      return {
-        ok: false,
-        status,
-        challenge: true,
-        error: `Cloudflare 人机验证拦截（HTTP ${status}）。当前出口/代理 IP 被 ChatGPT 风控，请更换干净的住宅代理后重试`,
-      };
-    }
-    const snippet = bodyText.replace(/\s+/g, " ").slice(0, 120);
+    return await readSessionApiResponse(response);
+  } catch (err) {
     return {
       ok: false,
-      status,
-      error: `session-token 未被 ChatGPT 接受（/api/auth/session 无用户信息，HTTP ${status}${snippet ? `，响应: ${snippet}` : ""}）`,
+      transport: true,
+      error: `无法验证 session Cookie: ${err.message}`,
     };
-  } catch (err) {
-    return { ok: false, error: `无法验证 session Cookie: ${err.message}` };
   }
+}
+
+async function fetchSessionViaStandaloneRequest(cookieSpecs, proxyValue, timeoutMs) {
+  const storageCookies = (cookieSpecs || [])
+    .map((spec) => toApiRequestCookie(spec))
+    .filter(Boolean);
+  if (!storageCookies.length) {
+    return {
+      ok: false,
+      transport: true,
+      error: "无 Cookie 可做独立校验",
+    };
+  }
+  const { proxyConfig, cleanup } = await preparePlaywrightProxy(
+    String(proxyValue || "").trim(),
+  );
+  const requestContext = await playwrightRequest.newContext({
+    proxy: proxyConfig || undefined,
+    storageState: { cookies: storageCookies, origins: [] },
+    extraHTTPHeaders: {
+      Accept: "application/json",
+      Referer: `${CHATGPT_ORIGIN}/`,
+      Origin: CHATGPT_ORIGIN,
+    },
+  });
+  try {
+    const response = await requestContext.get(
+      `${CHATGPT_ORIGIN}/api/auth/session`,
+      {
+        timeout: Math.max(2000, Number(timeoutMs) || 15000),
+      },
+    );
+    return await readSessionApiResponse(response);
+  } catch (err) {
+    return {
+      ok: false,
+      transport: true,
+      error: `独立请求校验失败: ${err.message}`,
+    };
+  } finally {
+    await requestContext.dispose().catch(() => {});
+    await cleanup().catch(() => {});
+  }
+}
+
+async function verifyRealSessionApi(context, options = {}) {
+  const attempts = Math.max(1, Number(options.attempts) || 3);
+  const delayMs = Math.max(0, Number(options.retryDelayMs ?? 400));
+  let last = {
+    ok: false,
+    error: "无法验证 session Cookie",
+  };
+  for (let i = 0; i < attempts; i += 1) {
+    last = await verifyRealSessionApiOnce(context);
+    if (last.ok || last.challenge || !last.transport) {
+      return last;
+    }
+    if (i < attempts - 1 && delayMs) {
+      await sleep(delayMs);
+    }
+  }
+  if (Array.isArray(options.cookieSpecs) && options.cookieSpecs.length) {
+    const fallback = await fetchSessionViaStandaloneRequest(
+      options.cookieSpecs,
+      options.proxy,
+    );
+    if (fallback.ok) {
+      fallback.fromStandalone = true;
+      return fallback;
+    }
+    if (!fallback.transport || fallback.challenge) {
+      return fallback;
+    }
+    last.error = `${last.error}；独立请求: ${fallback.error}`;
+  }
+  return last;
 }
 
 async function refreshSessionAccessToken(sessionRaw, options = {}) {
@@ -759,7 +892,12 @@ async function installChatGptSession(context, sessionRaw, options = {}) {
   if (injectResult.hasSessionToken && options.skipCookieVerify === true) {
     cookieVerified = true;
   } else if (injectResult.hasSessionToken) {
-    const apiCheck = await verifyRealSessionApi(context);
+    const apiCheck = await verifyRealSessionApi(context, {
+      attempts: options.verifyAttempts,
+      retryDelayMs: options.verifyRetryDelayMs,
+      cookieSpecs,
+      proxy: options.proxy || process.env.PROXY,
+    });
     if (apiCheck.ok) {
       cookieVerified = true;
       const email = apiCheck.data?.user?.email || "";
@@ -777,17 +915,16 @@ async function installChatGptSession(context, sessionRaw, options = {}) {
           console.log("[Session] 已通过 session-token 刷新 AccessToken");
         }
       }
-      console.log(`[Session] Cookie 校验通过${email ? `: ${email}` : ""}`);
-    } else if (
-      apiCheck.error &&
-      !/cloudflare|challenge|captcha/i.test(apiCheck.error)
-    ) {
-      throw new Error(
-        `${apiCheck.error}。请确认 Cookie 未过期，并尽量粘贴浏览器全部 chatgpt.com Cookies（cookies[] 或 cookieHeader）`,
+      console.log(
+        `[Session] Cookie 校验通过${email ? `: ${email}` : ""}${apiCheck.fromStandalone ? "（独立请求）" : ""}`,
+      );
+    } else if (apiCheck.challenge || apiCheck.transport) {
+      console.warn(
+        `[Session] Cookie 在线校验跳过: ${apiCheck.error || "unknown"}；将继续用已注入的 Cookie 打开页面`,
       );
     } else {
-      console.warn(
-        `[Session] Cookie 在线校验跳过: ${apiCheck.error || "unknown"}`,
+      throw new Error(
+        `${apiCheck.error}。请确认 Cookie 未过期，并尽量粘贴浏览器全部 chatgpt.com Cookies（cookies[] 或 cookieHeader）`,
       );
     }
   }
@@ -1416,6 +1553,7 @@ module.exports = {
   formatCookieHeader,
   expandSessionTokenCookies,
   isChallengeLike,
+  isTransportSessionFailure,
   isLoginRedirectUrl,
   isHardLoginRedirectUrl,
   isCheckoutPageUrl,

@@ -15,15 +15,25 @@ chromium.use(StealthPlugin());
 const DEFAULT_POOL_SIZE = 2;
 const BASE_PORT = Number(process.env.BROWSER_POOL_BASE_PORT || 19222);
 const ACQUIRE_TIMEOUT_MS = Number(process.env.BROWSER_POOL_ACQUIRE_TIMEOUT_MS || 180000);
+const STALE_MS = Math.max(
+    1,
+    Number(process.env.BROWSER_POOL_STALE_MS || 4 * 60 * 1000) || 4 * 60 * 1000
+);
+const STALE_SWEEP_MS = Math.max(
+    1,
+    Number(process.env.BROWSER_POOL_STALE_SWEEP_MS || 15000) || 15000
+);
 const MAX_POOL_SIZE = Math.min(48, Math.max(1, Number(process.env.BROWSER_POOL_MAX_SIZE || 24)));
 
 let runtimePoolSizeOverride = null;
 let runtimeEnabledOverride = null;
 
-/** @type {Array<{ slotId: number, port: number, cdpUrl: string, persistentContext: import('playwright').BrowserContext, inUse: boolean, jobKey: string|null, uses: number }>} */
+/** @type {Array<{ slotId: number, port: number, cdpUrl: string, persistentContext: import('playwright').BrowserContext, inUse: boolean, jobKey: string|null, uses: number, leaseId: number, acquiredAt: number, lastTouchedAt: number }>} */
 let slots = [];
 let initialized = false;
 let initPromise = null;
+let leaseSeq = 0;
+let staleTimer = null;
 /** @type {Array<{ jobKey: string, resolve: Function, reject: Function, timer: NodeJS.Timeout }>} */
 let waitQueue = [];
 
@@ -160,6 +170,9 @@ async function warmSlot(slotId) {
         inUse: false,
         jobKey: null,
         uses: 0,
+        leaseId: 0,
+        acquiredAt: 0,
+        lastTouchedAt: 0,
         createdAt: Date.now()
     };
 }
@@ -192,8 +205,10 @@ async function initBrowserPool() {
         slots = created;
         initialized = created.length > 0;
         if (!initialized) {
+            stopStaleWatch();
             console.warn('[BrowserPool] 无可用槽位，任务将回退为每次冷启动浏览器');
         } else {
+            startStaleWatch();
             console.log(`[BrowserPool] 预热完成 ${created.length}/${size} 个槽位`);
         }
         return { enabled: initialized, size: created.length };
@@ -214,6 +229,7 @@ function getStats() {
         maxPoolSize: MAX_POOL_SIZE,
         basePort: BASE_PORT,
         acquireTimeoutMs: ACQUIRE_TIMEOUT_MS,
+        staleMs: STALE_MS,
         size: slots.length,
         idle: slots.filter((s) => !s.inUse).length,
         busy: slots.filter((s) => s.inUse).length,
@@ -225,6 +241,9 @@ function getStats() {
             inUse: s.inUse,
             jobKey: s.jobKey,
             uses: s.uses,
+            leaseId: s.leaseId || 0,
+            acquiredAt: s.acquiredAt || 0,
+            lastTouchedAt: s.lastTouchedAt || 0,
             cdpUrl: s.cdpUrl
         }))
     };
@@ -284,14 +303,26 @@ function setRuntimePoolSize(size) {
     return n;
 }
 
-function releaseSlot(slotId) {
-    const slot = slots.find((s) => s.slotId === slotId);
-    if (!slot) {
-        return;
-    }
-    slot.inUse = false;
-    slot.jobKey = null;
+function reservationFrom(slot) {
+    return {
+        slotId: slot.slotId,
+        cdpUrl: slot.cdpUrl,
+        port: slot.port,
+        leaseId: slot.leaseId
+    };
+}
 
+function markBusy(slot, jobKey) {
+    slot.inUse = true;
+    slot.jobKey = jobKey || '';
+    slot.uses += 1;
+    slot.leaseId = ++leaseSeq;
+    slot.acquiredAt = Date.now();
+    slot.lastTouchedAt = Date.now();
+    return reservationFrom(slot);
+}
+
+function assignNextWaiter() {
     if (!waitQueue.length) {
         return;
     }
@@ -301,14 +332,88 @@ function releaseSlot(slotId) {
     }
     const next = waitQueue.shift();
     clearTimeout(next.timer);
-    free.inUse = true;
-    free.jobKey = next.jobKey;
-    free.uses += 1;
-    next.resolve({
-        slotId: free.slotId,
-        cdpUrl: free.cdpUrl,
-        port: free.port
-    });
+    next.resolve(markBusy(free, next.jobKey));
+}
+
+function releaseSlot(slotId, leaseId) {
+    const slot = slots.find((s) => s.slotId === slotId);
+    if (!slot || !slot.inUse) {
+        return false;
+    }
+    if (leaseId != null && Number(slot.leaseId) !== Number(leaseId)) {
+        return false;
+    }
+    slot.inUse = false;
+    slot.jobKey = null;
+    slot.leaseId = 0;
+    slot.acquiredAt = 0;
+    slot.lastTouchedAt = 0;
+    assignNextWaiter();
+    return true;
+}
+
+function releaseSlotByJobKey(jobKey) {
+    const key = String(jobKey || '').trim();
+    if (!key) {
+        return false;
+    }
+    const slot = slots.find((s) => s.inUse && s.jobKey === key);
+    if (!slot) {
+        return false;
+    }
+    return releaseSlot(slot.slotId, slot.leaseId);
+}
+
+function touchJob(jobKey) {
+    const key = String(jobKey || '').trim();
+    if (!key) {
+        return false;
+    }
+    const slot = slots.find((s) => s.inUse && s.jobKey === key);
+    if (!slot) {
+        return false;
+    }
+    slot.lastTouchedAt = Date.now();
+    return true;
+}
+
+function reclaimStaleSlots(now = Date.now()) {
+    let reclaimed = 0;
+    for (const slot of [...slots]) {
+        if (!slot.inUse) {
+            continue;
+        }
+        const touched = Number(slot.lastTouchedAt || slot.acquiredAt || 0);
+        if (!touched || now - touched < STALE_MS) {
+            continue;
+        }
+        console.warn(
+            `[BrowserPool] 回收超时槽位 slot-${slot.slotId} job=${slot.jobKey || '-'} idle=${Math.round((now - touched) / 1000)}s`
+        );
+        if (releaseSlot(slot.slotId, slot.leaseId)) {
+            reclaimed += 1;
+        }
+    }
+    return reclaimed;
+}
+
+function stopStaleWatch() {
+    if (staleTimer) {
+        clearInterval(staleTimer);
+        staleTimer = null;
+    }
+}
+
+function startStaleWatch() {
+    stopStaleWatch();
+    staleTimer = setInterval(() => {
+        try {
+            reclaimStaleSlots();
+        } catch (_) { /* ignore */ }
+    }, STALE_SWEEP_MS);
+    if (typeof staleTimer.unref === 'function') {
+        staleTimer.unref();
+    }
 }
 
 function acquireSlot(jobKey) {
@@ -317,16 +422,10 @@ function acquireSlot(jobKey) {
             resolve(null);
             return;
         }
+        reclaimStaleSlots();
         const free = slots.find((s) => !s.inUse);
         if (free) {
-            free.inUse = true;
-            free.jobKey = jobKey || '';
-            free.uses += 1;
-            resolve({
-                slotId: free.slotId,
-                cdpUrl: free.cdpUrl,
-                port: free.port
-            });
+            resolve(markBusy(free, jobKey || ''));
             return;
         }
 
@@ -357,7 +456,7 @@ async function withBrowserSlot(jobKey, fn) {
     try {
         return await fn(slot);
     } finally {
-        releaseSlot(slot.slotId);
+        releaseSlot(slot.slotId, slot.leaseId);
     }
 }
 
@@ -382,7 +481,7 @@ async function withBrowserContext(jobKey, contextOptions, fn) {
         if (context) {
             await context.close().catch(() => {});
         }
-        releaseSlot(reservation.slotId);
+        releaseSlot(reservation.slotId, reservation.leaseId);
     }
 }
 
@@ -400,6 +499,7 @@ function buildPoolEnv(slot) {
 }
 
 async function shutdownBrowserPool() {
+    stopStaleWatch();
     for (const waiter of waitQueue) {
         clearTimeout(waiter.timer);
         waiter.reject(new Error('浏览器池正在关闭'));
@@ -429,6 +529,9 @@ module.exports = {
     getDetailedStats,
     isEnabled,
     acquireSlot,
+    releaseSlotByJobKey,
+    touchJob,
+    reclaimStaleSlots,
     releaseSlot,
     formatBytes,
     MAX_POOL_SIZE
