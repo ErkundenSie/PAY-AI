@@ -244,6 +244,8 @@ function registerPublicRoutes(app, deps) {
         await ensureStoreReady();
         const body = { ...(req.body || {}) };
         delete body.card_id;
+        delete body.card_group_id;
+        delete body.cardGroupId;
         const result = await startPublicCheckoutPay(
           {
             ...body,

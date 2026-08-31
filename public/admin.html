@@ -3076,6 +3076,108 @@
         min-width: 128px;
       }
 
+      #proxies table {
+        table-layout: fixed;
+        width: 100%;
+      }
+
+      #proxies th,
+      #proxies td {
+        padding: 6px 6px;
+        white-space: nowrap;
+        letter-spacing: 0;
+        text-transform: none;
+        overflow: hidden;
+      }
+
+      #proxies th.select-header,
+      #proxies td.select-cell {
+        width: 40px;
+        min-width: 40px;
+        max-width: 40px;
+        text-align: center;
+      }
+
+      #proxies th:nth-child(2),
+      #proxies td:nth-child(2) {
+        width: 52px;
+        text-align: center;
+      }
+
+      #proxies th:nth-child(3),
+      #proxies td:nth-child(3) {
+        width: 64px;
+        text-align: center;
+      }
+
+      #proxies th:nth-child(4),
+      #proxies td:nth-child(4) {
+        width: 118px;
+      }
+
+      #proxies th:nth-child(5),
+      #proxies td:nth-child(5) {
+        width: 58px;
+        text-align: center;
+      }
+
+      #proxies th:nth-child(6),
+      #proxies td:nth-child(6) {
+        width: 32px;
+        padding-left: 2px;
+        padding-right: 2px;
+        text-align: center;
+      }
+
+      #proxies th:nth-child(7),
+      #proxies td:nth-child(7),
+      #proxies .proxy-url-cell {
+        width: 34%;
+        max-width: 0;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      #proxies .proxy-url-cell:hover,
+      #proxies .proxy-url-cell:hover code {
+        color: var(--primary);
+      }
+
+      #proxies th:nth-child(8),
+      #proxies td:nth-child(8) {
+        width: 56px;
+        text-overflow: ellipsis;
+      }
+
+      #proxies th:nth-child(9),
+      #proxies td:nth-child(9) {
+        width: 44px;
+        text-align: center;
+      }
+
+      #proxies th:nth-child(10),
+      #proxies td:nth-child(10) {
+        width: 52px;
+        text-align: center;
+      }
+
+      #proxies th:nth-child(11),
+      #proxies td:nth-child(11) {
+        width: 40px;
+        text-align: center;
+      }
+
+      #proxies .proxy-url-cell code {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+      }
+
       #checkout_debug.page-view {
         max-width: none;
         width: 100%;
@@ -5305,7 +5407,9 @@
           <h1>代理池</h1>
           <p>
             本地开通、支付调试和「代充对接」都从这里取代理。支持 http(s) /
-            socks5，用户名可含 <code>{session}</code> 走 sticky
+            socks5，以及 <code>vless://</code> / <code>vmess://</code> /
+            <code>trojan://</code> / <code>ss://</code>（本机拉起 Xray 转
+            SOCKS 再给 Chromium）。用户名可含 <code>{session}</code> 走 sticky
             session。每次任务从「启用」项随机抽一条，不绑定浏览器槽位；池为空时本地直连、代充走平台池。检测结果仅作参考，关闭「启用」才不参与抽取。
           </p>
         </div>
@@ -5334,7 +5438,8 @@
 http://user:pass@host:port
 socks5://user:pass@host:port
 socks://user:pass@host:port#备注
-http://USER-session-{session}:PASS@proxy.example.com:1000"
+http://USER-session-{session}:PASS@proxy.example.com:1000
+vless://uuid@host:443?encryption=none&security=tls&type=tcp#备注"
           ></textarea>
           <div class="proxy-add-actions">
             <button
@@ -5462,16 +5567,16 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
               <thead>
                 <tr>
                   <th class="select-header">选择</th>
-                  <th width="72px" style="text-align: center">启用</th>
-                  <th width="96px" style="text-align: center">活跃检测</th>
-                  <th width="140px">出口 IP</th>
-                  <th width="88px" style="text-align: center">延迟</th>
-                  <th width="88px" style="text-align: center">协议</th>
+                  <th>启用</th>
+                  <th>活跃检测</th>
+                  <th>出口 IP</th>
+                  <th>延迟</th>
+                  <th>协议</th>
                   <th>代理地址</th>
-                  <th width="120px">分组</th>
-                  <th width="58px" style="text-align: center">编辑</th>
-                  <th width="76px" style="text-align: center">检测</th>
-                  <th width="58px" style="text-align: center">删除</th>
+                  <th>分组</th>
+                  <th>编辑</th>
+                  <th>检测</th>
+                  <th>删除</th>
                 </tr>
               </thead>
               <tbody id="proxy_pool_body">
@@ -6059,7 +6164,7 @@ http://USER-session-{session}:PASS@proxy.example.com:1000"
                       class="asset-input"
                       onchange="onCheckoutCardSourceChange()"
                     >
-                      <option value="pool">跟随系统（卡池自动选卡）</option>
+                      <option value="pool">随机（卡池随机选卡）</option>
                       <option value="manual">手动输入新卡片</option>
                     </select>
                   </div>

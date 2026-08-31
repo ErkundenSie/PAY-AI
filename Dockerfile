@@ -24,9 +24,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 \
     libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 \
     libxss1 libasound2 libpangocairo-1.0-0 libpango-1.0-0 \
-    libxshmfence1 xdg-utils procps \
+    libxshmfence1 xdg-utils procps unzip \
     libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
+
+ARG XRAY_VERSION=25.9.11
+RUN wget -qO /tmp/Xray-linux-64.zip \
+      "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip" \
+    && unzip -o /tmp/Xray-linux-64.zip xray -d /usr/local/bin \
+    && chmod +x /usr/local/bin/xray \
+    && rm -f /tmp/Xray-linux-64.zip \
+    && xray version
+ENV XRAY_BIN=/usr/local/bin/xray
 
 WORKDIR /app
 

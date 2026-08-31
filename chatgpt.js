@@ -390,6 +390,17 @@ function shouldFallbackFromPhpCheckout(parsed) {
   return true;
 }
 
+function isTransientProxyNetworkError(err) {
+  const text = String((err && err.message) || err || "");
+  return /Failed to fetch|ERR_TUNNEL_CONNECTION_FAILED|ERR_PROXY_CONNECTION_FAILED|ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|ERR_CONNECTION_TIMED_OUT|ERR_TIMED_OUT|ERR_EMPTY_RESPONSE|ERR_SOCKS|ERR_SSL_PROTOCOL_ERROR|net::ERR_|HTTP 599|aborted|ECONNRESET|ETIMEDOUT|tunnel|sentinel token missing/i.test(
+    text,
+  );
+}
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function buildCheckoutHeaders(accessToken, extra = {}) {
   const token = String(accessToken || "").trim();
   const profile = extractProfileFromToken(token);
@@ -576,10 +587,27 @@ async function ensureChatGptHome(page) {
     !currentUrl.startsWith("https://chatgpt.com") ||
     /about:blank|^chrome:\/\//i.test(currentUrl)
   ) {
-    await page.goto("https://chatgpt.com/#pricing", {
-      waitUntil: "domcontentloaded",
-      timeout: 60000,
-    });
+    let lastErr;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await page.goto("https://chatgpt.com/#pricing", {
+          waitUntil: "domcontentloaded",
+          timeout: 45000,
+        });
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        if (!isTransientProxyNetworkError(err) || attempt >= 3) {
+          throw err;
+        }
+        console.warn(
+          `[ChatGPT] 打开主页代理网络失败，重试 ${attempt}/3: ${String(err.message || err).slice(0, 120)}`,
+        );
+        await sleepMs(1500 * attempt);
+      }
+    }
+    if (lastErr) throw lastErr;
   }
   await openPersonalWorkspace(page);
 }
@@ -841,6 +869,8 @@ async function probePageSentinelEndpoint(page, path, body = {}) {
   return page
     .evaluate(
       async ({ path, body }) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 12000);
         try {
           const response = await fetch(path, {
             method: "POST",
@@ -850,6 +880,7 @@ async function probePageSentinelEndpoint(page, path, body = {}) {
               accept: "application/json",
             },
             body: JSON.stringify(body || {}),
+            signal: controller.signal,
           });
           const text = await response.text();
           let data = {};
@@ -875,6 +906,8 @@ async function probePageSentinelEndpoint(page, path, body = {}) {
             headerToken: "",
             error: String((err && err.message) || err),
           };
+        } finally {
+          clearTimeout(timer);
         }
       },
       { path, body },
@@ -1357,11 +1390,23 @@ class ChatGPTService {
       .catch(() => buildDefaultSentinelFingerprint({ sid: deviceId }));
     const reqBody = buildCheckoutSentinelReqBody(deviceId, fingerprint, flow);
     let challenge = null;
-    const probe = await probePageSentinelEndpoint(
-      page,
-      "/backend-api/sentinel/req",
-      reqBody,
-    );
+    let probe = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      probe = await probePageSentinelEndpoint(
+        page,
+        "/backend-api/sentinel/req",
+        reqBody,
+      );
+      if (probe?.status > 0 && !probe?.error) {
+        break;
+      }
+      if (attempt < 3) {
+        console.warn(
+          `[ChatGPT] sentinel/req 网络失败，重试 ${attempt}/3: HTTP ${probe?.status || 0}${probe?.error ? ` ${probe.error}` : ""}`,
+        );
+        await sleepMs(1500 * attempt);
+      }
+    }
 
     if (probe?.headerToken) {
       rememberSentinelToken(page, probe.headerToken);
@@ -1756,9 +1801,23 @@ class ChatGPTService {
         if (pageCheckoutFirst) {
           console.log("[ChatGPT] 先走 PHP 协议提链...");
           const savedCookies = await snapshotChatGptCookies(options.page);
-          parsed = await this.postPhpProtocolCheckout(options.page, payload, {
-            accountId,
-          });
+          parsed = { ok: false };
+          for (let attempt = 1; attempt <= 3; attempt += 1) {
+            parsed = await this.postPhpProtocolCheckout(options.page, payload, {
+              accountId,
+            });
+            if (parsed.ok) break;
+            if (
+              !isTransientProxyNetworkError(parsed.error) ||
+              attempt >= 3
+            ) {
+              break;
+            }
+            console.warn(
+              `[ChatGPT] PHP 协议提链网络失败，重试 ${attempt}/3: ${String(parsed.error || parsed.status).slice(0, 120)}`,
+            );
+            await sleepMs(1500 * attempt);
+          }
           if (!parsed.ok && shouldFallbackFromPhpCheckout(parsed)) {
             console.warn(
               `[ChatGPT] PHP 协议提链未过: ${String(parsed.error || parsed.status).slice(0, 120)}，改用原网页 Sentinel`,
@@ -1776,11 +1835,24 @@ class ChatGPTService {
               payload.openai_account_id = accountId;
               this.headers = buildCheckoutHeaders(this.token, { accountId });
             }
-            parsed = isCreditsCheckoutPayload(payload)
-              ? await this.postCheckoutViaPageFetch(options.page, payload)
-              : await this.postCheckoutRequest(payload, options.page, {
-                  forcePage: true,
-                });
+            for (let attempt = 1; attempt <= 3; attempt += 1) {
+              parsed = isCreditsCheckoutPayload(payload)
+                ? await this.postCheckoutViaPageFetch(options.page, payload)
+                : await this.postCheckoutRequest(payload, options.page, {
+                    forcePage: true,
+                  });
+              if (parsed.ok) break;
+              if (
+                !isTransientProxyNetworkError(parsed.error) ||
+                attempt >= 3
+              ) {
+                break;
+              }
+              console.warn(
+                `[ChatGPT] 网页 Checkout 网络失败，重试 ${attempt}/3: ${String(parsed.error || parsed.status).slice(0, 120)}`,
+              );
+              await sleepMs(1500 * attempt);
+            }
           }
         } else {
           parsed = await this.postCheckoutRequest(payload, null);

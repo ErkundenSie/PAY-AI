@@ -3,6 +3,11 @@
 const crypto = require("crypto");
 const axios = require("axios");
 const { ProxyAgent } = require("proxy-agent");
+const {
+  isXrayShareLink,
+  parseShareLink,
+  startXrayRelay,
+} = require("./xray-relay");
 
 const PROBE_URLS = [
   "https://api.ipify.org/?format=text",
@@ -30,6 +35,7 @@ function normalizeProxyUrl(rawProxy) {
   }
 
   proxyUrl = proxyUrl.replace(/^socks:\/\//i, "socks5://");
+  if (isXrayShareLink(proxyUrl)) return proxyUrl;
 
   try {
     const parsed = new URL(proxyUrl);
@@ -68,6 +74,13 @@ function hashProxyUrl(url) {
 
 function parseProxyMeta(url) {
   try {
+    if (isXrayShareLink(url)) {
+      const parsed = parseShareLink(String(url || "").trim());
+      return {
+        protocol: parsed.protocol || "",
+        host: parsed.host || "",
+      };
+    }
     const parsed = new URL(normalizeProxyUrl(url));
     return {
       protocol: String(parsed.protocol || "")
@@ -112,58 +125,78 @@ async function testProxyUrl(raw, options = {}) {
     return { ok: false, error: "代理 URL 为空", latencyMs: 0 };
   }
 
-  let agent;
+  let relayCleanup = async () => {};
+  let probeProxyUrl = proxyUrl;
   try {
-    agent = new ProxyAgent({ getProxyForUrl: () => proxyUrl });
-  } catch (error) {
-    return {
-      ok: false,
-      error: `代理 URL 解析失败: ${error.message}`,
-      latencyMs: Date.now() - t0,
-    };
-  }
+    if (isXrayShareLink(proxyUrl) || isXrayShareLink(String(raw || "").trim())) {
+      const relay = await startXrayRelay(
+        isXrayShareLink(proxyUrl) ? proxyUrl : String(raw || "").trim(),
+      );
+      probeProxyUrl = relay.localProxyUrl;
+      relayCleanup = relay.cleanup;
+    }
 
-  const timeout = Math.max(1500, Number(options.timeoutMs) || 5000);
-  const probes = PROBE_URLS.map(async (probeUrl) => {
-    const response = await axios.get(probeUrl, {
-      httpsAgent: agent,
-      httpAgent: agent,
-      proxy: false,
-      timeout,
-      maxRedirects: 2,
-      validateStatus: () => true,
+    let agent;
+    try {
+      agent = new ProxyAgent({ getProxyForUrl: () => probeProxyUrl });
+    } catch (error) {
+      return {
+        ok: false,
+        error: `代理 URL 解析失败: ${error.message}`,
+        latencyMs: Date.now() - t0,
+      };
+    }
+
+    const timeout = Math.max(1500, Number(options.timeoutMs) || 8000);
+    const probes = PROBE_URLS.map(async (probeUrl) => {
+      const response = await axios.get(probeUrl, {
+        httpsAgent: agent,
+        httpAgent: agent,
+        proxy: false,
+        timeout,
+        maxRedirects: 2,
+        validateStatus: () => true,
+      });
+      if (response.status !== 200) {
+        throw new Error(`HTTP ${response.status} via ${probeUrl}`);
+      }
+      const ip = String(response.data || "")
+        .trim()
+        .split(/\s+/)[0];
+      if (!ip) {
+        throw new Error(`empty response via ${probeUrl}`);
+      }
+      return {
+        ok: true,
+        ip,
+        latencyMs: Date.now() - t0,
+        probedVia: probeUrl,
+      };
     });
-    if (response.status !== 200) {
-      throw new Error(`HTTP ${response.status} via ${probeUrl}`);
-    }
-    const ip = String(response.data || "")
-      .trim()
-      .split(/\s+/)[0];
-    if (!ip) {
-      throw new Error(`empty response via ${probeUrl}`);
-    }
-    return {
-      ok: true,
-      ip,
-      latencyMs: Date.now() - t0,
-      probedVia: probeUrl,
-    };
-  });
 
-  try {
-    return await Promise.any(probes);
+    try {
+      return await Promise.any(probes);
+    } catch (error) {
+      const details = Array.isArray(error?.errors)
+        ? error.errors
+            .map((item) => String(item?.message || item || "").trim())
+            .filter(Boolean)
+            .join("; ")
+        : String(error?.message || "").trim();
+      return {
+        ok: false,
+        error: details || "未知错误",
+        latencyMs: Date.now() - t0,
+      };
+    }
   } catch (error) {
-    const details = Array.isArray(error?.errors)
-      ? error.errors
-          .map((item) => String(item?.message || item || "").trim())
-          .filter(Boolean)
-          .join("; ")
-      : String(error?.message || "").trim();
     return {
       ok: false,
-      error: details || "未知错误",
+      error: String(error?.message || error || "未知错误"),
       latencyMs: Date.now() - t0,
     };
+  } finally {
+    await relayCleanup().catch(() => {});
   }
 }
 

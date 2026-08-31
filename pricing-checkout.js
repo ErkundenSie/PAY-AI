@@ -833,6 +833,13 @@ async function waitForPricingModal(page, timeoutMs = 12000) {
   return false;
 }
 
+function isTransientProxyNetworkError(err) {
+  const text = String((err && err.message) || err || "");
+  return /Failed to fetch|ERR_TUNNEL_CONNECTION_FAILED|ERR_PROXY_CONNECTION_FAILED|ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|ERR_CONNECTION_TIMED_OUT|ERR_TIMED_OUT|ERR_EMPTY_RESPONSE|ERR_SOCKS|ERR_SSL_PROTOCOL_ERROR|net::ERR_|HTTP 599|aborted|ECONNRESET|ETIMEDOUT|tunnel/i.test(
+    text,
+  );
+}
+
 async function waitForPricingPage(page, timeout = 60000) {
   if (await waitForPricingModal(page, 1500)) {
     console.log(
@@ -846,7 +853,23 @@ async function waitForPricingPage(page, timeout = 60000) {
     if (await hasVisibleLoginChrome(page).catch(() => false)) {
       throw new Error("Session 未生效：定价页显示登录界面");
     }
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout });
+    let opened = false;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout });
+        opened = true;
+        break;
+      } catch (err) {
+        if (!isTransientProxyNetworkError(err) || attempt >= 3) {
+          throw err;
+        }
+        console.warn(
+          `[定价页] 代理网络失败，重试 ${attempt}/3: ${String(err.message || err).slice(0, 120)}`,
+        );
+        await page.waitForTimeout(1500 * attempt);
+      }
+    }
+    if (!opened) continue;
     lastUrl = page.url();
     await clearHumanVerification(page, {
       phase: "pricing-page",

@@ -1,7 +1,13 @@
 "use strict";
 
 const axios = require("axios");
-const { testProxyUrl, mapWithConcurrency } = require("../proxy-pool");
+const {
+  testProxyUrl,
+  mapWithConcurrency,
+  normalizeProxyUrl,
+  parseProxyMeta,
+} = require("../proxy-pool");
+const { isXrayShareLink, parseShareLink } = require("../xray-relay");
 
 describe("testProxyUrl", () => {
   afterEach(() => {
@@ -44,5 +50,33 @@ describe("mapWithConcurrency", () => {
     });
     expect(results).toEqual([2, 4, 6, 8]);
     expect(maxActive).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("xray share links", () => {
+  const vless =
+    "vless://550e8400-e29b-41d4-a716-446655440000@example.com:443?encryption=none&security=reality&type=tcp&flow=xtls-rprx-vision&pbk=PUBLIC&sid=ab&sni=www.example.com&fp=chrome#note";
+
+  it("keeps vless UUID intact", () => {
+    expect(isXrayShareLink(vless)).toBe(true);
+    expect(normalizeProxyUrl(vless)).toBe(
+      "vless://550e8400-e29b-41d4-a716-446655440000@example.com:443?encryption=none&security=reality&type=tcp&flow=xtls-rprx-vision&pbk=PUBLIC&sid=ab&sni=www.example.com&fp=chrome",
+    );
+    expect(parseProxyMeta(vless)).toEqual({
+      protocol: "vless",
+      host: "example.com",
+    });
+  });
+
+  it("parses vless reality outbound", () => {
+    const parsed = parseShareLink(vless);
+    expect(parsed.outbound.protocol).toBe("vless");
+    expect(parsed.outbound.settings.vnext[0].users[0].id).toBe(
+      "550e8400-e29b-41d4-a716-446655440000",
+    );
+    expect(parsed.outbound.streamSettings.security).toBe("reality");
+    expect(parsed.outbound.streamSettings.realitySettings.publicKey).toBe(
+      "PUBLIC",
+    );
   });
 });

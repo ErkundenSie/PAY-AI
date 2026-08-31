@@ -731,9 +731,9 @@
           const loginPath = response.headers.get("X-Admin-Login-Path");
           if (loginPath && loginPath.startsWith("/")) {
             adminLoginPath = loginPath;
+            redirectToLogin();
+            throw new Error("登录已失效");
           }
-          redirectToLogin();
-          throw new Error("登录已失效");
         }
         return response;
       }
@@ -4148,15 +4148,15 @@
                               <td id="proxy_ip_${item.id}">${ipCell}</td>
                               <td style="text-align:center;" id="proxy_lat_${item.id}">${latency}</td>
                               <td style="text-align:center;"><code>${escapeHtml(item.protocol || "-")}</code></td>
-                              <td><code style="font-size:12px; word-break:break-all;">${escapeHtml(item.proxy_url || "")}</code></td>
+                              <td class="proxy-url-cell" onclick="copySavedProxyUrl(${item.id})"><code>${escapeHtml(formatProxyUrlPreview(item))}</code></td>
                               <td>${escapeHtml(proxyGroupLabel(item))}</td>
                               <td style="text-align:center;">
-                                <button type="button" class="btn btn-secondary" style="min-width:32px; padding:6px 8px; justify-content:center;" onclick="editSavedProxy(${item.id})" title="编辑代理">
+                                <button type="button" class="btn btn-secondary" style="min-width:0;width:32px;padding:0;justify-content:center;" onclick="editSavedProxy(${item.id})" title="编辑代理">
                                   <i data-lucide="pencil"></i>
                                 </button>
                               </td>
                               <td style="text-align:center;">
-                                <button type="button" class="btn btn-secondary" style="min-width:58px; padding:4px 10px; font-size:12px; justify-content:center;" onclick="testSavedProxy(${item.id})">检测</button>
+                                <button type="button" class="btn btn-secondary" style="min-width:0;padding:4px 8px;font-size:12px;justify-content:center;" onclick="testSavedProxy(${item.id})">检测</button>
                               </td>
                               <td style="text-align:center;">
                                   <button type="button" class="btn-delete" onclick="deleteSavedProxy(${item.id})" title="删除">
@@ -4645,6 +4645,38 @@
           `检测完成：活跃 ${okCount} / 共 ${total}`,
           okCount ? "success" : "warning",
         );
+      }
+
+      function formatProxyUrlPreview(item) {
+        const raw = String(item?.proxy_url || "").trim();
+        const protocol = String(item?.protocol || "").trim();
+        const host = String(item?.host || "").trim();
+        try {
+          const parsed = new URL(raw);
+          const scheme =
+            String(parsed.protocol || "")
+              .replace(":", "")
+              .toLowerCase() || protocol;
+          const hostname = parsed.hostname || host;
+          const port = parsed.port ? `:${parsed.port}` : "";
+          if (hostname) return `${scheme}://${hostname}${port}`;
+        } catch (_) {
+          /* vmess/ss 等非标准 URL */
+        }
+        if (protocol && host) return `${protocol}://${host}`;
+        return raw.length > 42 ? `${raw.slice(0, 42)}…` : raw || "-";
+      }
+
+      function copySavedProxyUrl(id) {
+        const item = proxyPoolList.find((row) => Number(row.id) === Number(id));
+        const url = String(item?.proxy_url || "").trim();
+        if (!url) {
+          showMessage("代理地址为空", "warning");
+          return;
+        }
+        copyTextToClipboard(url)
+          .then(() => showMessage("代理节点已复制", "success"))
+          .catch((error) => showMessage(error.message || "复制失败", "error"));
       }
 
       function toggleProxySelection(id, checked) {
@@ -5246,6 +5278,31 @@
             cdkCreate.value = current;
           }
         }
+        const checkoutCard = document.getElementById("checkout_card_source");
+        if (checkoutCard) {
+          const current = checkoutCard.value || "pool";
+          checkoutCard.innerHTML = [
+            '<option value="pool">随机（卡池随机选卡）</option>',
+            ...cardGroupList.map(
+              (group) =>
+                `<option value="group:${escapeHtml(String(group.id))}">${escapeHtml(group.name)}（${Number(group.card_count || 0)}）</option>`,
+            ),
+            '<option value="manual">手动输入新卡片</option>',
+          ].join("");
+          const next =
+            current === "manual" ||
+            current === "pool" ||
+            String(current).startsWith("group:")
+              ? current
+              : "pool";
+          checkoutCard.value = [...checkoutCard.options].some(
+            (option) => option.value === next,
+          )
+            ? next
+            : "pool";
+          onCheckoutCardSourceChange();
+        }
+        enhanceAssetSelects();
       }
 
       function handleCardGroupFilter(value) {
@@ -8439,30 +8496,7 @@
       }
 
       async function loadCheckoutDebugCards() {
-        const sel = document.getElementById("checkout_card_source");
-        if (!sel) return;
-        const current = sel.value || "pool";
-        let options = '<option value="pool">跟随系统（卡池自动选卡）</option>';
-        try {
-          const res = await authFetch("/api/admin/cards/options");
-          const data = await res.json();
-          const cards = Array.isArray(data.cards) ? data.cards : [];
-          options += cards
-            .map((card) => {
-              const last4 = String(card.last4 || "").slice(-4);
-              const holder = card.payment_holder_name || card.card_holder || "";
-              const label = `#${card.id} **** ${last4}${holder ? ` / ${holder}` : ""}`;
-              return `<option value="id:${card.id}">${escapeHtml(label)}</option>`;
-            })
-            .join("");
-        } catch (_) {
-          /* keep pool */
-        }
-        options += '<option value="manual">手动输入新卡片</option>';
-        sel.innerHTML = options;
-        if ([...sel.options].some((opt) => opt.value === current)) {
-          sel.value = current;
-        }
+        await loadCardGroupList();
         onCheckoutCardSourceChange();
       }
 
@@ -8739,9 +8773,9 @@
                     if (checkoutUrl) requestBody.checkout_url = checkoutUrl;
                   }
                   if (isPayment && cardChoice && cardChoice.source) {
-                    if (String(cardChoice.source).startsWith("id:")) {
-                      requestBody.card_id = Number(
-                        String(cardChoice.source).slice(3),
+                    if (String(cardChoice.source).startsWith("group:")) {
+                      requestBody.card_group_id = Number(
+                        String(cardChoice.source).slice(6),
                       );
                     } else if (cardChoice.source === "manual") {
                       requestBody.card_manual = String(

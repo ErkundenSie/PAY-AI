@@ -1374,7 +1374,7 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
     });
     if (!verification.ok) {
       return {
-        status: 401,
+        status: 400,
         payload: {
           success: false,
           error: "Session 无法通过 OpenAI 服务验证，请确认有效后重试",
@@ -1399,6 +1399,7 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
   }
 
   let preferredCardId = requireManualPayment ? 0 : Number(body.card_id || 0);
+  let cardGroupId = null;
   let manualCard = null;
   let manualAddress = null;
   try {
@@ -1428,6 +1429,23 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
           status: 400,
           payload: { success: false, error: "指定卡片当前不可用" },
         };
+      }
+    } else if (!requireManualPayment) {
+      const rawGroup = body.card_group_id ?? body.cardGroupId ?? "";
+      if (
+        rawGroup !== "" &&
+        rawGroup != null &&
+        String(rawGroup) !== "all" &&
+        String(rawGroup) !== "pool"
+      ) {
+        const group = await store.getCardGroupById(rawGroup);
+        if (!group) {
+          return {
+            status: 400,
+            payload: { success: false, error: "银行卡分组不存在" },
+          };
+        }
+        cardGroupId = Number(group.id);
       }
     }
     if (requireManualPayment || body.address) {
@@ -1467,13 +1485,15 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
     };
   }
 
-  if (!manualCard && !preferredCardId && !(await store.hasAvailableCard())) {
+  if (!manualCard && !preferredCardId && !(await store.hasAvailableCard(cardGroupId))) {
     return {
       status: 409,
       payload: {
         success: false,
         error: isAdminDebug
-          ? "银行卡池暂无可用卡片，请先在后台「银行卡池」导入银行卡后再试"
+          ? cardGroupId
+            ? "当前银行卡分组暂无可用卡片"
+            : "银行卡池暂无可用卡片，请先在后台「银行卡池」导入银行卡后再试"
           : "请先填写银行卡信息后再试",
       },
     };
@@ -1509,7 +1529,7 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
   );
   logTask(
     task.jobKey,
-    `${taskLabel}任务已创建 plan=${planType} plan_name=${resolvedPlanName}${creditQuantity ? ` credits=${creditQuantity}` : ""} region=${regionCode} email=${email || "-"} mode=${checkoutMode}${checkoutUrl ? " checkout_url=yes" : ""} cancel_auto_renew=${cancelAutoRenew ? "yes" : "no"}`,
+    `${taskLabel}任务已创建 plan=${planType} plan_name=${resolvedPlanName}${creditQuantity ? ` credits=${creditQuantity}` : ""} region=${regionCode} email=${email || "-"} mode=${checkoutMode}${checkoutUrl ? " checkout_url=yes" : ""} cancel_auto_renew=${cancelAutoRenew ? "yes" : "no"} card_group=${cardGroupId || "all"}`,
   );
   reserveForegroundSlot(task.jobKey);
   spawnCheckoutPaymentWorker({
@@ -1522,6 +1542,7 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
     creditQuantity,
     email,
     preferredCardId,
+    cardGroupId,
     manualCard,
     manualAddress,
     taskLabel,
@@ -4439,6 +4460,7 @@ function spawnCheckoutPaymentWorker({
   planNameOverride,
   email,
   preferredCardId = 0,
+  cardGroupId = null,
   manualCard = null,
   manualAddress = null,
   taskLabel = "付款调试",
@@ -4478,6 +4500,7 @@ function spawnCheckoutPaymentWorker({
         ACTIVATION_EMAIL: email || "",
         PROXY: proxy,
         PAYMENT_CARD_ID: preferredCardId ? String(preferredCardId) : "",
+        PAYMENT_CARD_GROUP_ID: cardGroupId ? String(cardGroupId) : "",
         PAYMENT_CARD_MANUAL: manualCard ? JSON.stringify(manualCard) : "",
         PAYMENT_ADDRESS_MANUAL: manualAddress
           ? JSON.stringify(manualAddress)

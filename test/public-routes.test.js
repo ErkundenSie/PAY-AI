@@ -138,9 +138,11 @@ describe("public routes", () => {
     const res = await request(app, "POST", "/api/public/checkout/pay", {
       session: "token",
       card_id: 99,
+      card_group_id: 7,
     });
     expect(res.status).toBe(200);
     expect(received.card_id).toBeUndefined();
+    expect(received.card_group_id).toBeUndefined();
     expect(received.cdk_code).toBe("KC-PUBLIC");
   });
 

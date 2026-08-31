@@ -768,7 +768,11 @@ async function run() {
     const stripeSessionId = checkoutResult?.sessionId || null;
     let accessToken = loginInfo.session?.accessToken || CONFIG.chatgptToken;
     let cardGroupId = null;
-    if (cdkCode) {
+    const envCardGroupId = Number(process.env.PAYMENT_CARD_GROUP_ID || 0);
+    if (envCardGroupId > 0) {
+      cardGroupId = envCardGroupId;
+      console.log(`[Info] 任务指定银行卡分组: ${cardGroupId}`);
+    } else if (cdkCode) {
       try {
         const cdkDetails = await store.verifyCdkDetails(cdkCode);
         if (cdkDetails?.card_group_id) {

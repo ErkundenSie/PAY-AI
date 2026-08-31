@@ -2,6 +2,7 @@
 
 const ProxyChain = require("proxy-chain");
 const { normalizeProxyUrl } = require("./proxy-pool");
+const { isXrayShareLink, startXrayRelay } = require("./xray-relay");
 
 function maskProxyUrl(url) {
   return String(url || "").replace(/\/\/([^:@/]+):([^@/]+)@/i, "//$1:***@");
@@ -35,6 +36,25 @@ async function preparePlaywrightProxy(proxyValue) {
   const raw = normalizeProxyUrl(proxyValue);
   if (!raw) {
     return { proxyConfig: null, cleanup: async () => {} };
+  }
+
+  if (isXrayShareLink(raw) || isXrayShareLink(String(proxyValue || "").trim())) {
+    const shareLink = isXrayShareLink(raw)
+      ? raw
+      : String(proxyValue || "").trim();
+    const relay = await startXrayRelay(shareLink);
+    const inner = await preparePlaywrightProxy(relay.localProxyUrl);
+    return {
+      proxyConfig: inner.proxyConfig,
+      relayed: true,
+      cleanup: async () => {
+        try {
+          await inner.cleanup();
+        } finally {
+          await relay.cleanup();
+        }
+      },
+    };
   }
 
   let parsed;
