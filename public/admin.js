@@ -4607,33 +4607,44 @@
           return;
         }
         const ids = proxyPoolList.map((item) => item.id);
-        try {
-          showMessage(`正在检测 ${ids.length} 条代理...`, "success");
-          const res = await authFetch("/api/admin/proxy/test", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ids, persist: true }),
-          });
-          const data = await res.json();
-          if (!res.ok || !data.success) {
-            throw new Error(data.message || "批量检测失败");
-          }
-          const results = Array.isArray(data.results) ? data.results : [];
-          let okCount = 0;
-          results.forEach((result) => {
-            if (result.id) {
-              applyProxyTestResultToRow(result.id, result);
+        const total = ids.length;
+        let cursor = 0;
+        let okCount = 0;
+        let done = 0;
+        showMessage(`正在检测 ${total} 条代理...`, "success");
+        const worker = async () => {
+          while (cursor < ids.length) {
+            const id = ids[cursor];
+            cursor += 1;
+            try {
+              const res = await authFetch(`/api/admin/proxies/${id}/test`, {
+                method: "POST",
+              });
+              const data = await res.json();
+              if (!res.ok || !data.success) {
+                throw new Error(data.error || data.message || "检测失败");
+              }
+              applyProxyTestResultToRow(id, data);
+              if (data.ok) okCount += 1;
+            } catch (error) {
+              applyProxyTestResultToRow(id, {
+                ok: false,
+                error: error.message || "检测失败",
+              });
             }
-            if (result.ok) okCount += 1;
-          });
-          showMessage(
-            `检测完成：活跃 ${okCount} / 共 ${results.length}`,
-            okCount ? "success" : "warning",
-          );
-          renderProxyPoolTable();
-        } catch (error) {
-          showMessage(error.message || "批量检测失败", "error");
-        }
+            done += 1;
+            if (done === total || done % 4 === 0) {
+              showMessage(`检测中 ${done}/${total}，活跃 ${okCount}`, "success");
+            }
+          }
+        };
+        await Promise.all(
+          Array.from({ length: Math.min(6, total) }, () => worker()),
+        );
+        showMessage(
+          `检测完成：活跃 ${okCount} / 共 ${total}`,
+          okCount ? "success" : "warning",
+        );
       }
 
       function toggleProxySelection(id, checked) {

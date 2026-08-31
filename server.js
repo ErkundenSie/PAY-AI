@@ -35,7 +35,7 @@ const {
   clearCheckoutChoice,
 } = require("./checkout-choice");
 const taxFreeAddress = require("./tax-free-address");
-const { testProxyUrl, normalizeProxyLines } = require("./proxy-pool");
+const { testProxyUrl, normalizeProxyLines, mapWithConcurrency } = require("./proxy-pool");
 const {
   extractSessionPreview,
   extractAccessTokenFromRaw,
@@ -2298,19 +2298,17 @@ app.post("/api/admin/proxy/test", authenticateAdmin, async (req, res) => {
         .json({ success: false, message: "一次最多测试 50 条代理" });
     }
 
-    const results = await Promise.all(
-      targets.map(async (target) => {
-        const result = await testProxyUrl(target.proxy_url);
-        if (persist && target.id) {
-          await store.updateProxyAssetCheck(target.id, result);
-        }
-        return {
-          id: target.id,
-          proxy_url: target.proxy_url,
-          ...result,
-        };
-      }),
-    );
+    const results = await mapWithConcurrency(targets, 8, async (target) => {
+      const result = await testProxyUrl(target.proxy_url);
+      if (persist && target.id) {
+        await store.updateProxyAssetCheck(target.id, result);
+      }
+      return {
+        id: target.id,
+        proxy_url: target.proxy_url,
+        ...result,
+      };
+    });
 
     return res.json({ success: true, results });
   } catch (error) {

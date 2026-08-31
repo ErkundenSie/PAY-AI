@@ -87,6 +87,24 @@ function normalizeProxyLines(input) {
   return [...new Set(lines.map(normalizeProxyUrl).filter(Boolean))];
 }
 
+async function mapWithConcurrency(items, limit, mapper) {
+  const list = Array.isArray(items) ? items : [];
+  const concurrency = Math.max(1, Math.min(Number(limit) || 1, list.length || 1));
+  const results = new Array(list.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < list.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await mapper(list[index], index);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, list.length) }, () => worker()),
+  );
+  return results;
+}
+
 async function testProxyUrl(raw, options = {}) {
   const proxyUrl = substituteProxySession(normalizeProxyUrl(raw));
   const t0 = Date.now();
@@ -105,39 +123,48 @@ async function testProxyUrl(raw, options = {}) {
     };
   }
 
-  const timeout = Math.max(3000, Number(options.timeoutMs) || 12000);
-  let lastErr = "";
-  for (const probeUrl of PROBE_URLS) {
-    try {
-      const response = await axios.get(probeUrl, {
-        httpsAgent: agent,
-        httpAgent: agent,
-        proxy: false,
-        timeout,
-        validateStatus: () => true,
-      });
-      if (response.status === 200) {
-        const ip = String(response.data || "")
-          .trim()
-          .split(/\s+/)[0];
-        return {
-          ok: true,
-          ip,
-          latencyMs: Date.now() - t0,
-          probedVia: probeUrl,
-        };
-      }
-      lastErr = `HTTP ${response.status} via ${probeUrl}`;
-    } catch (error) {
-      lastErr = `${error.code || ""} ${error.message}`.trim();
+  const timeout = Math.max(1500, Number(options.timeoutMs) || 5000);
+  const probes = PROBE_URLS.map(async (probeUrl) => {
+    const response = await axios.get(probeUrl, {
+      httpsAgent: agent,
+      httpAgent: agent,
+      proxy: false,
+      timeout,
+      maxRedirects: 2,
+      validateStatus: () => true,
+    });
+    if (response.status !== 200) {
+      throw new Error(`HTTP ${response.status} via ${probeUrl}`);
     }
-  }
+    const ip = String(response.data || "")
+      .trim()
+      .split(/\s+/)[0];
+    if (!ip) {
+      throw new Error(`empty response via ${probeUrl}`);
+    }
+    return {
+      ok: true,
+      ip,
+      latencyMs: Date.now() - t0,
+      probedVia: probeUrl,
+    };
+  });
 
-  return {
-    ok: false,
-    error: lastErr || "未知错误",
-    latencyMs: Date.now() - t0,
-  };
+  try {
+    return await Promise.any(probes);
+  } catch (error) {
+    const details = Array.isArray(error?.errors)
+      ? error.errors
+          .map((item) => String(item?.message || item || "").trim())
+          .filter(Boolean)
+          .join("; ")
+      : String(error?.message || "").trim();
+    return {
+      ok: false,
+      error: details || "未知错误",
+      latencyMs: Date.now() - t0,
+    };
+  }
 }
 
 module.exports = {
@@ -148,5 +175,6 @@ module.exports = {
   hashProxyUrl,
   parseProxyMeta,
   normalizeProxyLines,
+  mapWithConcurrency,
   testProxyUrl,
 };
