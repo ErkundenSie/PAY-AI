@@ -47,6 +47,9 @@ function createApp(overrides = {}) {
     getAppConfigValue: async () => "secret-key",
     importCards: async (cards) => ({ imported: cards.length }),
     getTaskStatus: async () => null,
+    listProxyGroups: async () => [],
+    getDefaultTimeZone: () => "Asia/Shanghai",
+    formatStoreDateTime: (value) => (value ? String(value) : ""),
     ...overrides.store,
   };
   registerPublicRoutes(app, {

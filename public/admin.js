@@ -1083,6 +1083,18 @@
           deleteAdminTaskLog(deleteBtn.getAttribute("data-delete-task") || "");
           return;
         }
+        const copyCdkBtn = event.target.closest("[data-copy-cdk]");
+        if (copyCdkBtn) {
+          event.preventDefault();
+          copyCDK(copyCdkBtn.getAttribute("data-copy-cdk") || "");
+          return;
+        }
+        const deleteCdkBtn = event.target.closest("[data-delete-cdk]");
+        if (deleteCdkBtn) {
+          event.preventDefault();
+          deleteCDK(deleteCdkBtn.getAttribute("data-delete-cdk") || "");
+          return;
+        }
         const viewSessionBtn = event.target.closest("[data-view-session]");
         if (viewSessionBtn) {
           event.preventDefault();
@@ -1132,6 +1144,20 @@
             deleteBillingBtn.getAttribute("data-delete-billing") || "",
           );
         }
+      });
+
+      document.addEventListener("change", (event) => {
+        const input = event.target.closest(
+          "input[data-select-type][data-select-key]",
+        );
+        if (!input || input.type !== "checkbox") {
+          return;
+        }
+        toggleSelection(
+          input.getAttribute("data-select-type") || "",
+          input.getAttribute("data-select-key") || "",
+          input.checked,
+        );
       });
 
       let sessionModalPayload = "";
@@ -4932,11 +4958,12 @@
                 ? "rgba(15, 118, 110, 0.12)"
                 : "rgba(37, 99, 235, 0.12)");
 
+            const safeCode = escapeHtml(code);
             return `
                       <tr>
-                          <td class="select-cell"><input type="checkbox" ${selectedItems.cdk.has(code) ? "checked" : ""} onchange="toggleSelection('cdk', '${code}', this.checked)"></td>
-                          <td><span class="cdk-copy" title="复制兑换链接" onclick="copyCDK('${code}')"><code>${code}</code><i data-lucide="copy"></i></span></td>
-                          <td style="text-align:center"><span class="status-badge" style="background: ${planTypeBg}; color: ${planTypeColor}">${planTypeLabel}</span></td>
+                          <td class="select-cell"><input type="checkbox" data-select-type="cdk" data-select-key="${safeCode}" ${selectedItems.cdk.has(code) ? "checked" : ""}></td>
+                          <td><span class="cdk-copy" title="复制兑换链接" data-copy-cdk="${safeCode}"><code>${safeCode}</code><i data-lucide="copy"></i></span></td>
+                          <td style="text-align:center"><span class="status-badge" style="background: ${planTypeBg}; color: ${planTypeColor}">${escapeHtml(planTypeLabel)}</span></td>
                           <td>${escapeHtml(typeof cdk === "string" ? "不限分组" : cdk.card_group_name || "不限分组")}</td>
                           <td>${escapeHtml(typeof cdk === "string" ? "默认代理" : cdk.proxy_group_name || "默认代理")}</td>
                           <td><code>${sessionPreview ? escapeHtml(sessionPreview) : "-"}</code></td>
@@ -4947,9 +4974,9 @@
                                 ? '<span class="status-badge status-success">已使用</span>'
                                 : '<span class="status-badge status-running">未使用</span>'
                           }</td>
-                          <td>${usedAt || "-"}</td>
+                          <td>${escapeHtml(usedAt || "-")}</td>
                           <td style="text-align:center">
-                              <button class="btn-delete" onclick="deleteCDK('${code}')">
+                              <button type="button" class="btn-delete" data-delete-cdk="${safeCode}" title="删除">
                                   <i data-lucide="trash-2"></i>
                               </button>
                           </td>
@@ -5016,15 +5043,35 @@
         if (!ok) {
           return;
         }
-        await Promise.all(
-          codes.map((code) =>
-            authFetch(`/api/admin/cdks/${encodeURIComponent(code)}`, {
-              method: "DELETE",
+        try {
+          const results = await Promise.all(
+            codes.map(async (code) => {
+              const res = await authFetch(
+                `/api/admin/cdks/${encodeURIComponent(code)}`,
+                { method: "DELETE" },
+              );
+              const data = await res.json().catch(() => ({}));
+              return {
+                code,
+                ok: res.ok && data.success !== false,
+                message: data.message,
+              };
             }),
-          ),
-        );
-        selectedItems.cdk.clear();
-        await loadData();
+          );
+          const failed = results.filter((item) => !item.ok);
+          selectedItems.cdk.clear();
+          await loadData();
+          if (failed.length) {
+            showMessage(
+              `已删除 ${codes.length - failed.length} 个，失败 ${failed.length} 个`,
+              "warning",
+            );
+            return;
+          }
+          showMessage(`已删除 ${codes.length} 个 CDK`, "success");
+        } catch (error) {
+          showMessage(error.message || "批量删除失败", "error");
+        }
       }
 
       async function batchDeletePhones() {
@@ -5996,10 +6043,10 @@
             dropdown.textContent = "全部状态";
           }
           await loadCdkList();
-            syncUiSelect(cdkFilter);
           const cdkFilter = document.getElementById("cdk_group_filter");
           if (cdkFilter) {
             cdkFilter.value = cdkGroupFilter;
+            syncUiSelect(cdkFilter);
           }
         } catch (error) {
           showMessage(error.message || "生成失败", "error");
@@ -6010,14 +6057,28 @@
       }
 
       async function deleteCDK(cdk) {
-        const ok = await showAdminConfirm(`确定删除 CDK: ${cdk} ?`, "删除 CDK");
+        const code = String(cdk || "").trim();
+        if (!code) {
+          return;
+        }
+        const ok = await showAdminConfirm(`确定删除 CDK: ${code} ?`, "删除 CDK");
         if (!ok) {
           return;
         }
-        await authFetch(`/api/admin/cdks/${encodeURIComponent(cdk)}`, {
-          method: "DELETE",
-        });
-        await loadData();
+        try {
+          const res = await authFetch(
+            `/api/admin/cdks/${encodeURIComponent(code)}`,
+            { method: "DELETE" },
+          );
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data.success === false) {
+            throw new Error(data.message || "删除失败");
+          }
+          showMessage(data.message || "CDK 已删除", "success");
+          await loadData();
+        } catch (error) {
+          showMessage(error.message || "删除失败", "error");
+        }
       }
 
       function renderPhoneTable() {
