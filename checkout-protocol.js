@@ -634,7 +634,16 @@ function expectedProtocolDueRange(currency, planName = "") {
   if (/credit|usage_based|platformbusiness/.test(plan)) {
     return null;
   }
-  if (cur === "PHP" && (!plan || /plus/.test(plan))) {
+  if (cur !== "PHP") {
+    return null;
+  }
+  if (/prolite|pro_5x|pro5x/.test(plan)) {
+    return { min: 3800, max: 5600 };
+  }
+  if (/pro_20x|pro20x|chatgptpro/.test(plan)) {
+    return { min: 7500, max: 11000 };
+  }
+  if (!plan || /plus/.test(plan)) {
     return { min: 900, max: 1050 };
   }
   return null;

@@ -27,6 +27,7 @@ const {
   canUseProtocolCheckout,
   completeProtocolCheckout,
   hydrateCheckoutFromUrl,
+  isExpectedProtocolDueAmount,
 } = require("./checkout-protocol");
 
 const MAX_CARD_ATTEMPTS = Number(process.env.PAYMENT_MAX_CARD_ATTEMPTS) || 3;
@@ -425,9 +426,11 @@ async function executePaymentWithRetry(page, options) {
         billedAmount = resolved.amount;
         billedCurrency = resolved.currency;
         if (
-          Number(billedAmount) <= 0 ||
-          (String(billedCurrency || "").toUpperCase() === "PHP" &&
-            (Number(billedAmount) < 900 || Number(billedAmount) > 1050))
+          !isExpectedProtocolDueAmount(
+            billedAmount,
+            billedCurrency,
+            planType || checkoutContext.planName,
+          )
         ) {
           lastError = `应付金额异常: ${billedCurrency} ${billedAmount}`;
           progress(lastError);
