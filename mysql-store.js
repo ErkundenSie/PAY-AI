@@ -3509,8 +3509,17 @@ function normalizeProxyGroupName(raw) {
 }
 
 function normalizeProxyGroupId(raw) {
-  if (raw == null || raw === "" || raw === "all") return null;
-  const id = Number(raw);
+  if (raw == null || raw === "") return null;
+  const value = String(raw).trim().toLowerCase();
+  if (
+    !value ||
+    ["all", "none", "pool", "ungrouped", "null", "undefined", "0"].includes(
+      value,
+    )
+  ) {
+    return null;
+  }
+  const id = Number(value);
   if (!Number.isInteger(id) || id <= 0) {
     throw new Error("无效的代理分组");
   }
@@ -3705,10 +3714,15 @@ async function addProxyAssets(input, options = {}) {
   if (!lines.length) {
     return { success: false, error: "未提供代理 URL" };
   }
-  const groupId =
-    options.groupId == null || options.groupId === ""
-      ? null
-      : normalizeProxyGroupId(options.groupId);
+  let groupId = null;
+  try {
+    groupId =
+      options.groupId == null || options.groupId === ""
+        ? null
+        : normalizeProxyGroupId(options.groupId);
+  } catch (error) {
+    return { success: false, error: error.message || "无效的代理分组" };
+  }
   if (groupId) {
     const group = await getProxyGroupById(groupId);
     if (!group) {

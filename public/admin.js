@@ -2140,7 +2140,7 @@
           extraEl && extraEl.querySelector("[data-confirm-extra]");
         const payload = extraValue
           ? {
-              source: extraValue.value || "pool",
+              source: extraValue.value,
               extra: extraPayload ? extraPayload.value : "",
             }
           : true;
@@ -4511,6 +4511,9 @@
         if (!confirmed) return;
         let groupId =
           typeof confirmed === "object" ? String(confirmed.source || "") : "";
+        if (/^(pool|none|all|ungrouped)$/i.test(groupId.trim())) {
+          groupId = "";
+        }
         const newName =
           typeof confirmed === "object"
             ? String(confirmed.extra || "").trim()
@@ -7871,6 +7874,14 @@
             el.innerHTML = `<i data-lucide="loader"></i> ${runningLabel || "调试中..."}`;
           }
         }
+        const stopBtn = document.getElementById("checkout_stop_btn");
+        if (stopBtn) {
+          stopBtn.hidden = !busy;
+          stopBtn.disabled = !busy;
+          if (busy) {
+            stopBtn.innerHTML = `<i data-lucide="square"></i> 停止`;
+          }
+        }
         lucide.createIcons();
       }
 
@@ -7885,12 +7896,18 @@
       function finishCheckoutDebugUi(status, data) {
         stopCheckoutDebugLogStream();
         resetCheckoutDebugButton();
+        const nextStatus = status || data?.status || "failed";
         if (data) {
           renderCheckoutDebugStatus({
             ...data,
-            status: status || data.status || "failed",
+            status: nextStatus,
           });
         }
+        patchCheckoutDebugHistory(checkoutDebugJobKey, {
+          status: nextStatus,
+          message: data?.message || "",
+        });
+        loadCheckoutDebugHistory().catch(() => {});
       }
 
       function scheduleCheckoutDebugUnlockFromLogs() {
@@ -7944,6 +7961,10 @@
         if (wrap) wrap.scrollTop = wrap.scrollHeight;
         updateCheckoutPlanChoiceUi();
         if (checkoutDebugLogsIndicateFailure(checkoutDebugLogText)) {
+          patchCheckoutDebugHistory(checkoutDebugJobKey, {
+            status: "failed",
+            message: "调试失败",
+          });
           scheduleCheckoutDebugUnlockFromLogs();
         }
       }
@@ -7984,6 +8005,10 @@
         }
         updateCheckoutPlanChoiceUi();
         if (checkoutDebugLogsIndicateFailure(checkoutDebugLogText)) {
+          patchCheckoutDebugHistory(checkoutDebugJobKey, {
+            status: "failed",
+            message: "调试失败",
+          });
           scheduleCheckoutDebugUnlockFromLogs();
         }
       }
@@ -8176,6 +8201,10 @@
           const data = await res.json();
           if (!data.success) return;
           renderCheckoutDebugStatus(data);
+          patchCheckoutDebugHistory(checkoutDebugJobKey, {
+            status: data.status,
+            message: data.message || "",
+          });
           const status = String(data.status || "").toLowerCase();
           const finished =
             CHECKOUT_DEBUG_TERMINAL_STATUSES.has(status) ||
@@ -8579,6 +8608,40 @@
         );
       }
 
+      function patchCheckoutDebugHistory(jobKey, patch = {}) {
+        const key = String(jobKey || "").trim();
+        if (!key) return;
+        let found = false;
+        checkoutDebugHistory = checkoutDebugHistory.map((task) => {
+          if (task.jobKey === key || task.id === key) {
+            found = true;
+            return {
+              ...task,
+              ...patch,
+              jobKey: task.jobKey || key,
+              id: task.id || key,
+            };
+          }
+          return task;
+        });
+        if (!found) {
+          checkoutDebugHistory = [
+            {
+              id: key,
+              jobKey: key,
+              cdk: patch.cdk || "[checkout-debug]",
+              token: patch.token || "",
+              time: patch.time || "",
+              status: patch.status || "running",
+              message: patch.message || "",
+              ...patch,
+            },
+            ...checkoutDebugHistory,
+          ];
+        }
+        renderCheckoutDebugHistory();
+      }
+
       function renderCheckoutDebugHistory() {
         const list = document.getElementById("checkout_debug_history_list");
         if (!list) return;
@@ -8616,14 +8679,39 @@
           const res = await authFetch("/api/admin/task-logs?limit=200");
           const data = await res.json();
           const tasks = Array.isArray(data.tasks) ? data.tasks : [];
-          checkoutDebugHistory = tasks.filter((task) => {
-            const cdk = String(task.cdk || "");
-            return (
-              cdk === "[checkout-debug]" ||
-              cdk === "[payment-debug]" ||
-              cdk === "[custom-pay]"
-            );
-          });
+          const previous = new Map(
+            checkoutDebugHistory.map((task) => [
+              String(task.jobKey || task.id || ""),
+              task,
+            ]),
+          );
+          checkoutDebugHistory = tasks
+            .filter((task) => {
+              const cdk = String(task.cdk || "");
+              return (
+                cdk === "[checkout-debug]" ||
+                cdk === "[payment-debug]" ||
+                cdk === "[custom-pay]"
+              );
+            })
+            .map((task) => {
+              const key = String(task.jobKey || task.id || "");
+              const local = previous.get(key);
+              const localStatus = String(local?.status || "").toLowerCase();
+              const remoteStatus = String(task.status || "").toLowerCase();
+              if (
+                local &&
+                CHECKOUT_DEBUG_TERMINAL_STATUSES.has(localStatus) &&
+                CHECKOUT_DEBUG_BUSY_STATUSES.has(remoteStatus)
+              ) {
+                return {
+                  ...task,
+                  status: local.status,
+                  message: local.message || task.message,
+                };
+              }
+              return task;
+            });
           renderCheckoutDebugHistory();
           if (showToast) showMessage("历史任务已刷新", "success");
         } catch (error) {
@@ -8824,6 +8912,16 @@
           }
 
           checkoutDebugJobKey = data.jobKey;
+          patchCheckoutDebugHistory(data.jobKey, {
+            status: "running",
+            cdk: isCustom
+              ? "[custom-pay]"
+              : isPayment
+                ? "[payment-debug]"
+                : "[checkout-debug]",
+            token: data.email || "",
+            time: formatAdminDateTime(new Date()),
+          });
           setCheckoutDebugBusy(
             true,
             isCustom
@@ -8847,6 +8945,46 @@
         } catch (e) {
           resetCheckoutDebugButton();
           showMessage(e.message || "启动失败", "error");
+        }
+      }
+
+      async function stopCheckoutDebugTask() {
+        const jobKey = String(checkoutDebugJobKey || "").trim();
+        if (!jobKey) {
+          showMessage("没有正在运行的调试任务", "error");
+          return;
+        }
+        const stopBtn = document.getElementById("checkout_stop_btn");
+        if (stopBtn) stopBtn.disabled = true;
+        try {
+          const res = await authFetch("/api/admin/checkout/stop", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobKey }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            const message = data.error || data.message || "停止失败";
+            if (res.status === 409) {
+              finishCheckoutDebugUi("failed", {
+                status: "failed",
+                message,
+                screenshots: [],
+              });
+              showMessage(message, "warning");
+              return;
+            }
+            throw new Error(message);
+          }
+          showMessage(data.message || "任务已停止", "success");
+          finishCheckoutDebugUi("failed", {
+            status: "failed",
+            message: data.message || "任务已停止",
+            screenshots: [],
+          });
+        } catch (e) {
+          if (stopBtn) stopBtn.disabled = false;
+          showMessage(e.message || "停止失败", "error");
         }
       }
 

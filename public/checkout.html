@@ -73,6 +73,15 @@
                     <span class="btn-text">开通</span>
                     <div class="loader"></div>
                   </button>
+                  <button
+                    type="button"
+                    id="stopBtn"
+                    class="checkout-stop-btn"
+                    hidden
+                  >
+                    <i data-lucide="square"></i>
+                    <span class="btn-text">停止</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -328,6 +337,7 @@
       const addrPostal = document.getElementById("addrPostal");
       const addrCountry = document.getElementById("addrCountry");
       const payBtn = document.getElementById("payBtn");
+      const stopBtn = document.getElementById("stopBtn");
       const clearSessionBtn = document.getElementById("clearSessionBtn");
       const cancelRenewBtn = document.getElementById("cancelRenewBtn");
       const statusMsg = document.getElementById("statusMessage");
@@ -539,6 +549,43 @@
         if (loader) loader.style.display = loading ? "block" : "none";
       }
 
+      function setStopVisible(visible) {
+        if (!stopBtn) return;
+        stopBtn.hidden = !visible;
+        stopBtn.disabled = !visible;
+        if (visible && window.lucide) lucide.createIcons();
+      }
+
+      async function stopCheckout() {
+        if (!activeJobKey || !activeViewerToken) {
+          showStatus("没有正在运行的开通任务", "error");
+          return;
+        }
+        if (stopBtn) stopBtn.disabled = true;
+        try {
+          const response = await fetch("/api/public/checkout/stop", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              jobKey: activeJobKey,
+              token: activeViewerToken,
+            }),
+          });
+          const data = await response.json();
+          if (!response.ok || !data.success) {
+            throw new Error(data.error || data.message || "停止失败");
+          }
+          applyTaskState({
+            status: "failed",
+            message: data.message || "任务已停止",
+            progress: taskProgressValue,
+          });
+        } catch (error) {
+          if (stopBtn) stopBtn.disabled = false;
+          showStatus(error.message || "停止失败", "error");
+        }
+      }
+
       function showStatus(message, type) {
         clearTimeout(statusTimer);
         statusMsg.textContent = String(message || "");
@@ -659,6 +706,7 @@
             : isError
               ? "is-error"
               : isRunning
+          setStopVisible(false);
                 ? "is-running"
                 : "is-pending"
         }`;
@@ -696,6 +744,7 @@
           setButtonText(START_SUCCESS_TEXT);
           setLoading(false);
           payBtn.disabled = true;
+          setStopVisible(false);
           if (isCheckoutLogPlaceholder()) {
             showCheckoutTaskLogPlaceholder(message || "开通成功");
           }
@@ -719,6 +768,7 @@
           setButtonText(START_FAILED_TEXT);
           setLoading(false);
           payBtn.disabled = false;
+          setStopVisible(false);
           if (isCheckoutLogPlaceholder()) {
             showCheckoutTaskLogPlaceholder(message || "开通失败");
           }
@@ -801,6 +851,7 @@
               showStatus(data.error || "任务状态查询失败", "error");
               setButtonText(START_FAILED_TEXT);
               setLoading(false);
+              setStopVisible(false);
               payBtn.disabled = false;
             }
             return;
@@ -838,6 +889,7 @@
           showStatus("任务订阅凭据缺失，请重新提交", "error");
           setButtonText(START_FAILED_TEXT);
           setLoading(false);
+          setStopVisible(false);
           payBtn.disabled = false;
           return;
         }
@@ -1120,6 +1172,7 @@
         setButtonText(START_PENDING_TEXT);
         setLoading(true);
         payBtn.disabled = true;
+        setStopVisible(false);
         resetProgressState();
         showProgress();
         setProgress(3, "正在启动开通任务...", "running", { force: true });
@@ -1151,6 +1204,7 @@
             setProgress(8, data.message || "任务已启动，正在开通中...");
             showStatus(data.message || "任务已启动，正在开通中...", "success");
             initWebSocket(data.jobKey, data.viewerToken || "");
+            setStopVisible(true);
             return;
           }
           setProgress(
@@ -1163,6 +1217,7 @@
           setButtonText(START_FAILED_TEXT);
           setLoading(false);
           payBtn.disabled = false;
+          setStopVisible(false);
         } catch (_) {
           setProgress(
             Math.max(taskProgressValue, 1),
@@ -1174,6 +1229,7 @@
           setButtonText(START_FAILED_TEXT);
           setLoading(false);
           payBtn.disabled = false;
+          setStopVisible(false);
         }
       }
 
@@ -1252,6 +1308,7 @@
       clearSessionBtn.addEventListener("click", clearSession);
       cancelRenewBtn.addEventListener("click", cancelAutoRenew);
       payBtn.addEventListener("click", startCheckout);
+      if (stopBtn) stopBtn.addEventListener("click", stopCheckout);
 
       fillSampleAddress();
       updateSessionAccount();

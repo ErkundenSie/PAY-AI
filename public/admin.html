@@ -3557,6 +3557,22 @@
         color: var(--text-secondary);
       }
 
+      .checkout-debug-actions .btn-danger {
+        background: #fff;
+        color: #b42318;
+        border: 1px solid #fda29b;
+      }
+
+      .checkout-debug-actions .btn-danger:hover:not(:disabled) {
+        background: #fef3f2;
+        color: #912018;
+        border-color: #f97066;
+      }
+
+      .checkout-debug-actions .btn-danger[hidden] {
+        display: none;
+      }
+
       .checkout-debug-job {
         display: inline-flex;
         align-items: center;
@@ -6085,6 +6101,16 @@ vless://uuid@host:443?encryption=none&security=tls&type=tcp#备注"
               >
                 <i data-lucide="log-in"></i>
                 自定义付款
+              </button>
+              <button
+                type="button"
+                class="btn btn-danger"
+                onclick="stopCheckoutDebugTask()"
+                id="checkout_stop_btn"
+                hidden
+              >
+                <i data-lucide="square"></i>
+                停止
               </button>
             </div>
           </div>

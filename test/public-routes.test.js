@@ -146,6 +146,45 @@ describe("public routes", () => {
     expect(received.cdk_code).toBe("KC-PUBLIC");
   });
 
+  it("rejects public checkout stop without viewer token", async () => {
+    const app = createApp();
+    const res = await request(app, "POST", "/api/public/checkout/stop", {
+      jobKey: "job-1",
+    });
+    expect(res.status).toBe(401);
+    expect(res.json.success).toBe(false);
+  });
+
+  it("stops a running public checkout job", async () => {
+    let stopped = "";
+    const app = createApp({
+      deps: {
+        adminAuth: {
+          verifyTaskViewerToken: (token, jobKey) =>
+            token === "viewer" && jobKey === "job-1",
+          issueTaskViewerToken: () => ({ token: "viewer" }),
+        },
+        stopCheckoutJob: async (jobKey) => {
+          stopped = jobKey;
+          return {
+            ok: true,
+            status: 200,
+            jobKey,
+            message: "任务已停止",
+          };
+        },
+      },
+    });
+    const res = await request(app, "POST", "/api/public/checkout/stop", {
+      jobKey: "job-1",
+      token: "viewer",
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.success).toBe(true);
+    expect(res.json.jobKey).toBe("job-1");
+    expect(stopped).toBe("job-1");
+  });
+
   it("verifies an unused CDK", async () => {
     const app = createApp();
     const res = await request(app, "POST", "/api/verify-cdk", {

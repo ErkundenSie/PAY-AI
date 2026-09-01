@@ -56,6 +56,7 @@ function registerPublicRoutes(app, deps) {
     getRemainingCooldownMinutes,
     handleActivationRequest,
     createCdks,
+    stopCheckoutJob,
   } = deps;
   const resolveActivationHandler = (req, res, next) => {
     const handler =
@@ -254,6 +255,47 @@ function registerPublicRoutes(app, deps) {
           { requireManualPayment: true },
         );
         return res.status(result.status).json(result.payload);
+      } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+    },
+  );
+
+  app.post(
+    "/api/public/checkout/stop",
+    limitPublicRequests("public-checkout-stop", 12, 60 * 1000),
+    async (req, res) => {
+      try {
+        await ensureStoreReady();
+        const jobKey = String(
+          req.body?.jobKey || req.body?.job_key || "",
+        ).trim();
+        const viewerToken = String(
+          req.body?.token || req.body?.viewerToken || "",
+        ).trim();
+        if (!jobKey || !/^[A-Za-z0-9._-]{1,80}$/.test(jobKey)) {
+          return res
+            .status(400)
+            .json({ success: false, error: "缺少任务标识" });
+        }
+        if (!adminAuth.verifyTaskViewerToken(viewerToken, jobKey)) {
+          return res.status(401).json({ success: false, error: "未授权订阅" });
+        }
+        if (typeof stopCheckoutJob !== "function") {
+          return res.status(500).json({ success: false, error: "停止功能不可用" });
+        }
+        const result = await stopCheckoutJob(jobKey);
+        if (!result.ok) {
+          return res.status(result.status).json({
+            success: false,
+            error: result.error,
+          });
+        }
+        return res.json({
+          success: true,
+          jobKey: result.jobKey,
+          message: result.message,
+        });
       } catch (error) {
         return res.status(500).json({ success: false, error: error.message });
       }

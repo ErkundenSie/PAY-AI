@@ -1853,7 +1853,8 @@ body.checkout-page {
 }
 
 .checkout-page .checkout-ghost-btn,
-.checkout-page .checkout-pay-btn {
+.checkout-page .checkout-pay-btn,
+.checkout-page .checkout-stop-btn {
   height: 34px;
   border-radius: 7px;
   font-size: 12px;
@@ -1884,6 +1885,22 @@ body.checkout-page {
 
 .checkout-page .checkout-pay-btn:hover {
   background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}
+
+.checkout-page .checkout-stop-btn {
+  min-width: 72px;
+  padding: 0 13px;
+  background: #fff;
+  color: #b42318;
+  border: 1px solid #fda29b;
+}
+
+.checkout-page .checkout-stop-btn:hover:not(:disabled) {
+  background: #fef3f2;
+}
+
+.checkout-page .checkout-stop-btn[hidden] {
+  display: none;
 }
 
 .checkout-page .checkout-grid {

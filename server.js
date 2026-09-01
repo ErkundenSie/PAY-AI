@@ -151,6 +151,8 @@ const TERMINAL_TASK_STATUSES = new Set([
   "manual",
 ]);
 const activeForegroundJobs = new Set();
+const jobChildren = new Map();
+const abortedJobs = new Set();
 
 let systemMetricsCache = {
   ts: 0,
@@ -2098,6 +2100,93 @@ function timestampTaskOutput(chunk) {
     .join("\n");
 }
 
+function registerJobChild(jobKey, child) {
+  const key = String(jobKey || "").trim();
+  if (!key || !child) return;
+  if (!jobChildren.has(key)) jobChildren.set(key, new Set());
+  jobChildren.get(key).add(child);
+}
+
+function unregisterJobChild(jobKey, child) {
+  const key = String(jobKey || "").trim();
+  const set = jobChildren.get(key);
+  if (!set) return;
+  set.delete(child);
+  if (!set.size) jobChildren.delete(key);
+}
+
+function isJobAborted(jobKey) {
+  return abortedJobs.has(String(jobKey || "").trim());
+}
+
+function safeTouchJob(jobKey) {
+  if (typeof browserPool.touchJob === "function") {
+    try {
+      browserPool.touchJob(jobKey);
+    } catch (_) {}
+  }
+}
+
+function safeReleaseSlotByJobKey(jobKey) {
+  if (typeof browserPool.releaseSlotByJobKey === "function") {
+    try {
+      browserPool.releaseSlotByJobKey(jobKey);
+    } catch (_) {}
+  }
+}
+
+function killJobChildren(jobKey) {
+  const key = String(jobKey || "").trim();
+  const children = jobChildren.get(key);
+  if (!children || !children.size) return 0;
+  let count = 0;
+  for (const child of children) {
+    count += 1;
+    try {
+      child.kill("SIGTERM");
+    } catch (_) {}
+    setTimeout(() => {
+      if (child.exitCode != null || child.signalCode != null) return;
+      try {
+        child.kill("SIGKILL");
+      } catch (_) {}
+    }, 3000).unref();
+  }
+  return count;
+}
+
+async function stopCheckoutJob(jobKey, reason = "任务已停止") {
+  const key = String(jobKey || "").trim();
+  if (!key || !/^[A-Za-z0-9._-]{1,80}$/.test(key)) {
+    return { ok: false, status: 400, error: "缺少任务标识" };
+  }
+  const task = await store.getTaskStatus(key);
+  if (!task) {
+    return { ok: false, status: 404, error: "任务不存在" };
+  }
+  if (TERMINAL_TASK_STATUSES.has(String(task.status || "").toLowerCase())) {
+    return { ok: false, status: 409, error: "任务已结束" };
+  }
+  abortedJobs.add(key);
+  const killed = killJobChildren(key);
+  const message = String(reason || "任务已停止");
+  const progress = Number(task.progress || 0);
+  await store.updateTaskLog(key, {
+    status: "failed",
+    message,
+    progress: Number.isFinite(progress) && progress > 0 ? progress : 0,
+  });
+  broadcastToTask(key, {
+    type: "status",
+    jobKey: key,
+    status: "failed",
+    message,
+    progress: Number.isFinite(progress) && progress > 0 ? progress : 0,
+  });
+  logTask(key, `任务已停止 killed=${killed}`, "warn");
+  return { ok: true, status: 200, killed, jobKey: key, message };
+}
+
 function runCheckoutScript(
   jobKey,
   scriptPath,
@@ -2105,6 +2194,16 @@ function runCheckoutScript(
   attempt = 1,
   onProgress = null,
 ) {
+  if (isJobAborted(jobKey)) {
+    return Promise.resolve({
+      attempt,
+      code: null,
+      signal: "SIGTERM",
+      timedOut: false,
+      output: "",
+      analysis: { status: "failed", message: "任务已停止" },
+    });
+  }
   return new Promise((resolve) => {
     logTask(jobKey, `启动子进程 attempt=${attempt} script=${scriptPath}`);
     const child = spawn("node", [scriptPath], {
@@ -2121,10 +2220,23 @@ function runCheckoutScript(
     let timedOut = false;
 
     activeProcesses.add(child);
+    registerJobChild(jobKey, child);
+    if (isJobAborted(jobKey)) {
+      try {
+        child.kill("SIGTERM");
+      } catch (_) {}
+      setTimeout(() => {
+        if (child.exitCode != null || child.signalCode != null) return;
+        try {
+          child.kill("SIGKILL");
+        } catch (_) {}
+      }, 3000).unref();
+    }
     const cleanup = () => {
       activeProcesses.delete(child);
+      unregisterJobChild(jobKey, child);
       if (idleTimer) clearTimeout(idleTimer);
-      browserPool.releaseSlotByJobKey(jobKey);
+      safeReleaseSlotByJobKey(jobKey);
     };
 
     const finish = (result) => {
@@ -2137,7 +2249,7 @@ function runCheckoutScript(
     };
 
     const resetIdleTimer = () => {
-      browserPool.touchJob(jobKey);
+      safeTouchJob(jobKey);
       if (idleTimer) {
         clearTimeout(idleTimer);
       }
@@ -2277,6 +2389,7 @@ app.post("/api/admin/runtime-logs/clear", authenticateAdmin, (req, res) => {
       level: "system",
       source: "server",
       text: "🧹 运行日志已手动清空",
+  stopCheckoutJob,
     });
     res.json({ success: true, message: "运行日志已清空" });
   } catch (error) {
@@ -2841,6 +2954,42 @@ function respondAdminAccountAction(res, result, fallbackMessage) {
   return res.json({ success: true, data: result.data });
 }
 
+function isAdminAccountProxyFallbackError(result) {
+  if (!result || result.ok) return false;
+  const status = Number(result.statusCode || 0);
+  const error = String(result.error || "");
+  return (
+    [403, 502, 503].includes(status) ||
+    /cloudflare|风控拦截|浏览器池当前不可用|浏览器 Session 操作失败|无法连接 OpenAI/i.test(
+      error,
+    )
+  );
+}
+
+async function withAdminAccountHttpFallback({
+  rawSession,
+  browserResult,
+  httpFn,
+}) {
+  if (browserResult?.ok) return browserResult;
+  if (
+    !browserResult ||
+    !hasAdminSessionCookies(rawSession) ||
+    isAdminAccountProxyFallbackError(browserResult)
+  ) {
+    const httpResult = await httpFn();
+    if (httpResult?.ok || !browserResult) {
+      if (httpResult?.ok && isAdminAccountProxyFallbackError(browserResult)) {
+        console.log(
+          `[Account] 浏览器查询被拦截，已改走代理 HTTP 接口 status=${httpResult.statusCode || 200}`,
+        );
+      }
+      return httpResult;
+    }
+  }
+  return browserResult;
+}
+
 function attachExportedSession(result, exported, previousToken = "") {
   const text = String(exported?.ok ? exported.text : "").trim();
   if (!text) {
@@ -3006,14 +3155,17 @@ app.post("/api/admin/subscription/cancel-auto-renew", async (req, res) => {
       },
       { proxyGroupId },
     );
-    if (!result && !hasAdminSessionCookies(rawSession)) {
-      result = await cancelAutoRenew(token, {
-        timezoneOffsetMin,
-        email,
-        proxy,
-        cookieHeader,
-      });
-    }
+    result = await withAdminAccountHttpFallback({
+      rawSession,
+      browserResult: result,
+      httpFn: () =>
+        cancelAutoRenew(token, {
+          timezoneOffsetMin,
+          email,
+          proxy,
+          cookieHeader,
+        }),
+    });
 
     await persistExportedAdminSession(req.body?.job_key, result);
     return respondAdminAccountAction(res, result, "取消自动续费失败");
@@ -3068,14 +3220,17 @@ app.post("/api/admin/subscription/enable-auto-renew", async (req, res) => {
       },
       { proxyGroupId },
     );
-    if (!result && !hasAdminSessionCookies(rawSession)) {
-      result = await resumeAutoRenew(token, {
-        timezoneOffsetMin,
-        email,
-        proxy,
-        cookieHeader,
-      });
-    }
+    result = await withAdminAccountHttpFallback({
+      rawSession,
+      browserResult: result,
+      httpFn: () =>
+        resumeAutoRenew(token, {
+          timezoneOffsetMin,
+          email,
+          proxy,
+          cookieHeader,
+        }),
+    });
 
     await persistExportedAdminSession(req.body?.job_key, result);
     return respondAdminAccountAction(res, result, "开启自动续费失败");
@@ -3161,14 +3316,17 @@ app.post("/api/admin/account/status", async (req, res) => {
       },
       { captureSession: false, proxyGroupId: parsed.proxyGroupId },
     );
-    if (!result && !hasAdminSessionCookies(parsed.rawSession)) {
-      result = await queryAccountStatusBySession(parsed.token, {
-        timezoneOffsetMin: parsed.timezoneOffsetMin,
-        email,
-        proxy: parsed.proxy,
-        cookieHeader: parsed.cookieHeader,
-      });
-    }
+    result = await withAdminAccountHttpFallback({
+      rawSession: parsed.rawSession,
+      browserResult: result,
+      httpFn: () =>
+        queryAccountStatusBySession(parsed.token, {
+          timezoneOffsetMin: parsed.timezoneOffsetMin,
+          email,
+          proxy: parsed.proxy,
+          cookieHeader: parsed.cookieHeader,
+        }),
+    });
     await persistExportedAdminSession(parsed.jobKey, result);
     return respondAdminAccountAction(res, result, "查询账户状态失败");
   } catch (error) {
@@ -3205,14 +3363,17 @@ app.post("/api/admin/account/reset-codex-quota", async (req, res) => {
         }),
       { proxyGroupId: parsed.proxyGroupId },
     );
-    if (!result && !hasAdminSessionCookies(parsed.rawSession)) {
-      result = await resetCodexQuota(parsed.token, {
-        timezoneOffsetMin: parsed.timezoneOffsetMin,
-        email,
-        proxy: parsed.proxy,
-        cookieHeader: parsed.cookieHeader,
-      });
-    }
+    result = await withAdminAccountHttpFallback({
+      rawSession: parsed.rawSession,
+      browserResult: result,
+      httpFn: () =>
+        resetCodexQuota(parsed.token, {
+          timezoneOffsetMin: parsed.timezoneOffsetMin,
+          email,
+          proxy: parsed.proxy,
+          cookieHeader: parsed.cookieHeader,
+        }),
+    });
     await persistExportedAdminSession(parsed.jobKey, result);
     return respondAdminAccountAction(res, result, "重置 Codex 额度失败");
   } catch (error) {
@@ -3919,6 +4080,27 @@ app.post("/api/admin/checkout/pay", async (req, res) => {
   }
 });
 
+app.post("/api/admin/checkout/stop", async (req, res) => {
+  try {
+    await ensureStoreReady();
+    const jobKey = String(req.body?.jobKey || req.body?.job_key || "").trim();
+    const result = await stopCheckoutJob(jobKey);
+    if (!result.ok) {
+      return res.status(result.status).json({
+        success: false,
+        error: result.error,
+      });
+    }
+    return res.json({
+      success: true,
+      jobKey: result.jobKey,
+      message: result.message,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.get("/api/admin/checkout/status/:jobKey", async (req, res) => {
   try {
     await ensureStoreReady();
@@ -4034,7 +4216,13 @@ app.post("/api/admin/proxies", authenticateAdmin, async (req, res) => {
     }
     res.json(result);
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    const message = String(error.message || "保存代理失败");
+    const clientError = /无效的代理分组|未提供代理/.test(message);
+    res.status(clientError ? 400 : 500).json({
+      success: false,
+      error: message,
+      message,
+    });
   }
 });
 
@@ -4315,12 +4503,30 @@ async function syncBrowserPoolModeFromStore() {
 }
 
 async function spawnWorkerWithBrowser({ jobKey, runtimeEnv, runScript }) {
+  if (isJobAborted(jobKey)) {
+    return {
+      code: null,
+      signal: "SIGTERM",
+      timedOut: false,
+      output: "",
+      analysis: { status: "failed", message: "任务已停止" },
+    };
+  }
   const poolEnabled = browserPool.getRuntimeEnabled();
   if (!poolEnabled) {
     logTask(jobKey, "浏览器模式: 独立启动（后台已关闭浏览器池）");
     return runScript(buildWorkerRuntimeEnv(runtimeEnv, null, "standalone"));
   }
   return browserPool.withBrowserSlot(jobKey, async (poolSlot) => {
+    if (isJobAborted(jobKey)) {
+      return {
+        code: null,
+        signal: "SIGTERM",
+        timedOut: false,
+        output: "",
+        analysis: { status: "failed", message: "任务已停止" },
+      };
+    }
     if (poolSlot) {
       logTask(
         jobKey,
@@ -4350,6 +4556,10 @@ function spawnCheckoutDebugWorker({
     let settled = false;
     try {
       const proxy = await pickTaskProxy(proxyGroupId);
+      if (isJobAborted(task.jobKey)) {
+        settled = true;
+        return;
+      }
       const hcaptchaCfg = await store.getHcaptchaConfig();
       const recordVideo = await store.getRecordVideoEnabled();
       const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
@@ -4386,7 +4596,8 @@ function spawnCheckoutDebugWorker({
             workerEnv,
             1,
             async (progress) => {
-              if (settled || progress <= 0) return;
+              if (settled || isJobAborted(task.jobKey) || progress <= 0) return;
+              if (isJobAborted(task.jobKey)) return;
               await store.updateTaskLog(task.jobKey, {
                 status: "running",
                 message: "浏览器调试进行中...",
@@ -4397,6 +4608,10 @@ function spawnCheckoutDebugWorker({
       });
 
       const analysis = analyzeCheckoutDebugOutput(run.output, run.timedOut);
+      if (isJobAborted(task.jobKey) && analysis.status !== "success") {
+        settled = true;
+        return;
+      }
       const checkoutUrl =
         analysis.checkoutUrl || extractCheckoutUrlFromOutput(run.output);
       const failureScreenshots = extractScreenshotsFromOutput(run.output);
@@ -4424,6 +4639,10 @@ function spawnCheckoutDebugWorker({
         `调试结束 status=${finalStatus} url=${checkoutUrl ? "yes" : "no"} screenshots=${failureScreenshots.length}`,
       );
     } catch (error) {
+      if (isJobAborted(task.jobKey)) {
+        settled = true;
+        return;
+      }
       console.error(`[Checkout Debug] ${task.jobKey}:`, error);
       logTask(task.jobKey, `调试任务异常: ${error.message}`, "error");
       settled = true;
@@ -4432,6 +4651,8 @@ function spawnCheckoutDebugWorker({
         message: error.message,
         progress: 0,
       });
+    } finally {
+      abortedJobs.delete(String(task.jobKey || "").trim());
     }
   })();
 }
@@ -4476,6 +4697,10 @@ function spawnCheckoutPaymentWorker({
     let settled = false;
     try {
       const proxy = await pickTaskProxy(proxyGroupId);
+      if (isJobAborted(task.jobKey)) {
+        settled = true;
+        return;
+      }
       const hcaptchaCfg = await store.getHcaptchaConfig();
       const recordVideo = await store.getRecordVideoEnabled();
       const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
@@ -4522,8 +4747,9 @@ function spawnCheckoutPaymentWorker({
             workerEnv,
             1,
             async (progress) => {
-              if (settled || progress <= 0) return;
+              if (settled || isJobAborted(task.jobKey) || progress <= 0) return;
               const runningProgress = Math.min(progress, 99);
+              if (isJobAborted(task.jobKey)) return;
               await store.updateTaskLog(task.jobKey, {
                 status: "running",
                 message: runningMessage,
@@ -4541,6 +4767,10 @@ function spawnCheckoutPaymentWorker({
       });
 
       const analysis = analyzeProcessOutput(run.output, run.timedOut);
+      if (isJobAborted(task.jobKey) && analysis.status !== "success") {
+        settled = true;
+        return;
+      }
       const finalStatus =
         analysis.status === "retry" ? "failed" : analysis.status || "failed";
       const taskMedia = extractTaskMediaFromOutput(run.output);
@@ -4572,6 +4802,10 @@ function spawnCheckoutPaymentWorker({
         `${taskLabel}结束 status=${finalStatus} card=${cardLast4 || "-"}`,
       );
     } catch (error) {
+      if (isJobAborted(task.jobKey)) {
+        settled = true;
+        return;
+      }
       console.error(`[Checkout Payment] ${task.jobKey}:`, error);
       logTask(task.jobKey, `${taskLabel}任务异常: ${error.message}`, "error");
       settled = true;
@@ -4588,6 +4822,7 @@ function spawnCheckoutPaymentWorker({
         progress: 0,
       });
     } finally {
+      abortedJobs.delete(String(task.jobKey || "").trim());
       releaseForegroundSlot(task.jobKey);
       drainActivationQueue().catch((error) => {
         console.warn(`[Queue] 排空失败: ${error.message}`);
@@ -5010,6 +5245,9 @@ function spawnActivationWorker({
         });
 
         const proxy = await pickTaskProxy(cdkDetails?.proxy_group_id);
+        if (isJobAborted(task.jobKey)) {
+          return;
+        }
         const hcaptchaCfg = await store.getHcaptchaConfig();
         const recordVideo = await store.getRecordVideoEnabled();
         const { env: hcaptchaEnv } = buildHcaptchaEnvFromConfig(hcaptchaCfg);
@@ -5046,6 +5284,7 @@ function spawnActivationWorker({
               workerEnv,
               attempt,
               async (progress, liveOutput) => {
+                if (isJobAborted(task.jobKey)) return;
                 if (progress > 0) {
                   const runningProgress = normalizeTaskProgress(
                     progress,
@@ -5146,6 +5385,9 @@ function spawnActivationWorker({
             }
           : finalRun?.analysis;
       const finalStatus = normalizedAnalysis?.status || "failed";
+      if (isJobAborted(task.jobKey) && finalStatus !== "success") {
+        return;
+      }
 
       const finalProgress = normalizeTaskProgress(
         finalStatus === "success" ? 100 : lastProgress,
@@ -5261,6 +5503,9 @@ function spawnActivationWorker({
         }
       }
     } catch (bgError) {
+      if (isJobAborted(task.jobKey)) {
+        return;
+      }
       console.error(`[Background Task Error] ${task.jobKey}:`, bgError);
       logTask(task.jobKey, `后台任务异常: ${bgError.message}`, "error");
       await store.updateTaskLog(task.jobKey, {
@@ -5290,6 +5535,7 @@ function spawnActivationWorker({
         logTask(task.jobKey, `CDK ${cdk} 已回滚为未使用`);
       }
     } finally {
+      abortedJobs.delete(String(task.jobKey || "").trim());
       releaseForegroundSlot(task.jobKey);
       drainActivationQueue().catch((error) => {
         console.warn(`[Queue] 排空失败: ${error.message}`);
