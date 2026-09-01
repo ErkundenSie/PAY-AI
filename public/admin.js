@@ -4423,7 +4423,9 @@
           const res = await authFetch("/api/admin/config", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(buildConfigPayload()),
+            body: JSON.stringify(
+              buildConfigPayload(["max_concurrent_activations"]),
+            ),
           });
           const data = await res.json();
           if (!res.ok || !data.success) {
@@ -4820,29 +4822,40 @@
         }
       }
 
-      function buildConfigPayload(overrides = {}) {
-        return {
-          max_concurrent_activations: Math.max(
-            1,
-            parseInt(
-              document.getElementById("max_concurrent_activations").value,
-              10,
-            ) || 1,
-          ),
-          maintenance_mode: Object.prototype.hasOwnProperty.call(
-            overrides,
-            "maintenance_mode",
-          )
-            ? Boolean(overrides.maintenance_mode)
-            : document.getElementById("maintenance_mode").checked,
-          default_timezone:
+      function readConfigValue(key) {
+        if (key === "max_concurrent_activations") {
+          const parsed = parseInt(
+            document.getElementById("max_concurrent_activations")?.value,
+            10,
+          );
+          return Math.max(1, Number.isFinite(parsed) ? parsed : 1);
+        }
+        if (key === "maintenance_mode") {
+          return Boolean(document.getElementById("maintenance_mode")?.checked);
+        }
+        if (key === "default_timezone") {
+          return (
             document.getElementById("default_timezone")?.value ||
-            "Asia/Shanghai",
-          default_proxy_group_id:
-            document.getElementById("default_proxy_group")?.value || "",
-          record_video:
-            document.getElementById("record_video")?.checked || false,
-        };
+            "Asia/Shanghai"
+          );
+        }
+        if (key === "default_proxy_group_id") {
+          return document.getElementById("default_proxy_group")?.value || "";
+        }
+        if (key === "record_video") {
+          return Boolean(document.getElementById("record_video")?.checked);
+        }
+        return undefined;
+      }
+
+      function buildConfigPayload(fields, overrides = {}) {
+        const payload = {};
+        for (const key of Array.isArray(fields) ? fields : []) {
+          payload[key] = Object.prototype.hasOwnProperty.call(overrides, key)
+            ? overrides[key]
+            : readConfigValue(key);
+        }
+        return payload;
       }
 
       function getCurrentEmailSource() {
@@ -4898,7 +4911,7 @@
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(
-              buildConfigPayload({
+              buildConfigPayload(["maintenance_mode"], {
                 maintenance_mode: nextValue,
               }),
             ),
@@ -6867,7 +6880,12 @@
           '<i data-lucide="loader" class="animate-spin"></i> 处理中...';
         lucide.createIcons();
 
-        const payload = buildConfigPayload();
+        const payload = buildConfigPayload([
+          "default_timezone",
+          "default_proxy_group_id",
+          "record_video",
+          "maintenance_mode",
+        ]);
 
         try {
           const res = await authFetch("/api/admin/config", {

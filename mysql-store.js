@@ -3936,7 +3936,7 @@ async function getActiveProxy(groupId = null) {
   const id =
     groupId == null || groupId === "" ? null : normalizeProxyGroupId(groupId);
   const params = [];
-  let sql = `SELECT proxy_url
+  let sql = `SELECT id, proxy_url
          FROM proxy_assets
          WHERE is_active = 1`;
   if (id) {
@@ -3949,8 +3949,8 @@ async function getActiveProxy(groupId = null) {
     return "";
   }
   await runExecute(
-    `UPDATE proxy_assets SET usage_count = usage_count + 1 WHERE proxy_url = ?`,
-    [rows[0].proxy_url],
+    `UPDATE proxy_assets SET usage_count = usage_count + 1 WHERE id = ?`,
+    [rows[0].id],
   ).catch(() => {});
   return substituteProxySession(String(rows[0].proxy_url || ""));
 }

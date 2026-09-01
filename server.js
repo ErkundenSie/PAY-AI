@@ -5337,7 +5337,7 @@ async function handleActivationRequest(req, res) {
         email: extractEmailFromSession(rawSession) || tokenCheck.email || "",
       });
       if (!verification.ok) {
-        return res.status(401).json({
+        return res.status(400).json({
           success: false,
           message: "Session 无法通过 OpenAI 服务验证，请确认有效后重试",
         });
