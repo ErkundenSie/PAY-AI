@@ -1540,8 +1540,8 @@ async function loadAdminConfigRows() {
   }
   adminConfigCache.promise = runQuery(
     `SELECT config_key, config_value
-             FROM app_config
-             WHERE config_key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         FROM app_config
+         WHERE config_key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
     [
       "proxy",
       "max_concurrent_activations",
@@ -1558,6 +1558,7 @@ async function loadAdminConfigRows() {
       "inbox_email_domains",
       "record_video",
       "default_timezone",
+      "default_proxy_group_id",
     ],
   )
     .then((rows) => {
