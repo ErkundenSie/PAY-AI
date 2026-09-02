@@ -16,10 +16,48 @@
   </head>
 
   <body class="recharge-page checkout-page">
+    <svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+      <symbol id="i-arrow-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>
+      </symbol>
+      <symbol id="i-code-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/>
+      </symbol>
+      <symbol id="i-trash-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>
+      </symbol>
+      <symbol id="i-ban" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>
+      </symbol>
+      <symbol id="i-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>
+      </symbol>
+      <symbol id="i-square" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect width="18" height="18" x="3" y="3" rx="2"/>
+      </symbol>
+      <symbol id="i-credit-card" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/>
+      </symbol>
+      <symbol id="i-notebook-tabs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M15 2v20"/><path d="M15 7h5"/><path d="M15 12h5"/><path d="M15 17h5"/>
+      </symbol>
+      <symbol id="i-shield-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>
+      </symbol>
+      <symbol id="i-lock-keyhole" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="16" r="1"/><rect x="3" y="10" width="18" height="12" rx="2"/><path d="M7 10V7a5 5 0 0 1 10 0v3"/>
+      </symbol>
+      <symbol id="i-user-round-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 21a8 8 0 0 1 13.292-6"/><circle cx="10" cy="8" r="5"/><path d="m16 19 2 2 4-4"/>
+      </symbol>
+      <symbol id="i-badge-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="m9 12 2 2 4-4"/>
+      </symbol>
+    </svg>
     <div class="page-shell checkout-shell">
       <header class="checkout-hero">
         <a href="/" class="checkout-back"
-          ><i data-lucide="arrow-left"></i> 返回助手</a
+          ><svg class="lucide" aria-hidden="true"><use href="#i-arrow-left"/></svg> 返回助手</a
         >
       </header>
 
@@ -29,7 +67,7 @@
             <div class="checkout-session-main">
               <div class="checkout-panel-head">
                 <span class="checkout-icon-badge"
-                  ><i data-lucide="code-2"></i
+                  ><svg class="lucide" aria-hidden="true"><use href="#i-code-2"/></svg
                 ></span>
                 <div>
                   <h2>自助开通</h2>
@@ -40,7 +78,7 @@
                 <textarea
                   id="sessionInput"
                   placeholder="粘贴 Session JSON"
-                  rows="1"
+                  rows="3"
                   wrap="off"
                 ></textarea>
                 <p
@@ -56,7 +94,8 @@
                     title="清空 Session"
                     aria-label="清空 Session"
                   >
-                    <i data-lucide="trash-2"></i>
+                    <svg class="lucide" aria-hidden="true"><use href="#i-trash-2"/></svg>
+                    <span class="btn-text">清空</span>
                   </button>
                   <button
                     type="button"
@@ -65,11 +104,11 @@
                     title="取消自动续费"
                     aria-label="取消自动续费"
                   >
-                    <i data-lucide="ban"></i>
+                    <svg class="lucide" aria-hidden="true"><use href="#i-ban"/></svg>
                     <span class="btn-text">取消自动续费</span>
                   </button>
                   <button type="button" id="payBtn" class="checkout-pay-btn">
-                    <i data-lucide="zap"></i>
+                    <svg class="lucide" aria-hidden="true"><use href="#i-zap"/></svg>
                     <span class="btn-text">开通</span>
                     <div class="loader"></div>
                   </button>
@@ -79,7 +118,7 @@
                     class="checkout-stop-btn"
                     hidden
                   >
-                    <i data-lucide="square"></i>
+                    <svg class="lucide" aria-hidden="true"><use href="#i-square"/></svg>
                     <span class="btn-text">停止</span>
                   </button>
                 </div>
@@ -91,7 +130,7 @@
             <article class="checkout-panel">
               <div class="checkout-panel-head">
                 <span class="checkout-icon-badge"
-                  ><i data-lucide="credit-card"></i
+                  ><svg class="lucide" aria-hidden="true"><use href="#i-credit-card"/></svg
                 ></span>
                 <div>
                   <h2>支付信息</h2>
@@ -137,20 +176,19 @@
               </div>
               <div class="checkout-card-box">
                 <span class="checkout-card-box-title">银行卡信息</span>
-                <div class="checkout-labeled-field">
-                  <span>卡号</span>
+                <div>
+                  <label class="field-label" for="cardNumber">卡号</label>
                   <input
                     id="cardNumber"
                     type="text"
-                    inputmode="numeric"
                     autocomplete="cc-number"
-                    placeholder="16 位卡号（支持粘贴卡号|有效期|CVC）"
-                    maxlength="23"
+                    placeholder="16 位卡号（支持粘贴 卡号,有效期,CVC）"
+                    maxlength="96"
                   />
                 </div>
                 <div class="checkout-grid">
-                  <div class="checkout-labeled-field">
-                    <span>有效期</span>
+                  <div>
+                    <label class="field-label" for="cardExpiry">有效期</label>
                     <input
                       id="cardExpiry"
                       type="text"
@@ -160,8 +198,8 @@
                       maxlength="5"
                     />
                   </div>
-                  <div class="checkout-labeled-field">
-                    <span>CVC</span>
+                  <div>
+                    <label class="field-label" for="cardCvc">CVC</label>
                     <input
                       id="cardCvc"
                       type="text"
@@ -172,8 +210,8 @@
                     />
                   </div>
                 </div>
-                <div class="checkout-labeled-field">
-                  <span>持卡人</span>
+                <div>
+                  <label class="field-label" for="cardHolder">持卡人</label>
                   <input
                     id="cardHolder"
                     type="text"
@@ -238,7 +276,7 @@
           <div class="checkout-task-log-head">
             <div class="checkout-panel-head">
               <span class="checkout-icon-badge"
-                ><i data-lucide="notebook-tabs"></i
+                ><svg class="lucide" aria-hidden="true"><use href="#i-notebook-tabs"/></svg
               ></span>
               <div>
                 <h2>本次任务日志</h2>
@@ -274,7 +312,7 @@
       <section class="checkout-assurance-grid" aria-label="服务保障">
         <article class="checkout-assurance-card">
           <span class="checkout-assurance-icon"
-            ><i data-lucide="shield-check"></i
+            ><svg class="lucide" aria-hidden="true"><use href="#i-shield-check"/></svg
           ></span>
           <div>
             <h3>安全保障</h3>
@@ -283,7 +321,7 @@
         </article>
         <article class="checkout-assurance-card">
           <span class="checkout-assurance-icon"
-            ><i data-lucide="lock-keyhole"></i
+            ><svg class="lucide" aria-hidden="true"><use href="#i-lock-keyhole"/></svg
           ></span>
           <div>
             <h3>数据加密</h3>
@@ -292,7 +330,7 @@
         </article>
         <article class="checkout-assurance-card">
           <span class="checkout-assurance-icon"
-            ><i data-lucide="user-round-check"></i
+            ><svg class="lucide" aria-hidden="true"><use href="#i-user-round-check"/></svg
           ></span>
           <div>
             <h3>隐私保护</h3>
@@ -301,7 +339,7 @@
         </article>
         <article class="checkout-assurance-card">
           <span class="checkout-assurance-icon"
-            ><i data-lucide="badge-check"></i
+            ><svg class="lucide" aria-hidden="true"><use href="#i-badge-check"/></svg
           ></span>
           <div>
             <h3>安全可靠</h3>
@@ -466,19 +504,26 @@
       }
 
       function parsePastedCard(value) {
-        const fields = String(value || "")
-          .trim()
-          .split(/[|,，;\t\r\n]+/)
+        const raw = String(value || "").trim();
+        if (!raw) return null;
+        let parts = raw
+          .split(/[|,，;、\t\r\n]+/)
           .map((item) => item.trim())
           .filter(Boolean);
-        const number = digitsOnly(fields[0]);
+        if (parts.length < 3) {
+          const packed = raw.match(
+            /(\d[\d\s-]{11,23}\d)\D+(\d{1,2}\s*[/\-.．／]\s*\d{2,4})\D+(\d{3,4})\b/,
+          );
+          if (packed) parts = [packed[1], packed[2], packed[3]];
+        }
+        const number = digitsOnly(parts[0]);
         if (number.length < 13 || number.length > 19) return null;
 
         let expiryFieldIndex = -1;
         let expiry = "";
-        for (let index = 1; index < fields.length; index += 1) {
-          const match = fields[index].match(
-            /^(\d{1,2})\s*(?:[/-]\s*)?(\d{2}|\d{4})$/,
+        for (let index = 1; index < parts.length; index += 1) {
+          const match = String(parts[index] || "").match(
+            /^(\d{1,2})\s*[/\-.．／]?\s*(\d{2}|\d{4})$/,
           );
           const month = Number(match?.[1]);
           if (!match || month < 1 || month > 12) continue;
@@ -488,13 +533,21 @@
         }
         if (expiryFieldIndex < 0) return null;
 
-        const cvc = fields
+        const cvc = parts
           .slice(expiryFieldIndex + 1)
           .map(digitsOnly)
           .find((field) => /^\d{3,4}$/.test(field));
         if (!cvc) return null;
 
         return { number, expiry, cvc };
+      }
+
+      function applyParsedCard(card) {
+        if (!card) return false;
+        cardNumber.value = formatCardNumber(card.number);
+        cardExpiry.value = card.expiry;
+        cardCvc.value = card.cvc;
+        return true;
       }
 
       function validateCardFields() {
@@ -706,7 +759,6 @@
             : isError
               ? "is-error"
               : isRunning
-          setStopVisible(false);
                 ? "is-running"
                 : "is-pending"
         }`;
@@ -1233,17 +1285,35 @@
         }
       }
 
+      function looksLikeCardBundle(value) {
+        return /[|,，;、]/.test(String(value || ""));
+      }
+
       cardNumber.addEventListener("input", () => {
-        cardNumber.value = formatCardNumber(cardNumber.value);
+        const raw = cardNumber.value;
+        if (looksLikeCardBundle(raw)) {
+          if (applyParsedCard(parsePastedCard(raw))) {
+            showStatus("已识别并填入卡号、有效期和 CVC", "success");
+          }
+          return;
+        }
+        cardNumber.value = formatCardNumber(raw);
       });
       cardNumber.addEventListener("paste", (event) => {
-        const card = parsePastedCard(event.clipboardData?.getData("text"));
-        if (!card) return;
-        event.preventDefault();
-        cardNumber.value = formatCardNumber(card.number);
-        cardExpiry.value = card.expiry;
-        cardCvc.value = card.cvc;
-        showStatus("已识别并填入卡号、有效期和 CVC", "success");
+        const text = String(
+          event.clipboardData?.getData("text/plain") ||
+            event.clipboardData?.getData("text") ||
+            "",
+        ).trim();
+        if (!text) return;
+        if (looksLikeCardBundle(text) || parsePastedCard(text)) {
+          event.preventDefault();
+          if (applyParsedCard(parsePastedCard(text))) {
+            showStatus("已识别并填入卡号、有效期和 CVC", "success");
+            return;
+          }
+          cardNumber.value = text;
+        }
       });
       sessionInput.addEventListener("input", updateSessionAccount);
       cardExpiry.addEventListener("input", () => {

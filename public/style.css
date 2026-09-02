@@ -1568,11 +1568,14 @@ button.is-loading .btn-text {
 .checkout-page .checkout-secure-hint svg,
 .checkout-page .checkout-tips-secure svg,
 .checkout-page .checkout-pay-btn svg,
+.checkout-page .checkout-stop-btn svg,
+.checkout-page .checkout-assurance-icon svg,
 .checkout-page .checkout-footnote svg,
 .checkout-page svg.lucide {
   width: 16px;
   height: 16px;
   display: inline-block;
+  flex-shrink: 0;
   vertical-align: middle;
 }
 
@@ -1695,8 +1698,8 @@ body.checkout-page {
 
 .checkout-page .checkout-workspace {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 16px;
   align-items: stretch;
 }
 
@@ -1787,29 +1790,29 @@ body.checkout-page {
 .checkout-page .checkout-session-entry {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "input actions";
-  gap: 8px 12px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "input"
+    "actions";
+  gap: 10px;
+  align-items: stretch;
 }
 
 .checkout-page .checkout-session-entry.has-session-account {
-  padding-top: 20px;
+  padding-top: 0;
 }
 
 .checkout-page .checkout-session-account {
-  position: absolute;
-  top: 0;
-  right: 0;
+  position: static;
   display: none;
-  max-width: 260px;
+  max-width: 100%;
   margin: 0;
   overflow: hidden;
   color: #2563eb;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  line-height: 14px;
-  text-align: right;
+  line-height: 16px;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1821,15 +1824,16 @@ body.checkout-page {
 .checkout-page .checkout-session-entry textarea,
 .checkout-page #sessionInput {
   grid-area: input;
-  height: 34px;
-  min-height: 34px;
-  padding: 7px 12px;
+  width: 100%;
+  height: 72px;
+  min-height: 72px;
+  padding: 10px 12px;
   border: 1px solid #dfe7f5;
-  border-radius: 7px;
+  border-radius: 8px;
   box-shadow: none;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 18px;
-  resize: none;
+  resize: vertical;
 }
 
 .checkout-page .checkout-secure-hint {
@@ -1848,15 +1852,20 @@ body.checkout-page {
   grid-area: actions;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
-  flex-shrink: 0;
 }
 
 .checkout-page .checkout-ghost-btn,
 .checkout-page .checkout-pay-btn,
 .checkout-page .checkout-stop-btn {
-  height: 34px;
-  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  border-radius: 8px;
   font-size: 12px;
   font-weight: 600;
   box-shadow: none;
@@ -1864,21 +1873,22 @@ body.checkout-page {
 
 .checkout-page .checkout-clear-session-btn,
 .checkout-page .checkout-cancel-btn {
-  width: 32px;
-  min-width: 32px;
-  padding: 0;
-  color: #64748b;
+  width: auto;
+  min-width: 0;
+  padding: 0 12px;
+  color: #475569;
   border-color: #dfe7f5;
   background: #fff;
 }
 
-.checkout-page .checkout-cancel-btn .btn-text {
-  display: none;
+.checkout-page .checkout-cancel-btn .btn-text,
+.checkout-page .checkout-clear-session-btn .btn-text {
+  display: inline;
 }
 
 .checkout-page .checkout-pay-btn {
   min-width: 104px;
-  padding: 0 13px;
+  padding: 0 16px;
   background: linear-gradient(135deg, #2f75ff, #1c60ed);
   box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
 }
@@ -1909,19 +1919,23 @@ body.checkout-page {
 }
 
 .checkout-page .checkout-plan-row {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 2px;
+}
+
+.checkout-page .checkout-plan-row:has(#creditQuantityWrap:not([hidden])) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .checkout-page .checkout-card-box {
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  margin-top: 10px;
-  padding: 14px;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px 16px 16px;
   border: 1px solid #e2ebfa;
   border-radius: 10px;
-  background: linear-gradient(180deg, #fbfdff 0%, #f7faff 100%);
+  background: #f8fbff;
 }
 
 .checkout-page .checkout-card-box-title {
@@ -2035,8 +2049,9 @@ body.checkout-page {
 
 .checkout-page .checkout-task-log {
   position: relative;
-  flex: none;
-  height: 540px;
+  flex: 1 1 auto;
+  min-height: 420px;
+  height: auto;
   margin-top: 14px;
   padding: 12px 14px;
   overflow: auto;
@@ -2185,7 +2200,18 @@ body.checkout-page {
       "actions";
   }
 
-  .checkout-page .checkout-session-actions {
+  .checkout-page .chestretch;
+  }
+
+  .checkout-page .checkout-session-actions .checkout-ghost-btn,
+  .checkout-page .checkout-session-actions .checkout-pay-btn,
+  .checkout-page .checkout-session-actions .checkout-stop-btn {
+    flex: 1 1 auto;
+  }
+
+  .checkout-page .checkout-plan-row,
+  .checkout-page .checkout-plan-row:has(#creditQuantityWrap:not([hidden])) {
+    grid-template-columns: 1frssion-actions {
     justify-content: flex-end;
   }
 
