@@ -12,6 +12,7 @@
     />
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="/jwt-decode.js"></script>
+    <script src="/card-parse.js"></script>
     <script src="/us-tax-free-address.js"></script>
   </head>
 
@@ -144,6 +145,7 @@
                     <option value="pro_5x">ChatGPT Pro 5x</option>
                     <option value="pro_20x">ChatGPT Pro 20x</option>
                     <option value="credits">Codex 充值点数</option>
+                    <option value="gift">额度礼品卡</option>
                   </select>
                 </div>
                 <div id="creditQuantityWrap" hidden>
@@ -504,42 +506,13 @@
       }
 
       function parsePastedCard(value) {
-        const raw = String(value || "").trim();
-        if (!raw) return null;
-        let parts = raw
-          .split(/[|,，;、\t\r\n]+/)
-          .map((item) => item.trim())
-          .filter(Boolean);
-        if (parts.length < 3) {
-          const packed = raw.match(
-            /(\d[\d\s-]{11,23}\d)\D+(\d{1,2}\s*[/\-.．／]\s*\d{2,4})\D+(\d{3,4})\b/,
-          );
-          if (packed) parts = [packed[1], packed[2], packed[3]];
-        }
-        const number = digitsOnly(parts[0]);
-        if (number.length < 13 || number.length > 19) return null;
-
-        let expiryFieldIndex = -1;
-        let expiry = "";
-        for (let index = 1; index < parts.length; index += 1) {
-          const match = String(parts[index] || "").match(
-            /^(\d{1,2})\s*[/\-.．／]?\s*(\d{2}|\d{4})$/,
-          );
-          const month = Number(match?.[1]);
-          if (!match || month < 1 || month > 12) continue;
-          expiryFieldIndex = index;
-          expiry = `${String(month).padStart(2, "0")}/${match[2].slice(-2)}`;
-          break;
-        }
-        if (expiryFieldIndex < 0) return null;
-
-        const cvc = parts
-          .slice(expiryFieldIndex + 1)
-          .map(digitsOnly)
-          .find((field) => /^\d{3,4}$/.test(field));
-        if (!cvc) return null;
-
-        return { number, expiry, cvc };
+        const parsed =
+          window.CardParse && typeof window.CardParse.parseCardBundle === "function"
+            ? window.CardParse.parseCardBundle(value)
+            : null;
+        return parsed
+          ? { number: parsed.number, expiry: parsed.expiry, cvc: parsed.cvc }
+          : null;
       }
 
       function applyParsedCard(card) {
@@ -1009,12 +982,26 @@
         const raw = String(planType || "")
           .trim()
           .toLowerCase();
-        return raw === "credits" || raw.startsWith("credits_");
+        return (
+          raw === "credits" ||
+          raw.startsWith("credits_") ||
+          raw === "gift" ||
+          raw.startsWith("gift_")
+        );
+      }
+
+      function isGiftCreditsPlan(planType) {
+        const raw = String(planType || "")
+          .trim()
+          .toLowerCase();
+        return raw === "gift" || raw.startsWith("gift_");
       }
 
       function syncCreditQuantityUi() {
         const show = isCreditsPlan(planSelect.value);
         if (creditQuantityWrap) creditQuantityWrap.hidden = !show;
+        regionSelect.disabled = false;
+        updateRegionHint();
       }
 
       function pickRandom(list) {
@@ -1286,7 +1273,10 @@
       }
 
       function looksLikeCardBundle(value) {
-        return /[|,，;、]/.test(String(value || ""));
+        return window.CardParse &&
+          typeof window.CardParse.looksLikeCardBundle === "function"
+          ? window.CardParse.looksLikeCardBundle(value)
+          : /[|,，;、]/.test(String(value || ""));
       }
 
       cardNumber.addEventListener("input", () => {

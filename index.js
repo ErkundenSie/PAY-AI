@@ -911,7 +911,7 @@ async function run() {
       } else if (!isCredits) {
         console.log("[步骤] 已按选项跳过关闭自动续费");
       }
-      if (isCredits) {
+      if (isCredits && store.isGiftCreditsPlan(planType)) {
         const giftId = String(
           checkoutResult?.giftId || checkoutResult?.data?.gift_id || "",
         ).trim();

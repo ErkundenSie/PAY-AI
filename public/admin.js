@@ -5967,26 +5967,14 @@
       }
 
       function parseImportedCardLine(raw) {
+        if (window.CardParse && typeof window.CardParse.parseCardImportLine === "function") {
+          const parsed = window.CardParse.parseCardImportLine(raw);
+          if (!parsed) return { error: "为空" };
+          return parsed;
+        }
         const text = String(raw || "").trim();
         if (!text) return { error: "为空" };
-        const parts = text
-          .split(/[|,，\t]/)
-          .map((item) => item.trim())
-          .filter(Boolean);
-        if (parts.length < 3) {
-          return { error: "格式错误（卡号|有效期|CVC，也可用逗号分隔）" };
-        }
-        const digits = String(parts[1] || "").replace(/\D/g, "");
-        const card_expiry =
-          digits.length === 4
-            ? `${digits.slice(0, 2)}/${digits.slice(2)}`
-            : String(parts[1] || "").trim();
-        return {
-          card_number: parts[0].replace(/\s+/g, ""),
-          card_expiry,
-          card_cvc: parts[2].replace(/\s+/g, ""),
-          card_holder: parts.slice(3).join(" ").trim(),
-        };
+        return { error: "格式错误（卡号|有效期|CVC，也可用逗号分隔）" };
       }
 
       async function importCardPool() {
@@ -8866,12 +8854,14 @@
                     plan_type: planType,
                     plan_name: planName || undefined,
                     country: region,
-                    credit_quantity: String(planType).startsWith("credits")
-                      ? Number(
-                          document.getElementById("checkout_credit_quantity")
-                            ?.value || 500,
-                        )
-                      : undefined,
+                    credit_quantity:
+                      String(planType).startsWith("credits") ||
+                      String(planType).startsWith("gift")
+                        ? Number(
+                            document.getElementById("checkout_credit_quantity")
+                              ?.value || 500,
+                          )
+                        : undefined,
                   };
                   if (isCustom) {
                     requestBody.cdk_code = "[custom-pay]";
@@ -9022,12 +9012,15 @@
           pro_5x: "Pro 5x",
           pro_20x: "Pro 20x",
           credits: "Codex 点数",
+          gift: "额度礼品卡",
         };
         const currentRaw = sel.value || "plus";
         const current = String(currentRaw).startsWith("credits")
           ? "credits"
-          : currentRaw;
-        const planKeys = ["plus", "pro_5x", "pro_20x", "credits"].filter(
+          : String(currentRaw).startsWith("gift")
+            ? "gift"
+            : currentRaw;
+        const planKeys = ["plus", "pro_5x", "pro_20x", "credits", "gift"].filter(
           (key) => checkoutPlanMap[key],
         );
         const keys = planKeys.length
@@ -9050,7 +9043,12 @@
           document.getElementById("checkout_plan_type")?.value || "plus";
         const input = document.getElementById("checkout_plan_name");
         const wrap = document.getElementById("checkout_credit_quantity_wrap");
-        if (wrap) wrap.hidden = !String(planType).startsWith("credits");
+        const gift = String(planType).startsWith("gift");
+        if (wrap) {
+          wrap.hidden = !(
+            String(planType).startsWith("credits") || gift
+          );
+        }
         const mapped =
           checkoutPlanMap[planType] ||
           checkoutPlanMap.credits ||

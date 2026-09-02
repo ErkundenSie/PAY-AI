@@ -1244,20 +1244,15 @@ function extractBoundCardFromOutput(output) {
 }
 
 function parseManualDebugCard(raw) {
-  const text = String(raw || "").trim();
-  if (!text) return null;
-  const parts = text
-    .split(/[|\t,]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  if (parts.length < 3) {
+  const parsed = cardValidator.parseCardBundle(raw);
+  if (!parsed) {
     throw new Error("手动卡片格式：卡号|月/年|CVC，可再加持卡人姓名");
   }
   const card = {
-    card_number: parts[0].replace(/\s+/g, ""),
-    card_expiry: cardValidator.normalizeExpiry(parts[1]) || parts[1],
-    card_cvc: parts[2].replace(/\s+/g, ""),
-    card_holder: parts[3] || "",
+    card_number: parsed.card_number,
+    card_expiry: parsed.card_expiry,
+    card_cvc: parsed.card_cvc,
+    card_holder: parsed.card_holder || "",
   };
   const numberCheck = cardValidator.validateCardNumber(card.card_number);
   if (!numberCheck.valid) throw new Error(numberCheck.error || "卡号无效");

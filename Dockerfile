@@ -54,7 +54,9 @@ RUN pip install -r requirements-hcaptcha.txt \
 # 复制源码（含 hcaptcha solver）
 COPY . .
 
-RUN mkdir -p debug_screenshots product_files /tmp/hcaptcha_auto_solver_live
+RUN mkdir -p debug_screenshots product_files /tmp/hcaptcha_auto_solver_live \
+    && cp -a /app/node_modules /opt/node_modules \
+    && chmod +x /app/docker-entrypoint.sh
 
 ENV NODE_ENV=production \
     PORT=17621 \
@@ -67,4 +69,5 @@ EXPOSE 17621
 HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
     CMD curl -f http://localhost:17621/api/public/runtime || exit 1
 
+ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]
 CMD ["node", "server.js"]

@@ -71,6 +71,8 @@ services:
       BROWSER_POOL_MAX_SIZE: ${BROWSER_POOL_MAX_SIZE:-24}
       BROWSER_POOL_BASE_PORT: ${BROWSER_POOL_BASE_PORT:-19222}
     volumes:
+      - .:/app
+      - kc_gpt_node_modules:/app/node_modules
       - ./debug_screenshots:/app/debug_screenshots
       - ./data:/app/data
       - ./product_files:/app/product_files
@@ -83,3 +85,4 @@ services:
 
 volumes:
   mysql_data:
+  kc_gpt_node_modules:

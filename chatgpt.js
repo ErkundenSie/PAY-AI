@@ -2048,15 +2048,17 @@ class ChatGPTService {
         this.headers = buildCheckoutHeaders(this.token, { accountId });
       }
       const useGiftCredits =
-        (store.isCreditsPlan(planType) || creditQuantity > 0) &&
-        options.giftCredits !== false;
+        options.giftCredits === true ||
+        (store.isGiftCreditsPlan(planType) && options.giftCredits !== false);
+      const billingCountry = String(country || "").toUpperCase();
+      const billingCurrency = String(currency || "").toUpperCase();
       let giftId = String(options.giftId || "").trim();
       if (useGiftCredits && !giftId) {
         const gift = await this.createGiftCreditsOrder({
           page: options.page,
           amount: creditQuantity,
-          country,
-          currency,
+          country: billingCountry,
+          currency: billingCurrency,
           accountId,
         });
         giftId = String(gift.giftId || "").trim();
@@ -2076,18 +2078,23 @@ class ChatGPTService {
             creditQuantity,
           });
       console.log(
-        `[ChatGPT] 创建 Checkout Session: plan_name=${planName}, country=${country}, currency=${currency}, account_id=${accountId || "none"}, current_plan=${warmupPlan || "none"}, modes=${modes.join("->")}${creditQuantity ? `, credits=${creditQuantity}` : ""}${giftId ? `, gift_id=${giftId}` : ""}${pageCheckoutFirst ? ", via=php-protocol" : ""}`,
+        `[ChatGPT] 创建 Checkout Session: plan_name=${planName}, country=${billingCountry}, currency=${billingCurrency}, account_id=${accountId || "none"}, current_plan=${warmupPlan || "none"}, modes=${modes.join("->")}${creditQuantity ? `, credits=${creditQuantity}` : ""}${giftId ? `, gift_id=${giftId}` : ""}${pageCheckoutFirst ? ", via=php-protocol" : ""}`,
       );
 
       let lastParsed = null;
       for (const uiMode of modes) {
-        const payload = buildCheckoutPayload(planName, country, currency, {
-          uiMode,
-          accountId,
-          creditQuantity,
-          giftId,
-          giftCredits: useGiftCredits,
-        });
+        const payload = buildCheckoutPayload(
+          planName,
+          billingCountry,
+          billingCurrency,
+          {
+            uiMode,
+            accountId,
+            creditQuantity,
+            giftId,
+            giftCredits: useGiftCredits,
+          },
+        );
         console.log(`[ChatGPT] 尝试 checkout 模式: ${planType}-${uiMode}`);
         let parsed;
         if (pageCheckoutFirst) {
@@ -2166,10 +2173,14 @@ class ChatGPTService {
             };
             continue;
           }
-          const resolved = this.resolveCheckoutUrl(parsed.data, country);
+          const resolved = this.resolveCheckoutUrl(
+            parsed.data,
+            billingCountry,
+          );
           if (resolved.checkoutUrl) {
             const processorEntity =
-              parsed.data?.processor_entity || resolveProcessorEntity(country);
+              parsed.data?.processor_entity ||
+              resolveProcessorEntity(billingCountry);
             console.log(
               `[ChatGPT] Checkout route: provider=stripe, processor_entity=${processorEntity}, source=checkout_response`,
             );
@@ -2475,7 +2486,7 @@ async function openApiCheckout(
     `🧭 [步骤] 正在通过 API 创建 Checkout (country=${region}, currency=${billingCurrency}, plan=${planType})...`,
   );
 
-  if (store.isCreditsPlan(planType)) {
+  if (store.isGiftCreditsPlan(planType)) {
     const quantity = store.resolveCreditQuantity(planType, creditQuantity);
     const gpt = new ChatGPTService(page.context().request, token);
     const checkout = await gpt.createCheckoutSession(
@@ -2483,7 +2494,7 @@ async function openApiCheckout(
       region,
       billingCurrency,
       planNameOverride,
-      { page, creditQuantity: quantity },
+      { page, creditQuantity: quantity, giftCredits: true },
     );
     if (checkout.checkoutUrl && checkout.sessionId) {
       console.log(
@@ -2493,6 +2504,27 @@ async function openApiCheckout(
     }
     throw new Error(
       `API 创建礼品 Checkout 失败: ${checkout.error || "未返回 session"}${checkout.giftId ? ` gift_id=${checkout.giftId}` : ""}`,
+    );
+  }
+
+  if (store.isCreditsPlan(planType)) {
+    const quantity = store.resolveCreditQuantity(planType, creditQuantity);
+    const gpt = new ChatGPTService(page.context().request, token);
+    const checkout = await gpt.createCheckoutSession(
+      planType,
+      region,
+      billingCurrency,
+      planNameOverride,
+      { page, creditQuantity: quantity, giftCredits: false },
+    );
+    if (checkout.checkoutUrl && checkout.sessionId) {
+      console.log(
+        `✅ [步骤] Codex 点数走协议支付: session=${checkout.sessionId} quantity=${quantity}`,
+      );
+      return { ...checkout, checkoutUrl: checkout.checkoutUrl };
+    }
+    throw new Error(
+      `API 创建 Codex 点数 Checkout 失败: ${checkout.error || "未返回 session"}`,
     );
   }
 

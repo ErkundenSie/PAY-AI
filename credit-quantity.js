@@ -8,6 +8,7 @@ const CHECKOUT_PLANS = [
   { id: "pro_5x", label: "ChatGPT Pro 5x" },
   { id: "pro_20x", label: "ChatGPT Pro 20x" },
   { id: "credits", label: "Codex 充值点数" },
+  { id: "gift", label: "额度礼品卡" },
 ];
 const PLAN_NAME_MAP = {
   plus: "chatgptplusplan",
@@ -19,6 +20,12 @@ const PLAN_NAME_MAP = {
   credits_1000: "chatgptbusiness_usage_based",
   credits_1500: "chatgptbusiness_usage_based",
   credits_2000: "chatgptbusiness_usage_based",
+  gift: "chatgptbusiness_usage_based",
+  gift_250: "chatgptbusiness_usage_based",
+  gift_500: "chatgptbusiness_usage_based",
+  gift_1000: "chatgptbusiness_usage_based",
+  gift_1500: "chatgptbusiness_usage_based",
+  gift_2000: "chatgptbusiness_usage_based",
 };
 const PLAN_TYPE_LABELS = {
   plus: "ChatGPT Plus",
@@ -30,13 +37,30 @@ const PLAN_TYPE_LABELS = {
   credits_1000: "Codex 1000 点",
   credits_1500: "Codex 1500 点",
   credits_2000: "Codex 2000 点",
+  gift: "额度礼品卡",
+  gift_250: "礼品卡 250 点",
+  gift_500: "礼品卡 500 点",
+  gift_1000: "礼品卡 1000 点",
+  gift_1500: "礼品卡 1500 点",
+  gift_2000: "礼品卡 2000 点",
 };
+
+function isGiftCreditsPlan(planType) {
+  const raw = String(planType || "")
+    .trim()
+    .toLowerCase();
+  return raw === "gift" || raw.startsWith("gift_");
+}
 
 function isCreditsPlan(planType) {
   const raw = String(planType || "")
     .trim()
     .toLowerCase();
-  return raw === "credits" || raw.startsWith("credits_");
+  return (
+    raw === "credits" ||
+    raw.startsWith("credits_") ||
+    isGiftCreditsPlan(raw)
+  );
 }
 
 function normalizeCreditQuantity(value) {
@@ -49,7 +73,9 @@ function resolveCreditQuantity(planType, quantity) {
   const raw = String(planType || "")
     .trim()
     .toLowerCase();
-  const fromPlan = Number((raw.match(/^credits_(\d+)$/) || [])[1] || 0);
+  const fromPlan = Number(
+    (raw.match(/^(?:credits|gift)_(\d+)$/) || [])[1] || 0,
+  );
   return normalizeCreditQuantity(quantity || fromPlan || 0);
 }
 
@@ -64,7 +90,7 @@ function getCheckoutPlanNameMap() {
 }
 
 function resolvePlanName(planType) {
-  if (isCreditsPlan(planType)) {
+  if (isGiftCreditsPlan(planType) || isCreditsPlan(planType)) {
     return PLAN_NAME_MAP.credits;
   }
   return PLAN_NAME_MAP[planType] || PLAN_NAME_MAP.plus;
@@ -76,6 +102,10 @@ function getPlanTypeLabel(planType) {
     .toLowerCase();
   if (PLAN_TYPE_LABELS[raw]) {
     return PLAN_TYPE_LABELS[raw];
+  }
+  if (isGiftCreditsPlan(raw)) {
+    const quantity = resolveCreditQuantity(raw, 0);
+    return quantity ? `礼品卡 ${quantity} 点` : PLAN_TYPE_LABELS.gift;
   }
   if (isCreditsPlan(raw)) {
     const quantity = resolveCreditQuantity(raw, 0);
@@ -92,6 +122,7 @@ module.exports = {
   PLAN_NAME_MAP,
   PLAN_TYPE_LABELS,
   isCreditsPlan,
+  isGiftCreditsPlan,
   normalizeCreditQuantity,
   resolveCreditQuantity,
   listCheckoutPlans,

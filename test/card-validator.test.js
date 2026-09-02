@@ -3,6 +3,7 @@
 const {
   validateExpiry,
   parseCardImportLine,
+  parseCardBundle,
 } = require("../card-validator");
 
 describe("card import formats", () => {
@@ -28,6 +29,14 @@ describe("card import formats", () => {
       card_number: "5349336383247282",
       card_expiry: "04/31",
       card_cvc: "937",
+    });
+  });
+
+  it("parses comma gift-card paste bundles", () => {
+    expect(parseCardBundle("5378727122975684,09/28,748")).toMatchObject({
+      number: "5378727122975684",
+      expiry: "09/28",
+      cvc: "748",
     });
   });
 });

@@ -15,6 +15,7 @@ describe("credit quantity", () => {
   it("detects credits plans", () => {
     expect(isCreditsPlan("credits")).toBe(true);
     expect(isCreditsPlan("credits_500")).toBe(true);
+    expect(isCreditsPlan("gift")).toBe(true);
     expect(isCreditsPlan("plus")).toBe(false);
   });
 
@@ -35,6 +36,7 @@ describe("credit quantity", () => {
       "pro_5x",
       "pro_20x",
       "credits",
+      "gift",
     ]);
     expect(resolvePlanName("plus")).toBe("chatgptplusplan");
     expect(resolvePlanName("credits_500")).toBe("chatgptbusiness_usage_based");
@@ -49,6 +51,7 @@ describe("credit quantity", () => {
       "pro_5x",
       "pro_20x",
       "credits",
+      "gift",
     ]);
   });
 });
