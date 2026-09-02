@@ -1712,6 +1712,20 @@ function analyzeProcessOutput(output, timedOut) {
   }
 
   if (
+    /already paid|already_subscribed/i.test(normalized) ||
+    normalized.includes("该账号可能已订阅")
+  ) {
+    return {
+      status: "failed",
+      message: "该账号已开通订阅，无需重复兑换，请更换未订阅账号后重试",
+      reachedPayment: false,
+      shouldRetry: false,
+      deletePhone: false,
+      deleteCard: false,
+    };
+  }
+
+  if (
     normalized.includes("无法获取支付链接") ||
     normalized.includes("API 创建 Checkout 失败") ||
     normalized.includes("createCheckoutSession 失败") ||

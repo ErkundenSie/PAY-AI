@@ -22,6 +22,7 @@ const {
   buildGiftCreditsPurchaseUrl,
   buildCodexCreditPurchaseUrl,
   isCodexCreditPurchaseUrl,
+  ChatGPTService,
 } = require("../chatgpt");
 
 describe("chatgpt checkout helpers", () => {
@@ -382,5 +383,68 @@ describe("chatgpt checkout helpers", () => {
     ).toHaveLength(25);
     expect(obj.c).toBe("c-token");
     expect(isUsableCheckoutSentinel(token)).toBe(true);
+  });
+
+  it("retries gift page.evaluate after navigation destroys the context", async () => {
+    let calls = 0;
+    const page = {
+      url: () => "https://chatgpt.com/",
+      goto: async () => {},
+      waitForLoadState: async () => {},
+      evaluate: async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw new Error(
+            "page.evaluate: Execution context was destroyed, most likely because of a navigation",
+          );
+        }
+        return {
+          status: 200,
+          bodyText: JSON.stringify({
+            gift_id: "6a978495ed708191ae02f3ca2f266c44",
+          }),
+        };
+      },
+    };
+    const gpt = new ChatGPTService(null, "token");
+    const gift = await gpt.createGiftCreditsOrder({
+      page,
+      amount: 250,
+      country: "PH",
+      currency: "PHP",
+    });
+    expect(calls).toBe(2);
+    expect(gift.giftId).toBe("6a978495ed708191ae02f3ca2f266c44");
+  });
+
+  it("creates gift credits via request api without page.evaluate", async () => {
+    let evaluates = 0;
+    const request = {
+      post: async () => ({
+        status: () => 200,
+        text: async () =>
+          JSON.stringify({ gift_id: "6a978495ed708191ae02f3ca2f266c44" }),
+      }),
+    };
+    const page = {
+      url: () => "https://chatgpt.com/",
+      goto: async () => {},
+      waitForLoadState: async () => {},
+      evaluate: async () => {
+        evaluates += 1;
+        throw new Error(
+          "page.evaluate: Execution context was destroyed, most likely because of a navigation",
+        );
+      },
+    };
+    const gpt = new ChatGPTService(request, "token");
+    const gift = await gpt.createGiftCreditsOrder({
+      page,
+      amount: 250,
+      country: "PH",
+      currency: "PHP",
+    });
+    expect(evaluates).toBe(0);
+    expect(gift.giftId).toBe("6a978495ed708191ae02f3ca2f266c44");
   });
 });

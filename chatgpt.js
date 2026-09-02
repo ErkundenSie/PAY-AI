@@ -503,6 +503,55 @@ function sleepMs(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isDestroyedEvaluateError(err) {
+  return /Execution context was destroyed|most likely because of a navigation/i.test(
+    String((err && err.message) || err || ""),
+  );
+}
+
+async function ensureChatGptPage(page, url = CHATGPT_HOME_URL) {
+  if (!page || typeof page.goto !== "function") return;
+  const current = String(
+    (typeof page.url === "function" && page.url()) || "",
+  );
+  if (!/^https:\/\/chatgpt\.com(\/|$)/i.test(current)) {
+    await page
+      .goto(String(url || CHATGPT_HOME_URL), {
+        waitUntil: "domcontentloaded",
+        timeout: 20000,
+      })
+      .catch(() => {});
+  }
+  await page
+    .waitForLoadState("domcontentloaded", { timeout: 15000 })
+    .catch(() => {});
+}
+
+async function evaluateOnChatGptPage(page, fn, arg, options = {}) {
+  const home = options.url || CHATGPT_HOME_URL;
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await ensureChatGptPage(page, home);
+    await page
+      .waitForLoadState("load", { timeout: 8000 })
+      .catch(() => {});
+    try {
+      return await page.evaluate(fn, arg);
+    } catch (err) {
+      lastErr = err;
+      if (!isDestroyedEvaluateError(err) || attempt >= 3) throw err;
+      console.warn(
+        `[ChatGPT] page.evaluate 因页面跳转中断，重试 ${attempt}/3: ${String(err.message || err).slice(0, 120)}`,
+      );
+      await page
+        .waitForLoadState("domcontentloaded", { timeout: 20000 })
+        .catch(() => {});
+      await sleepMs(400 * attempt);
+    }
+  }
+  throw lastErr;
+}
+
 function buildCheckoutHeaders(accessToken, extra = {}) {
   const token = String(accessToken || "").trim();
   const profile = extractProfileFromToken(token);
@@ -1625,7 +1674,8 @@ class ChatGPTService {
       if (payload.cancel_url) {
         officialPayload.cancel_url = payload.cancel_url;
       }
-      const result = await page.evaluate(
+      const result = await evaluateOnChatGptPage(
+        page,
         async ({ path, payload, headers }) => {
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), 20000);
@@ -1653,6 +1703,11 @@ class ChatGPTService {
           path: CHECKOUT_API_PATH,
           payload: officialPayload,
           headers,
+        },
+        {
+          url: isGiftCreditsCheckoutPayload(payload)
+            ? "https://chatgpt.com/gifts/credits"
+            : CHATGPT_HOME_URL,
         },
       );
       parsed = result.error
@@ -1709,7 +1764,8 @@ class ChatGPTService {
       });
     }
 
-    const result = await page.evaluate(
+    const result = await evaluateOnChatGptPage(
+      page,
       async ({ path, payload, token, sentinel }) => {
         const liveSentinel = String(
           window.__kcSentinelToken || sentinel || "",
@@ -1758,6 +1814,11 @@ class ChatGPTService {
         payload,
         token: this.token,
         sentinel,
+      },
+      {
+        url: isGiftCreditsCheckoutPayload(payload)
+          ? "https://chatgpt.com/gifts/credits"
+          : CHATGPT_HOME_URL,
       },
     );
 
@@ -1902,21 +1963,48 @@ class ChatGPTService {
     const url = /^https?:\/\//i.test(String(path || ""))
       ? String(path)
       : `https://chatgpt.com${String(path || "").startsWith("/") ? path : `/${path}`}`;
-    if (page && typeof page.goto === "function") {
-      const current = String(
-        (typeof page.url === "function" && page.url()) || "",
-      );
-      if (!/^https:\/\/chatgpt\.com(\/|$)/i.test(current)) {
-        await page
-          .goto("https://chatgpt.com/gifts/credits", {
-            waitUntil: "domcontentloaded",
-            timeout: 20000,
-          })
-          .catch(() => {});
+    const stayOnGiftCredits = /gift-credits|gifts\/credits/i.test(
+      String(path || url),
+    );
+    const requestHeaders = {
+      ...headers,
+      origin: "https://chatgpt.com",
+      referer: stayOnGiftCredits
+        ? "https://chatgpt.com/gifts/credits"
+        : "https://chatgpt.com/",
+    };
+    const fn =
+      this.request &&
+      this.request[verb === "GET" ? "get" : "post"];
+    if (typeof fn === "function") {
+      try {
+        const response = await fn.call(this.request, url, {
+          headers: requestHeaders,
+          data: verb === "GET" ? undefined : body,
+          timeout: 20000,
+        });
+        const bodyText = await response.text().catch(() => "");
+        const parsed = parseCheckoutApiBody(response.status(), bodyText);
+        if (
+          parsed.ok ||
+          (parsed.status >= 400 &&
+            parsed.status !== 401 &&
+            parsed.status !== 403)
+        ) {
+          return parsed;
+        }
+        console.warn(
+          `[ChatGPT] gift-credits 请求 API HTTP ${parsed.status}，改用页面 fetch: ${String(parsed.error || "").slice(0, 80)}`,
+        );
+      } catch (err) {
+        console.warn(
+          `[ChatGPT] gift-credits 请求 API 失败，改用页面 fetch: ${String(err.message || err).slice(0, 80)}`,
+        );
       }
     }
     if (page && typeof page.evaluate === "function") {
-      const result = await page.evaluate(
+      const result = await evaluateOnChatGptPage(
+        page,
         async ({ url, method, headers, body }) => {
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), 20000);
@@ -1941,24 +2029,17 @@ class ChatGPTService {
             clearTimeout(timer);
           }
         },
-        { url, method: verb, headers, body },
+        { url, method: verb, headers: requestHeaders, body },
+        {
+          url: stayOnGiftCredits
+            ? "https://chatgpt.com/gifts/credits"
+            : CHATGPT_HOME_URL,
+        },
       );
       if (result.error) {
         return { ok: false, status: 0, data: {}, error: result.error };
       }
       return parseCheckoutApiBody(result.status, result.bodyText);
-    }
-    const fn =
-      this.request &&
-      this.request[verb === "GET" ? "get" : "post"];
-    if (typeof fn === "function") {
-      const response = await fn.call(this.request, url, {
-        headers,
-        data: verb === "GET" ? undefined : body,
-        timeout: 20000,
-      });
-      const bodyText = await response.text().catch(() => "");
-      return parseCheckoutApiBody(response.status(), bodyText);
     }
     return { ok: false, status: 0, data: {}, error: "missing request api" };
   }
