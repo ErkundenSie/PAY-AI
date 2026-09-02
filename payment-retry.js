@@ -138,7 +138,12 @@ async function attemptCardPayment(
           currency,
           name: holderName,
           email,
-          planName: checkout?.data?.plan_name || checkout?.planName || "",
+          planName:
+            checkout?.data?.plan_name ||
+            checkout?.planName ||
+            planType ||
+            "",
+          credits: store.isCreditsPlan(planType),
         },
         accountId,
         email,

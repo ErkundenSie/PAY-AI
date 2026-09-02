@@ -2,7 +2,7 @@ require("./load-env");
 
 const { executePaymentWithRetry } = require("./payment-retry");
 const { openPricingCheckout } = require("./pricing-checkout");
-const { openApiCheckout } = require("./chatgpt");
+const { ChatGPTService, openApiCheckout } = require("./chatgpt");
 const { hydrateCheckoutFromUrl } = require("./checkout-protocol");
 const store = require("./mysql-store");
 const { getRegionConfig, getRegionBrowserProfile } = require("./region-config");
@@ -756,8 +756,14 @@ async function run() {
 
     if (debugOnly) {
       const checkoutUrl = checkoutResult?.checkoutUrl || page.url();
+      const giftId = String(
+        checkoutResult?.giftId || checkoutResult?.data?.gift_id || "",
+      ).trim();
       console.log(`🔗 [调试] 支付链接: ${checkoutUrl}`);
       console.log(`CHECKOUT_URL: ${checkoutUrl}`);
+      if (giftId) {
+        console.log(`GIFT_ID: ${giftId}`);
+      }
       console.log("CHECKOUT_DEBUG_SUCCESS");
       return;
     }
@@ -904,6 +910,33 @@ async function run() {
         }
       } else if (!isCredits) {
         console.log("[步骤] 已按选项跳过关闭自动续费");
+      }
+      if (isCredits) {
+        const giftId = String(
+          checkoutResult?.giftId || checkoutResult?.data?.gift_id || "",
+        ).trim();
+        if (giftId) {
+          try {
+            const gpt = new ChatGPTService(
+              page.context().request,
+              accessToken,
+            );
+            const gift = await gpt.fetchGiftCreditsRedeem({
+              page,
+              giftId,
+              accountId: checkoutResult?.accountId || loginInfo.accountId,
+            });
+            console.log(`GIFT_ID: ${giftId}`);
+            if (gift.redeemUrl) {
+              console.log(`GIFT_REDEEM_URL: ${gift.redeemUrl}`);
+              console.log(`兑换链接: ${gift.redeemUrl}`);
+            }
+          } catch (err) {
+            console.warn(
+              `[步骤] 读取礼品兑换链接失败: ${String(err.message || err).slice(0, 160)}`,
+            );
+          }
+        }
       }
       console.log("PAYMENT_SUCCESS");
       removeMediaFiles(paymentResult.screenshots);

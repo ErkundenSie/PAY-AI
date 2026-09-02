@@ -1161,6 +1161,11 @@ function extractCheckoutUrlFromOutput(output) {
   return match ? match[1].trim() : "";
 }
 
+function extractGiftRedeemUrlFromOutput(output) {
+  const match = String(output || "").match(/GIFT_REDEEM_URL:\s*(https?\S+)/);
+  return match ? match[1].trim() : "";
+}
+
 function analyzeCheckoutDebugOutput(output, timedOut) {
   const normalized = String(output || "");
   const runtimeError = extractRuntimeErrorMessage(normalized);
@@ -1615,9 +1620,14 @@ function analyzeProcessOutput(output, timedOut) {
     normalized.includes("支付成功");
 
   if (success) {
+    const giftRedeemUrl = extractGiftRedeemUrlFromOutput(normalized);
     return {
       status: "success",
-      message: "激活成功",
+      message: giftRedeemUrl
+        ? `支付成功，兑换链接: ${giftRedeemUrl}`
+        : "激活成功",
+      checkoutUrl: giftRedeemUrl || undefined,
+      giftRedeemUrl,
       reachedPayment: true,
       shouldRetry: false,
       deletePhone: false,

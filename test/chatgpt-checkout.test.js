@@ -16,6 +16,10 @@ const {
   assembleCheckoutSentinelToken,
   isUsableCheckoutSentinel,
   isCreditsCheckoutPayload,
+  isGiftCreditsCheckoutPayload,
+  extractGiftId,
+  buildGiftCreditsRedeemUrl,
+  buildGiftCreditsPurchaseUrl,
   buildCodexCreditPurchaseUrl,
   isCodexCreditPurchaseUrl,
 } = require("../chatgpt");
@@ -35,12 +39,43 @@ describe("chatgpt checkout helpers", () => {
     });
   });
 
-  it("builds Codex credit purchase payload", () => {
+  it("builds gift credits purchase payload", () => {
+    const payload = buildCheckoutPayload(
+      "chatgptbusiness_usage_based",
+      "US",
+      "USD",
+      {
+        accountId: "acct-1",
+        creditQuantity: 500,
+        giftId: "6a978495ed708191ae02f3ca2f266c44",
+      },
+    );
+    expect(payload).toEqual({
+      entry_point: "gift_credits_purchase",
+      checkout_ui_mode: "custom",
+      billing_details: { country: "US", currency: "USD" },
+      credit_purchase_data: {
+        quantity: 500,
+        unit: "credit",
+        account_id: "acct-1",
+      },
+      purchased_gift_checkout_data: {
+        gift_id: "6a978495ed708191ae02f3ca2f266c44",
+      },
+      cancel_url:
+        "https://chatgpt.com/gifts/credits?gift_id=6a978495ed708191ae02f3ca2f266c44&credits=500&checkout=cancelled",
+      account_id: "acct-1",
+      openai_account_id: "acct-1",
+    });
+    expect(isGiftCreditsCheckoutPayload(payload)).toBe(true);
+  });
+
+  it("keeps workspace credits payload when giftCredits is false", () => {
     const payload = buildCheckoutPayload(
       "chatgptbusiness_usage_based",
       "PH",
       "PHP",
-      { accountId: "acct-1", creditQuantity: 1000 },
+      { accountId: "acct-1", creditQuantity: 1000, giftCredits: false },
     );
     expect(payload).toEqual({
       entry_point: "codex_team_start",
@@ -57,6 +92,7 @@ describe("chatgpt checkout helpers", () => {
       account_id: "acct-1",
       openai_account_id: "acct-1",
     });
+    expect(isGiftCreditsCheckoutPayload(payload)).toBe(false);
   });
 
   it("detects credits checkout payloads", () => {
@@ -71,7 +107,39 @@ describe("chatgpt checkout helpers", () => {
     });
 
     expect(isCreditsCheckoutPayload(creditsPayload)).toBe(true);
+    expect(isGiftCreditsCheckoutPayload(creditsPayload)).toBe(true);
     expect(isCreditsCheckoutPayload(plusPayload)).toBe(false);
+  });
+
+  it("builds gift redeem urls from gift records", () => {
+    expect(extractGiftId({ gift_id: "6a978495ed708191ae02f3ca2f266c44" })).toBe(
+      "6a978495ed708191ae02f3ca2f266c44",
+    );
+    expect(
+      buildGiftCreditsRedeemUrl(
+        { redeem_url: "https://chatgpt.com/gifts/redeem/ABC" },
+        "6a978495ed708191ae02f3ca2f266c44",
+      ),
+    ).toBe("https://chatgpt.com/gifts/redeem/ABC");
+    expect(
+      buildGiftCreditsRedeemUrl({ code: "ABC123" }, "gid"),
+    ).toBe("https://chatgpt.com/gifts/redeem/ABC123");
+    expect(buildGiftCreditsRedeemUrl({}, "6a978495ed708191ae02f3ca2f266c44")).toBe(
+      "https://chatgpt.com/gifts/6a978495ed708191ae02f3ca2f266c44",
+    );
+    expect(
+      buildGiftCreditsRedeemUrl(
+        {
+          url: "https://chatgpt.com/gifts/credits?gift_id=6a978495ed708191ae02f3ca2f266c44&credits=500",
+        },
+        "6a978495ed708191ae02f3ca2f266c44",
+      ),
+    ).toBe("https://chatgpt.com/gifts/6a978495ed708191ae02f3ca2f266c44");
+    expect(
+      buildGiftCreditsPurchaseUrl(500, "6a978495ed708191ae02f3ca2f266c44"),
+    ).toBe(
+      "https://chatgpt.com/gifts/credits?gift_id=6a978495ed708191ae02f3ca2f266c44&credits=500",
+    );
   });
 
   it("builds the official Codex credit purchase URL", () => {
@@ -148,6 +216,20 @@ describe("chatgpt checkout helpers", () => {
       "custom",
       "hosted",
     ]);
+  });
+
+  it("prefers custom checkout for credits even with an active plus plan", () => {
+    expect(
+      resolveCheckoutModes("chatgptplusplan", {
+        credits: true,
+        creditQuantity: 1000,
+      }),
+    ).toEqual(["custom", "hosted"]);
+    expect(
+      resolveCheckoutModes("chatgptbusiness_usage_based", {
+        creditQuantity: 500,
+      }),
+    ).toEqual(["custom", "hosted"]);
   });
 
   it("summarizes checkout cookies without values", () => {

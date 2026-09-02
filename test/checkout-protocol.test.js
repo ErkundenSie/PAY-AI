@@ -12,6 +12,7 @@ const {
   isExpectedProtocolDueAmount,
   stripeHeaders,
   toSameOriginPath,
+  resolveProtocolClientMode,
 } = require("../checkout-protocol");
 
 describe("checkout protocol helpers", () => {
@@ -142,6 +143,15 @@ describe("checkout protocol helpers", () => {
     expect(isExpectedProtocolDueAmount(0, "PHP")).toBe(false);
   });
 
+  it("accepts any positive due amount for usage-based credits", () => {
+    expect(
+      isExpectedProtocolDueAmount(250, "PHP", "chatgptbusiness_usage_based"),
+    ).toBe(true);
+    expect(
+      isExpectedProtocolDueAmount(0, "PHP", "chatgptbusiness_usage_based"),
+    ).toBe(false);
+  });
+
   it("does not treat protocol PHP 982.14 as still-taxed UI due", () => {
     const { isAlreadyTaxFreeCheckoutDue } = require("../stripe-payment");
     expect(
@@ -181,6 +191,39 @@ describe("checkout protocol helpers", () => {
     expect(text).toContain("client_context");
     expect(text).toContain("client_context%5Bmode%5D=subscription");
     expect(text).not.toContain("customer_session_client_secret");
+  });
+
+  it("uses payment mode without setup_future_usage for credits", () => {
+    expect(
+      resolveProtocolClientMode({
+        credits: true,
+        planName: "chatgptbusiness_usage_based",
+      }),
+    ).toBe("payment");
+    const form = buildConfirmationTokenForm({
+      card: {
+        number: "4242424242424242",
+        cvc: "123",
+        exp_month: "12",
+        exp_year: "2028",
+      },
+      billing: {
+        line1: "123 Main St",
+        city: "Portland",
+        country: "US",
+        postal_code: "97201",
+        state: "OR",
+        name: "Jane Doe",
+        currency: "php",
+        planName: "chatgptbusiness_usage_based",
+        credits: true,
+      },
+      publishableKey: "pk_live_xxx",
+    });
+    const text = form.toString();
+    expect(text).toContain("client_context%5Bmode%5D=payment");
+    expect(text).not.toContain("setup_future_usage=off_session");
+    expect(text).not.toContain("client_context%5Bmode%5D=subscription");
   });
 
   it("keeps client_context mode even without customer session secret", () => {

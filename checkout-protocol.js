@@ -64,6 +64,23 @@ function protocolEnabled() {
   return raw !== "0" && raw !== "false" && raw !== "off";
 }
 
+function isCreditsProtocolPlan(planName = "") {
+  return /credit|usage_based|platformbusiness|chatgptbusiness/i.test(
+    String(planName || ""),
+  );
+}
+
+function resolveProtocolClientMode(billing = {}) {
+  const explicit = String(billing.clientMode || billing.mode || "")
+    .trim()
+    .toLowerCase();
+  if (explicit === "payment" || explicit === "subscription") return explicit;
+  if (billing.credits === true || isCreditsProtocolPlan(billing.planName)) {
+    return "payment";
+  }
+  return "subscription";
+}
+
 function resolveProcessorEntity(country, checkout = {}) {
   const fromCheckout = String(checkout.processor_entity || "").trim();
   if (fromCheckout) return fromCheckout;
@@ -195,6 +212,9 @@ function extractCheckoutContext(checkout = {}, country = "") {
       data.publishable_key || data.publishableKey || "",
     ).trim(),
     hosted: parsedUrl.hosted,
+    planName: String(
+      checkout.planName || data.plan_name || data.planName || "",
+    ).trim(),
     data,
   };
 }
@@ -286,6 +306,7 @@ function buildConfirmationTokenForm({
   const sid = `${crypto.randomUUID().replace(/-/g, "")}4e41f2`;
   const pm = "payment_method_data";
   const params = new URLSearchParams();
+  const clientMode = resolveProtocolClientMode(billing);
   const pairs = [
     [`${pm}[type]`, "card"],
     [`${pm}[card][number]`, card.number],
@@ -350,12 +371,14 @@ function buildConfirmationTokenForm({
       `${pm}[client_attribution_metadata][merchant_integration_additional_elements][2]`,
       "address",
     ],
-    ["setup_future_usage", "off_session"],
+    ...(clientMode === "subscription"
+      ? [["setup_future_usage", "off_session"]]
+      : []),
     [
       "client_context[currency]",
       String(billing.currency || "usd").toLowerCase(),
     ],
-    ["client_context[mode]", "subscription"],
+    ["client_context[mode]", clientMode],
     ["client_context[payment_method_types][0]", "card"],
     ["client_context[payment_method_types][1]", "link"],
   ];
@@ -1083,7 +1106,11 @@ async function completeProtocolCheckout({
         })
         .catch(() => {});
     }
-    if (resolvedAccountId) {
+    const creditsPurchase = Boolean(
+      billing.credits === true ||
+        isCreditsProtocolPlan(billing.planName || ctx.planName),
+    );
+    if (resolvedAccountId && !creditsPurchase) {
       await getSameOriginJson(page, {
         path: `${SUBSCRIPTIONS_PATH}?account_id=${encodeURIComponent(resolvedAccountId)}`,
         headers: {
@@ -1125,4 +1152,6 @@ module.exports = {
   completeProtocolCheckout,
   isExpectedProtocolDueAmount,
   isHostedStripeSession,
+  isCreditsProtocolPlan,
+  resolveProtocolClientMode,
 };
