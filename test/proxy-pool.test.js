@@ -1,11 +1,14 @@
 "use strict";
 
+const net = require("net");
 const axios = require("axios");
 const {
   testProxyUrl,
   mapWithConcurrency,
   normalizeProxyUrl,
   parseProxyMeta,
+  probeProxyConnect,
+  resolveProxyConnectEndpoint,
 } = require("../proxy-pool");
 const { isXrayShareLink, parseShareLink } = require("../xray-relay");
 
@@ -34,6 +37,45 @@ describe("testProxyUrl", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/HTTP 500/);
+  });
+});
+
+describe("probeProxyConnect", () => {
+  it("resolves http proxy host and port", () => {
+    expect(
+      resolveProxyConnectEndpoint("http://user:pass@proxy.example:8080"),
+    ).toEqual({ host: "proxy.example", port: 8080 });
+  });
+
+  it("connects to an open TCP port", async () => {
+    const server = net.createServer((socket) => socket.end());
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address();
+    try {
+      const result = await probeProxyConnect(`http://127.0.0.1:${port}`, {
+        timeoutMs: 800,
+      });
+      expect(result.ok).toBe(true);
+      expect(result.port).toBe(port);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it("fails when the port is closed", async () => {
+    const result = await probeProxyConnect("http://127.0.0.1:1", {
+      timeoutMs: 800,
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("covers hanging connects with an overall timeout", async () => {
+    const started = Date.now();
+    const result = await probeProxyConnect("http://192.0.2.1:81", {
+      timeoutMs: 600,
+    });
+    expect(result.ok).toBe(false);
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 });
 

@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS proxy_assets (
     last_check_ip VARCHAR(64) NOT NULL DEFAULT '',
     last_check_latency_ms INT NULL DEFAULT NULL,
     last_check_error VARCHAR(512) NOT NULL DEFAULT '',
+    connect_fail_count INT NOT NULL DEFAULT 0,
     usage_count INT NOT NULL DEFAULT 0,
     sort_order INT NOT NULL DEFAULT 0,
     group_id BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '所属代理分组',

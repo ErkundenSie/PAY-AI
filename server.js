@@ -35,7 +35,7 @@ const {
   clearCheckoutChoice,
 } = require("./checkout-choice");
 const taxFreeAddress = require("./tax-free-address");
-const { testProxyUrl, normalizeProxyLines, mapWithConcurrency } = require("./proxy-pool");
+const { testProxyUrl, normalizeProxyLines, mapWithConcurrency, probeProxyConnect, substituteProxySession } = require("./proxy-pool");
 const {
   extractSessionPreview,
   extractAccessTokenFromRaw,
@@ -1311,7 +1311,29 @@ function resolveCustomCheckoutUrl(raw) {
 
 async function pickTaskProxy(rawGroupId) {
   const groupId = await store.resolveProxyGroupId(rawGroupId);
-  return store.getActiveProxy(groupId);
+  const rows = await store.listActiveProxies(groupId, 3);
+  if (!rows.length) return "";
+  let lastError = "";
+  for (const row of rows) {
+    const probe = await probeProxyConnect(row.proxy_url, { timeoutMs: 2500 });
+    const recorded = await store
+      .recordProxyConnectProbe(row.id, probe)
+      .catch(() => ({ deactivated: false, failCount: 0 }));
+    if (probe.ok) {
+      await store.touchProxyUsage(row.id);
+      return substituteProxySession(String(row.proxy_url || ""));
+    }
+    lastError = probe.error || "连接失败";
+    const failCount = Number(recorded.failCount || 0);
+    console.warn(
+      `[Proxy] 节点 ${row.id} 连接失败 ${failCount}/3: ${lastError}${
+        recorded.deactivated ? "，已停用" : ""
+      }`,
+    );
+  }
+  throw new Error(
+    lastError ? `代理节点无法连接: ${lastError}` : "代理节点无法连接",
+  );
 }
 
 async function startPublicCheckoutPay(body = {}, options = {}) {

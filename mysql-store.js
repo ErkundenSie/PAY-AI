@@ -884,6 +884,11 @@ async function ensureLegacyColumns() {
     "last_check_error",
     "VARCHAR(512) NOT NULL DEFAULT ''",
   );
+  await ensureColumn(
+    "proxy_assets",
+    "connect_fail_count",
+    "INT NOT NULL DEFAULT 0",
+  );
   await ensureColumn("proxy_assets", "usage_count", "INT NOT NULL DEFAULT 0");
   await ensureColumn("proxy_assets", "sort_order", "INT NOT NULL DEFAULT 0");
   await ensureColumn(
@@ -3520,6 +3525,7 @@ function formatProxyAssetRow(row) {
         ? null
         : Number(row.last_check_latency_ms),
     last_check_error: String(row.last_check_error || ""),
+    connect_fail_count: Number(row.connect_fail_count || 0),
     usage_count: Number(row.usage_count || 0),
     sort_order: Number(row.sort_order || 0),
     group_id: row.group_id ? Number(row.group_id) : null,
@@ -3864,9 +3870,13 @@ async function deleteProxyAssetsByIds(proxyIds = []) {
 }
 
 async function setProxyAssetActive(id, isActive) {
+  const enabled = Boolean(isActive);
   const result = await runExecute(
-    `UPDATE proxy_assets SET is_active = ? WHERE id = ?`,
-    [isActive ? 1 : 0, Number(id)],
+    `UPDATE proxy_assets
+         SET is_active = ?,
+             connect_fail_count = IF(? = 1, 0, connect_fail_count)
+         WHERE id = ?`,
+    [enabled ? 1 : 0, enabled ? 1 : 0, Number(id)],
   );
   if (!result.affectedRows) {
     return { success: false, error: "代理不存在" };
@@ -3925,16 +3935,63 @@ async function updateProxyAssetCheck(id, checkResult) {
              last_check_ok = ?,
              last_check_ip = ?,
              last_check_latency_ms = ?,
-             last_check_error = ?
+             last_check_error = ?,
+             connect_fail_count = IF(? = 1, 0, connect_fail_count)
          WHERE id = ?`,
     [
       ok ? 1 : 0,
       ok ? String(checkResult.ip || "") : "",
       ok ? Number(checkResult.latencyMs || 0) : null,
       ok ? "" : String(checkResult.error || "检测失败").slice(0, 512),
+      ok ? 1 : 0,
       Number(id),
     ],
   );
+}
+
+const PROXY_CONNECT_FAIL_LIMIT = 3;
+
+async function recordProxyConnectProbe(id, probe) {
+  const proxyId = Number(id);
+  if (!Number.isInteger(proxyId) || proxyId <= 0) {
+    return { deactivated: false, failCount: 0 };
+  }
+  const latency = Number(probe?.latencyMs);
+  const latencyMs = Number.isFinite(latency) ? latency : null;
+  if (probe?.ok) {
+    await runExecute(
+      `UPDATE proxy_assets
+           SET last_check_at = CURRENT_TIMESTAMP,
+               last_check_ok = 1,
+               last_check_latency_ms = ?,
+               last_check_error = '',
+               connect_fail_count = 0
+           WHERE id = ?`,
+      [latencyMs, proxyId],
+    );
+    return { deactivated: false, failCount: 0 };
+  }
+  const error = String(probe?.error || "连接失败").slice(0, 512);
+  await runExecute(
+    `UPDATE proxy_assets
+         SET last_check_at = CURRENT_TIMESTAMP,
+             last_check_ok = 0,
+             last_check_latency_ms = ?,
+             last_check_error = ?,
+             connect_fail_count = connect_fail_count + 1,
+             is_active = IF(connect_fail_count + 1 >= ?, 0, is_active)
+         WHERE id = ?`,
+    [latencyMs, error, PROXY_CONNECT_FAIL_LIMIT, proxyId],
+  );
+  const rows = await runQuery(
+    `SELECT connect_fail_count, is_active FROM proxy_assets WHERE id = ? LIMIT 1`,
+    [proxyId],
+  );
+  const failCount = Number(rows[0]?.connect_fail_count || 0);
+  return {
+    deactivated: Number(rows[0]?.is_active || 0) !== 1,
+    failCount,
+  };
 }
 
 async function getProxyAssetById(id) {
@@ -3980,9 +4037,10 @@ async function migrateLegacyProxyConfig() {
 
 // 只取代理，不占用手机/卡资产；适合注册/协议提取这种只用代理的子流程
 // 支持 {session} 占位符；每次调用替换为新的随机 sticky session ID
-async function getActiveProxy(groupId = null) {
+async function listActiveProxies(groupId = null, limit = 3) {
   const id =
     groupId == null || groupId === "" ? null : normalizeProxyGroupId(groupId);
+  const take = Math.max(1, Math.min(Number(limit) || 3, 8));
   const params = [];
   let sql = `SELECT id, proxy_url
          FROM proxy_assets
@@ -3991,15 +4049,26 @@ async function getActiveProxy(groupId = null) {
     sql += ` AND group_id = ?`;
     params.push(id);
   }
-  sql += ` ORDER BY RAND() LIMIT 1`;
-  const rows = await runQuery(sql, params);
+  sql += ` ORDER BY RAND() LIMIT ?`;
+  params.push(take);
+  return runQuery(sql, params);
+}
+
+async function touchProxyUsage(id) {
+  const proxyId = Number(id);
+  if (!Number.isInteger(proxyId) || proxyId <= 0) return;
+  await runExecute(
+    `UPDATE proxy_assets SET usage_count = usage_count + 1 WHERE id = ?`,
+    [proxyId],
+  ).catch(() => {});
+}
+
+async function getActiveProxy(groupId = null) {
+  const rows = await listActiveProxies(groupId, 1);
   if (!rows.length) {
     return "";
   }
-  await runExecute(
-    `UPDATE proxy_assets SET usage_count = usage_count + 1 WHERE id = ?`,
-    [rows[0].id],
-  ).catch(() => {});
+  await touchProxyUsage(rows[0].id);
   return substituteProxySession(String(rows[0].proxy_url || ""));
 }
 
@@ -6224,6 +6293,8 @@ module.exports = {
   releaseStaleAssetLocks,
   resetAllAssetLocks,
   getActiveProxy,
+  listActiveProxies,
+  touchProxyUsage,
   resolveProxyGroupId,
   listProxyGroups,
   getProxyGroupById,
@@ -6237,6 +6308,7 @@ module.exports = {
   setProxyAssetActive,
   updateProxyAsset,
   updateProxyAssetCheck,
+  recordProxyConnectProbe,
   getProxyAssetById,
   incrementAssetSuccessCount,
   getAppConfigValue,
