@@ -5,6 +5,7 @@ const mysql = require("mysql2/promise");
 const {
   encryptSecret,
   decryptSecret,
+  reencryptSecret,
   isEncryptedSecret,
 } = require("./data-crypto");
 const {
@@ -1065,7 +1066,7 @@ async function ensureReady() {
 }
 
 async function migrateTaskSessionPayloads() {
-  const rows = await runQuery(
+  const plainRows = await runQuery(
     `SELECT id, session_payload
          FROM task_logs
          WHERE session_payload IS NOT NULL
@@ -1075,14 +1076,34 @@ async function migrateTaskSessionPayloads() {
          LIMIT 200`,
     ["enc:v1:%"],
   );
-  for (const row of rows) {
+  for (const row of plainRows) {
     await runExecute("UPDATE task_logs SET session_payload = ? WHERE id = ?", [
       encryptSecret(row.session_payload),
       row.id,
     ]);
   }
-  if (rows.length)
-    console.log(`[安全] 已加密 ${rows.length} 条历史 Session 数据`);
+  if (plainRows.length)
+    console.log(`[安全] 已加密 ${plainRows.length} 条历史 Session 数据`);
+
+  const encRows = await runQuery(
+    `SELECT id, session_payload
+         FROM task_logs
+         WHERE session_payload LIKE ?
+         ORDER BY id ASC`,
+    ["enc:v1:%"],
+  );
+  let rotated = 0;
+  for (const row of encRows) {
+    const next = reencryptSecret(row.session_payload);
+    if (next === row.session_payload) continue;
+    await runExecute("UPDATE task_logs SET session_payload = ? WHERE id = ?", [
+      next,
+      row.id,
+    ]);
+    rotated += 1;
+  }
+  if (rotated)
+    console.log(`[安全] 已将 ${rotated} 条 Session 密文迁移到当前数据密钥`);
 }
 
 async function migrateCardAssetSecrets() {
@@ -1098,23 +1119,30 @@ async function migrateCardAssetSecrets() {
          ORDER BY id ASC`,
   );
   let encrypted = 0;
+  let rotated = 0;
   for (const row of rows) {
+    if (isEncryptedSecret(row.card_number)) {
+      const nextNumber = reencryptSecret(row.card_number);
+      const nextCvc = row.card_cvc ? reencryptSecret(row.card_cvc) : row.card_cvc;
+      if (nextNumber === row.card_number && nextCvc === row.card_cvc) {
+        continue;
+      }
+      await runExecute(
+        `UPDATE card_assets
+           SET card_number = ?,
+               card_cvc = ?
+           WHERE id = ?`,
+        [nextNumber, nextCvc, row.id],
+      );
+      rotated += 1;
+      continue;
+    }
     const number = decryptCardField(row.card_number);
     const cvc = decryptCardField(row.card_cvc);
     const packed = encryptCardNumber(number);
     const nextCvc = encryptCardCvc(cvc);
-    const alreadyEncrypted =
-      isEncryptedSecret(row.card_number) &&
-      (!row.card_cvc || isEncryptedSecret(row.card_cvc));
     const last4 = packed.last4 || String(row.card_last4 || "");
     const hash = packed.hash || String(row.card_number_hash || "");
-    if (
-      alreadyEncrypted &&
-      last4 === String(row.card_last4 || "") &&
-      hash === String(row.card_number_hash || "")
-    ) {
-      continue;
-    }
     await runExecute(
       `UPDATE card_assets
            SET card_number = ?,
@@ -1129,6 +1157,9 @@ async function migrateCardAssetSecrets() {
   if (encrypted) {
     console.log(`[安全] 已加密 ${encrypted} 张银行卡敏感字段`);
   }
+  if (rotated) {
+    console.log(`[安全] 已将 ${rotated} 张银行卡密文迁移到当前数据密钥`);
+  }
 }
 
 async function migrateSensitiveAppConfigValues() {
@@ -1140,14 +1171,16 @@ async function migrateSensitiveAppConfigValues() {
     keys,
   );
   for (const row of rows) {
-    const encrypted = encodeConfigValue(
-      row.config_key,
-      decryptSecret(row.config_value || ""),
-    );
-    if (encrypted !== row.config_value) {
+    const next = isEncryptedSecret(row.config_value)
+      ? reencryptSecret(row.config_value || "")
+      : encodeConfigValue(
+          row.config_key,
+          decryptSecret(row.config_value || ""),
+        );
+    if (next !== row.config_value) {
       await runExecute(
         "UPDATE app_config SET config_value = ? WHERE config_key = ?",
-        [encrypted, row.config_key],
+        [next, row.config_key],
       );
     }
   }
