@@ -211,15 +211,15 @@
                       maxlength="4"
                     />
                   </div>
-                </div>
-                <div>
-                  <label class="field-label" for="cardHolder">持卡人</label>
-                  <input
-                    id="cardHolder"
-                    type="text"
-                    autocomplete="cc-name"
-                    placeholder="持卡人姓名"
-                  />
+                  <div>
+                    <label class="field-label" for="cardHolder">持卡人</label>
+                    <input
+                      id="cardHolder"
+                      type="text"
+                      autocomplete="cc-name"
+                      placeholder="持卡人姓名"
+                    />
+                  </div>
                 </div>
               </div>
               <div class="checkout-grid checkout-address-grid">
@@ -295,8 +295,13 @@
             class="checkout-task-log"
             role="log"
             aria-live="polite"
+            data-empty="true"
           >
-            <p class="checkout-task-log-empty">等待开始开通...</p>
+            <div class="checkout-task-log-empty">
+              <svg class="lucide" aria-hidden="true"><use href="#i-notebook-tabs"/></svg>
+              <strong>任务尚未开始</strong>
+              <span>开通任务开始后，日志将在这里实时展示。</span>
+            </div>
           </div>
           <div id="taskProgress" class="task-progress" style="display: none">
             <div class="task-progress-header">
@@ -747,9 +752,19 @@
 
       function showCheckoutTaskLogPlaceholder(message) {
         if (!checkoutTaskLog) return;
-        const empty = document.createElement("p");
+        const empty = document.createElement("div");
         empty.className = "checkout-task-log-empty";
-        empty.textContent = message;
+        const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        icon.classList.add("lucide");
+        icon.setAttribute("aria-hidden", "true");
+        const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+        use.setAttribute("href", "#i-notebook-tabs");
+        icon.appendChild(use);
+        const title = document.createElement("strong");
+        title.textContent = "任务尚未开始";
+        const detail = document.createElement("span");
+        detail.textContent = message;
+        empty.append(icon, title, detail);
         checkoutTaskLog.replaceChildren(empty);
         checkoutTaskLog.dataset.empty = "true";
       }
