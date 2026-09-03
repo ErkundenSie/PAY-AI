@@ -17,10 +17,13 @@ function decodeKey(value) {
 }
 
 function resolveDataEncryptionKey() {
-    const configured = decodeKey(process.env.DATA_ENCRYPTION_KEY);
+    const raw = String(process.env.DATA_ENCRYPTION_KEY || '').trim();
+    const configured = decodeKey(raw);
     if (configured) return configured;
-    if (String(process.env.DATA_ENCRYPTION_KEY || '').trim()) {
-        throw new Error('DATA_ENCRYPTION_KEY 必须是 32 字节的 base64url 密钥');
+    if (raw) {
+        console.warn(
+            '[安全] DATA_ENCRYPTION_KEY 不是 32 字节 base64url（例如口令字符串），已忽略，改用 data/.data-encryption-key',
+        );
     }
 
     const keyFile = path.join(__dirname, 'data', '.data-encryption-key');
