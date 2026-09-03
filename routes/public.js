@@ -381,25 +381,31 @@ function registerPublicRoutes(app, deps) {
   });
 
   app.get("/api/public/runtime", async (req, res) => {
+    const active = Number(getActiveForegroundJobCount() || 0);
+    let max = 1;
+    let queued = 0;
+    let storeReady = false;
     try {
       await ensureStoreReady();
-      const [maxConcurrentActivations, queued] = await Promise.all([
+      const [maxConcurrentActivations, queuedCount] = await Promise.all([
         store.getMaxConcurrentActivations(),
         store.countQueuedForegroundTasks(),
       ]);
-      const max = Math.max(1, Number(maxConcurrentActivations || 1));
-      const active = Number(getActiveForegroundJobCount() || 0);
-      return res.json({
-        success: true,
-        runtime: {
-          active_foreground_jobs: active,
-          max_foreground_jobs: max,
-          queued_tasks: Number(queued || 0),
-        },
-      });
-    } catch (error) {
-      return res.status(500).json({ success: false, message: error.message });
+      max = Math.max(1, Number(maxConcurrentActivations || 1));
+      queued = Number(queuedCount || 0);
+      storeReady = true;
+    } catch (_) {
+      /* 启动中也返回 200，避免反向代理 / Cloudflare 502 */
     }
+    return res.json({
+      success: true,
+      runtime: {
+        active_foreground_jobs: active,
+        max_foreground_jobs: max,
+        queued_tasks: queued,
+        store_ready: storeReady,
+      },
+    });
   });
 
   app.post(

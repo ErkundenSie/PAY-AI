@@ -69,5 +69,6 @@ EXPOSE 17621
 HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
     CMD curl -f http://localhost:17621/api/public/runtime || exit 1
 
-ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]
+# 内联入口，避免源码挂载带来的 CRLF 让 docker-entrypoint.sh 直接失败（Cloudflare 502）
+ENTRYPOINT ["sh", "-c", "set -e; if [ ! -f /app/node_modules/express/package.json ]; then echo '[boot] seeding Linux node_modules'; mkdir -p /app/node_modules; cp -a /opt/node_modules/. /app/node_modules/; fi; exec \"$@\"", "--"]
 CMD ["node", "server.js"]

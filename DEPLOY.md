@@ -52,6 +52,32 @@ docker compose up -d
 
 访问：`http://your-server-ip:17621/admin-login.html`
 
+Cloudflare / Nginx 对外部署时：
+
+1. `.env` 保持 `APP_BIND_ADDRESS=127.0.0.1`，由本机反向代理转到 `17621`。
+2. 设 `TRUST_PROXY=1`。
+3. Cloudflare SSL 用 Full，源站必须有 80/443；只开 17621 且未反代时会出现 502 Host Error。
+4. 源站 Nginx 示例：
+
+```nginx
+server {
+    listen 80;
+    server_name YOUR_DOMAIN;
+    location / {
+        proxy_pass http://127.0.0.1:17621;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+排障：`docker compose logs -f app`。`ADMIN_PASSWORD` 须 ≥12 位，`DB_PASSWORD` 必填。HTTP 会先监听，再初始化 MySQL / 浏览器池。
+
 ### 4. 常用命令
 
 ```bash

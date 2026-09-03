@@ -2408,7 +2408,6 @@ app.post("/api/admin/runtime-logs/clear", authenticateAdmin, (req, res) => {
       level: "system",
       source: "server",
       text: "🧹 运行日志已手动清空",
-  stopCheckoutJob,
     });
     res.json({ success: true, message: "运行日志已清空" });
   } catch (error) {
@@ -5793,6 +5792,12 @@ async function authorizeTaskSubscription(data, jobKey, request) {
 app.post("/api/admin/trigger-activation", handleActivationRequest);
 
 async function start() {
+  const server = await new Promise((resolve, reject) => {
+    const httpServer = app.listen(PORT, "0.0.0.0", () => resolve(httpServer));
+    httpServer.once("error", reject);
+  });
+  console.log(`[boot] HTTP 已监听 0.0.0.0:${PORT}，正在初始化数据库与浏览器池`);
+
   await ensureStoreReady();
 
   try {
@@ -5902,22 +5907,20 @@ async function start() {
     }
   }, 6 * 60 * 60 * 1000).unref();
 
-  const server = app.listen(PORT, () => {
-    sampleCpuPercent();
-    setInterval(sampleCpuPercent, 2000).unref();
-    const conn = store.connectionInfo;
-    runtimeLog.push({
-      jobKey: "",
-      level: "system",
-      source: "server",
-      text: `✅ 服务就绪  http://localhost:${PORT}  ·  MySQL ${conn.user}@${conn.host}:${conn.port}/${conn.database}  ·  PID=${process.pid}`,
-    });
-    console.log("数据库表检查完成");
-    console.log(`http://localhost:${PORT}`);
-    console.log(
-      `MySQL => ${conn.user}@${conn.host}:${conn.port}/${conn.database}`,
-    );
+  sampleCpuPercent();
+  setInterval(sampleCpuPercent, 2000).unref();
+  const conn = store.connectionInfo;
+  runtimeLog.push({
+    jobKey: "",
+    level: "system",
+    source: "server",
+    text: `✅ 服务就绪  http://localhost:${PORT}  ·  MySQL ${conn.user}@${conn.host}:${conn.port}/${conn.database}  ·  PID=${process.pid}`,
   });
+  console.log("数据库表检查完成");
+  console.log(`http://localhost:${PORT}`);
+  console.log(
+    `MySQL => ${conn.user}@${conn.host}:${conn.port}/${conn.database}`,
+  );
 
   // WebSocket Server Setup
   const wss = new WebSocket.Server({ server, maxPayload: 8 * 1024 });
