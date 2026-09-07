@@ -2024,8 +2024,9 @@ body.checkout-page {
 .checkout-page .checkout-task-log-panel {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
+  /* 不参与行高计算，高度跟左侧表单对齐，日志在内部滚动 */
+  height: 0;
+  min-height: 100%;
   padding: 14px 18px;
   box-sizing: border-box;
   overflow: hidden;
@@ -2076,12 +2077,12 @@ body.checkout-page {
 
 .checkout-page .checkout-task-log {
   position: relative;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
-  height: auto;
   margin-top: 12px;
   padding: 12px 14px;
   overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid #e0e9f8;
   border-radius: 8px;
   background: #fbfdff;
