@@ -13,6 +13,10 @@ const {
   stripeHeaders,
   toSameOriginPath,
   resolveProtocolClientMode,
+  isHostedStripeSession,
+  buildElementsSessionForm,
+  buildPaymentPageConfirmForm,
+  paymentPageState,
 } = require("../checkout-protocol");
 
 describe("checkout protocol helpers", () => {
@@ -83,7 +87,25 @@ describe("checkout protocol helpers", () => {
     expect(resolveProcessorEntity("PH")).toBe("openai_ie");
   });
 
-  it("skips protocol for hosted Stripe checkout", () => {
+  it("uses hosted protocol for cs_live sessions", () => {
+    expect(
+      isHostedStripeSession(
+        "cs_live_abc",
+        "https://checkout.stripe.com/c/pay/cs_live_abc",
+      ),
+    ).toBe(true);
+    expect(
+      isHostedStripeSession(
+        "cs_live_abc",
+        "https://chatgpt.com/checkout/openai_llc/cs_live_abc",
+      ),
+    ).toBe(true);
+    expect(
+      isHostedStripeSession(
+        "oaics_abc",
+        "https://chatgpt.com/checkout/openai_llc/oaics_abc",
+      ),
+    ).toBe(false);
     expect(
       canUseProtocolCheckout(
         {
@@ -92,7 +114,7 @@ describe("checkout protocol helpers", () => {
         },
         "token",
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       canUseProtocolCheckout(
         {
@@ -111,6 +133,12 @@ describe("checkout protocol helpers", () => {
         },
         "token",
       ),
+    ).toBe(true);
+    expect(
+      extractCheckoutContext({
+        sessionId: "cs_live_abc",
+        checkoutUrl: "https://chatgpt.com/checkout/openai_llc/cs_live_abc",
+      }).hosted,
     ).toBe(true);
   });
 
@@ -273,5 +301,82 @@ describe("checkout protocol helpers", () => {
     expect(toSameOriginPath("https://checkout.stripe.com/c/pay/cs_live")).toBe(
       "",
     );
+  });
+
+  it("builds hosted confirmation token with checkout attribution", () => {
+    const form = buildConfirmationTokenForm({
+      card: {
+        number: "4242424242424242",
+        cvc: "123",
+        exp_month: "12",
+        exp_year: "2028",
+      },
+      billing: {
+        line1: "123 Main St",
+        city: "Portland",
+        country: "US",
+        postal_code: "97201",
+        state: "OR",
+        name: "Jane Doe",
+        currency: "php",
+      },
+      publishableKey: "pk_live_xxx",
+      hosted: true,
+      stripeVersion: "2025-03-31.basil",
+      elementsSessionId: "elements_session_abc",
+      elementsConfigId: "cfg_abc",
+    });
+    const text = form.toString();
+    expect(text).toContain("merchant_integration_source%5D=checkout");
+    expect(text).toContain("merchant_integration_version%5D=custom");
+    expect(text).toContain("payment_method_selection_flow%5D=automatic");
+    expect(text).toContain("elements_session_abc");
+    expect(text).toContain("cfg_abc");
+    expect(text).not.toContain("merchant_integration_source%5D=elements");
+  });
+
+  it("builds hosted elements session and payment_pages confirm forms", () => {
+    const elements = buildElementsSessionForm({
+      publishableKey: "pk_live_xxx",
+      stripeVersion: "2025-03-31.basil",
+      sessionId: "cs_live_abc",
+      amount: 98214,
+      currency: "php",
+      clientMode: "subscription",
+      pmcId: "pmc_123",
+      stripeJsId: "js_1",
+    });
+    const elementsText = elements.toString();
+    expect(elementsText).toContain("type=deferred_intent");
+    expect(elementsText).toContain("checkout_session_id=cs_live_abc");
+    expect(elementsText).toContain("deferred_intent%5Bmode%5D=subscription");
+    expect(elementsText).toContain(
+      "deferred_intent%5Bsetup_future_usage%5D=off_session",
+    );
+    expect(elementsText).toContain("pmc_123");
+
+    const confirm = buildPaymentPageConfirmForm({
+      confirmationToken: "ctoken_abc",
+      publishableKey: "pk_live_xxx",
+      stripeVersion: "2025-03-31.basil",
+      expectedAmount: 98214,
+    });
+    expect(confirm.toString()).toContain("confirmation_token=ctoken_abc");
+    expect(confirm.toString()).toContain("expected_amount=98214");
+  });
+
+  it("reads hosted payment page success and decline states", () => {
+    expect(
+      paymentPageState({
+        status: "complete",
+        payment_intent: { id: "pi_1", status: "succeeded" },
+      }).succeeded,
+    ).toBe(true);
+    expect(
+      paymentPageState({
+        payment_intent: { status: "requires_payment_method" },
+        error: { message: "declined" },
+      }).declined,
+    ).toBe(true);
   });
 });

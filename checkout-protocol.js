@@ -41,10 +41,18 @@ function generateRandomName() {
 const PLATFORM_BASE = "https://chatgpt.com";
 const TAXES_PATH = "/backend-api/payments/checkout/taxes";
 const CONFIRM_PATH = "/backend-api/payments/checkout/confirm";
+const APPROVE_PATH = "/backend-api/payments/checkout/approve";
 const SUBSCRIPTIONS_PATH = "/backend-api/payments/subscriptions";
 const STRIPE_BOOTSTRAP_PATH = "/backend-api/payments/stripe_client_bootstrap";
 const STRIPE_API_BASE = "https://api.stripe.com/v1";
 const STRIPE_VERSION = "2025-03-31.basil";
+const STRIPE_JS_DEPLOY_STATUS =
+  "https://js.stripe.com/deploy_status_henson.json";
+const CHECKOUT_STRIPE_ORIGIN = "https://checkout.stripe.com";
+const OPENAI_PUBLISHABLE_KEYS = [
+  "pk_live_51Pj377KslHRdbaPgTJYjThzH3f5dt1N1vK7LUp0qh0yNSarhfZ6nfbG7FFlh8KLxVkvdMWN5o6Mc4Vda6NHaSnaV00C2Sbl8Zs",
+  "pk_live_51HOrSwC6h1nxGoI3lTAgRjYVrz4dU3fVOabyCcKR3pbEJguCVAlqCxdxCUvoRh1XWwRacViovU3kLKvpkjh7IqkW00iXQsjo3n",
+];
 const STRIPE_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
 const BROWSER_MAJOR = "136";
@@ -139,23 +147,25 @@ function normalizeCardForProtocol(card = {}) {
 }
 
 function isHostedStripeSession(sessionId = "", checkoutUrl = "") {
-  const url = String(checkoutUrl || "").trim();
-  return /checkout\.stripe\.com/i.test(url);
+  if (/checkout\.stripe\.com/i.test(String(checkoutUrl || ""))) return true;
+  return /^cs_(?:live|test)_/i.test(String(sessionId || ""));
 }
 
 function parseCheckoutUrl(raw = "") {
   const text = String(raw || "").trim();
-  if (!text) return { sessionId: "", processorEntity: "", checkoutUrl: "" };
-  const hosted = /checkout\.stripe\.com/i.test(text);
+  if (!text) {
+    return { sessionId: "", processorEntity: "", checkoutUrl: "", hosted: false };
+  }
   const pathMatch = text.match(
     /\/checkout\/([a-z0-9_]+)\/((?:oaics_|cs_)[A-Za-z0-9_-]+)/i,
   );
   const idMatch = text.match(/((?:oaics_|cs_)[A-Za-z0-9_-]{8,})/i);
+  const sessionId = String(pathMatch?.[2] || idMatch?.[1] || "").trim();
   return {
-    sessionId: String(pathMatch?.[2] || idMatch?.[1] || "").trim(),
+    sessionId,
     processorEntity: String(pathMatch?.[1] || "").trim(),
     checkoutUrl: text,
-    hosted,
+    hosted: isHostedStripeSession(sessionId, text),
   };
 }
 
@@ -211,7 +221,10 @@ function extractCheckoutContext(checkout = {}, country = "") {
     publishableKey: String(
       data.publishable_key || data.publishableKey || "",
     ).trim(),
-    hosted: parsedUrl.hosted,
+    hosted: isHostedStripeSession(
+      sessionId,
+      checkout.checkoutUrl || parsedUrl.checkoutUrl || data.url || "",
+    ),
     planName: String(
       checkout.planName || data.plan_name || data.planName || "",
     ).trim(),
@@ -246,7 +259,7 @@ function canUseProtocolCheckout(checkout = {}, accessToken = "") {
   if (!protocolEnabled()) return false;
   if (!String(accessToken || "").trim()) return false;
   const ctx = extractCheckoutContext(checkout);
-  return Boolean(ctx.sessionId && !ctx.hosted);
+  return Boolean(ctx.sessionId);
 }
 
 function buildTaxesPayload({
@@ -291,19 +304,39 @@ function randomHex(n = 16) {
   return crypto.randomBytes(n).toString("hex");
 }
 
+function stripeDeviceId(hosted = false) {
+  if (hosted) return `${crypto.randomUUID()}${randomHex(3)}`;
+  return `${crypto.randomUUID().replace(/-/g, "")}fbcd8f`;
+}
+
 function buildConfirmationTokenForm({
   card,
   billing,
   publishableKey,
   cussSecret = "",
   stripeCustomer = "",
+  hosted = false,
+  stripeVersion = "",
+  elementsSessionId: elementsSessionIdArg = "",
+  elementsConfigId: elementsConfigIdArg = "",
 }) {
   const clientSessionId = crypto.randomUUID();
-  const elementsSessionId = `elements_session_${randomHex(5)}`;
-  const elementsConfigId = crypto.randomUUID();
-  const guid = `${crypto.randomUUID().replace(/-/g, "")}fbcd8f`;
-  const muid = `${crypto.randomUUID().replace(/-/g, "")}e77c22`;
-  const sid = `${crypto.randomUUID().replace(/-/g, "")}4e41f2`;
+  const elementsSessionId =
+    elementsSessionIdArg || `elements_session_${randomHex(5)}`;
+  const elementsConfigId = elementsConfigIdArg || crypto.randomUUID();
+  const guid = stripeDeviceId(hosted);
+  const muid = stripeDeviceId(hosted);
+  const sid = stripeDeviceId(hosted);
+  const attr = hosted
+    ? { source: "checkout", version: "custom", selectionFlow: "automatic" }
+    : {
+        source: "elements",
+        version: "2021",
+        selectionFlow: "merchant_specified",
+      };
+  const version =
+    String(stripeVersion || STRIPE_VERSION).split(";")[0].trim() ||
+    STRIPE_VERSION;
   const pm = "payment_method_data";
   const params = new URLSearchParams();
   const clientMode = resolveProtocolClientMode(billing);
@@ -333,7 +366,7 @@ function buildConfirmationTokenForm({
     [`${pm}[client_attribution_metadata][client_session_id]`, clientSessionId],
     [
       `${pm}[client_attribution_metadata][merchant_integration_source]`,
-      "elements",
+      attr.source,
     ],
     [
       `${pm}[client_attribution_metadata][merchant_integration_subtype]`,
@@ -341,7 +374,7 @@ function buildConfirmationTokenForm({
     ],
     [
       `${pm}[client_attribution_metadata][merchant_integration_version]`,
-      "2021",
+      attr.version,
     ],
     [
       `${pm}[client_attribution_metadata][payment_intent_creation_flow]`,
@@ -349,7 +382,7 @@ function buildConfirmationTokenForm({
     ],
     [
       `${pm}[client_attribution_metadata][payment_method_selection_flow]`,
-      "merchant_specified",
+      attr.selectionFlow,
     ],
     [
       `${pm}[client_attribution_metadata][elements_session_id]`,
@@ -389,16 +422,19 @@ function buildConfirmationTokenForm({
 
   pairs.push(
     ["client_attribution_metadata[client_session_id]", clientSessionId],
-    ["client_attribution_metadata[merchant_integration_source]", "elements"],
+    ["client_attribution_metadata[merchant_integration_source]", attr.source],
     [
       "client_attribution_metadata[merchant_integration_subtype]",
       "payment-element",
     ],
-    ["client_attribution_metadata[merchant_integration_version]", "2021"],
+    [
+      "client_attribution_metadata[merchant_integration_version]",
+      attr.version,
+    ],
     ["client_attribution_metadata[payment_intent_creation_flow]", "deferred"],
     [
       "client_attribution_metadata[payment_method_selection_flow]",
-      "merchant_specified",
+      attr.selectionFlow,
     ],
     ["client_attribution_metadata[elements_session_id]", elementsSessionId],
     [
@@ -419,7 +455,7 @@ function buildConfirmationTokenForm({
     ],
     ["set_as_default_payment_method", "false"],
     ["key", publishableKey],
-    ["_stripe_version", STRIPE_VERSION],
+    ["_stripe_version", version],
   );
 
   for (const [key, value] of pairs) {
@@ -735,6 +771,10 @@ async function createConfirmationToken({
   publishableKey,
   cussSecret,
   stripeCustomer,
+  hosted = false,
+  stripeVersion = "",
+  elementsSessionId = "",
+  elementsConfigId = "",
 }) {
   const axios = getAxios();
   const form = buildConfirmationTokenForm({
@@ -743,6 +783,10 @@ async function createConfirmationToken({
     publishableKey,
     cussSecret,
     stripeCustomer,
+    hosted,
+    stripeVersion,
+    elementsSessionId,
+    elementsConfigId,
   });
   const response = await axios.post(
     `${STRIPE_API_BASE}/confirmation_tokens`,
@@ -827,6 +871,662 @@ async function confirmPaymentIntent({
     declined: Boolean(error.code || error.decline_code),
     error: stripeDeclineMessage(error) || "支付失败",
     paymentIntent: error.payment_intent || data,
+  };
+}
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function pkPrefix(pk = "") {
+  return String(pk || "").slice(0, 24);
+}
+
+function hostedPublishableKeyCandidates(preferred = "") {
+  const keys = [preferred, ...OPENAI_PUBLISHABLE_KEYS].filter((key) =>
+    String(key || "").startsWith("pk_"),
+  );
+  return [...new Set(keys)];
+}
+
+function hostedStripeVersion(deploy = {}) {
+  const basil = deploy.basil || {};
+  const rv = String(basil.rv || STRIPE_VERSION).trim();
+  const base = rv.includes("basil") ? rv : `${rv}.basil`;
+  return base.split(";")[0].trim();
+}
+
+function checkoutPageHeaders(sessionId = "", extra = {}) {
+  const sid = String(sessionId || "").trim();
+  return {
+    Accept: "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+    Referer: `${CHECKOUT_STRIPE_ORIGIN}/c/pay/${sid}`,
+    "User-Agent": STRIPE_UA,
+    ...extra,
+  };
+}
+
+function cookieHeaderFromAxios(headers = {}) {
+  const setCookie = headers["set-cookie"] || headers["Set-Cookie"];
+  const list = Array.isArray(setCookie)
+    ? setCookie
+    : setCookie
+      ? [setCookie]
+      : [];
+  return list
+    .map((line) => String(line).split(";")[0].trim())
+    .filter(Boolean)
+    .join("; ");
+}
+
+function extractPaymentPageInitFromHtml(html = "") {
+  const text = String(html || "");
+  if (!text) return null;
+  const pick = (key) => {
+    const match = text.match(new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`, "i"));
+    return match?.[1] || "";
+  };
+  const pkMatch = text.match(/pk_(?:live|test)_[A-Za-z0-9]+/);
+  const data = {
+    init_checksum: pick("init_checksum"),
+    checkout_config_id: pick("checkout_config_id"),
+    ppage_token: pick("ppage_token"),
+    publishable_key: pkMatch?.[0] || pick("publishable_key"),
+  };
+  if (
+    !data.init_checksum &&
+    !data.ppage_token &&
+    !data.publishable_key &&
+    !data.checkout_config_id
+  ) {
+    return null;
+  }
+  return data;
+}
+
+function asNestedId(value) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (value && typeof value === "object") {
+    return String(value.id || "").trim();
+  }
+  return "";
+}
+
+function paymentPageState(data = {}) {
+  const pi = data.payment_intent;
+  const piId =
+    typeof pi === "string"
+      ? pi
+      : String(pi?.id || data.payment_intent_id || "").trim();
+  const piStatus = String(
+    (typeof pi === "object" && pi?.status) || data.payment_object_status || "",
+  ).trim();
+  const status = String(data.status || data.payment_page_status || "").trim();
+  return {
+    status,
+    paymentObjectStatus: piStatus,
+    paymentIntentId: piId,
+    clientSecret: String(
+      data.client_secret ||
+        (typeof pi === "object" && pi?.client_secret) ||
+        "",
+    ).trim(),
+    succeeded: /succeed/i.test(piStatus) || /succeed/i.test(status),
+    requiresAction: /requires_action/i.test(piStatus),
+    declined:
+      /requires_payment_method|canceled|failed/i.test(piStatus) ||
+      Boolean(data.error || data.last_payment_error),
+  };
+}
+
+function buildElementsSessionForm({
+  publishableKey,
+  stripeVersion,
+  sessionId,
+  amount,
+  currency,
+  clientMode,
+  pmcId = "",
+  stripeJsId,
+  locale = "en",
+}) {
+  const params = new URLSearchParams();
+  const mode = clientMode === "payment" ? "payment" : "subscription";
+  const cur = String(currency || "usd").toLowerCase();
+  const pairs = [
+    ["type", "deferred_intent"],
+    ["deferred_intent[mode]", mode],
+    ["deferred_intent[amount]", String(amount || 0)],
+    ["deferred_intent[currency]", cur],
+    ["deferred_intent[payment_method_types][0]", "card"],
+    ["currency", cur],
+    ["elements_init_source", "custom_checkout"],
+    ["referrer_host", "chatgpt.com"],
+    ["stripe_js_id", stripeJsId],
+    ["locale", locale],
+    ["checkout_session_id", sessionId],
+    ["key", publishableKey],
+    ["_stripe_version", stripeVersion],
+  ];
+  if (mode === "subscription") {
+    pairs.splice(4, 0, ["deferred_intent[setup_future_usage]", "off_session"]);
+  }
+  if (pmcId) {
+    pairs.push(["deferred_intent[payment_method_configuration][id]", pmcId]);
+  }
+  for (const [key, value] of pairs) params.append(key, value);
+  return params;
+}
+
+function buildPaymentPageConfirmForm({
+  confirmationToken,
+  publishableKey,
+  stripeVersion,
+  expectedAmount,
+  guid = "",
+  muid = "",
+  sid = "",
+}) {
+  const params = new URLSearchParams();
+  const pairs = [
+    ["confirmation_token", confirmationToken],
+    ["key", publishableKey],
+    ["_stripe_version", stripeVersion],
+  ];
+  if (expectedAmount) {
+    pairs.push(["expected_amount", String(expectedAmount)]);
+  }
+  if (guid) pairs.push(["guid", guid]);
+  if (muid) pairs.push(["muid", muid]);
+  if (sid) pairs.push(["sid", sid]);
+  for (const [key, value] of pairs) {
+    if (value !== undefined && value !== null && value !== "") {
+      params.append(key, value);
+    }
+  }
+  return params;
+}
+
+async function stripeRequest(url, { method = "GET", body, headers, timeout = 30000, responseType } = {}) {
+  const axios = getAxios();
+  try {
+    const response = await axios({
+      url,
+      method,
+      headers: headers || stripeHeaders(),
+      data: body,
+      timeout,
+      validateStatus: () => true,
+      maxRedirects: 5,
+      responseType,
+    });
+    const data = response.data;
+    return {
+      ok: response.status >= 200 && response.status < 300,
+      status: response.status,
+      data:
+        typeof data === "object" && data !== null
+          ? data
+          : parseJsonBody(String(data || "")),
+      text: typeof data === "string" ? data : "",
+      headers: response.headers || {},
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      data: {},
+      text: "",
+      headers: {},
+      error: String(err.message || err),
+    };
+  }
+}
+
+async function retrievePaymentPage(sessionId, pk, stripeVersion) {
+  const params = new URLSearchParams();
+  params.append("key", pk);
+  params.append("_stripe_version", stripeVersion);
+  return stripeRequest(
+    `${STRIPE_API_BASE}/payment_pages/${encodeURIComponent(sessionId)}?${params}`,
+    { method: "GET", headers: stripeHeaders() },
+  );
+}
+
+async function resolveHostedPublishableKey({
+  sessionId,
+  preferredKey,
+  stripeVersion,
+  progress,
+}) {
+  const keys = hostedPublishableKeyCandidates(preferredKey);
+  for (const key of keys) {
+    const result = await retrievePaymentPage(sessionId, key, stripeVersion);
+    const detail = String(result.data?.error?.message || result.error || "").slice(
+      0,
+      180,
+    );
+    progress(
+      `hosted: 探测 payment_page pk=${pkPrefix(key)} http=${result.status}${detail ? ` ${detail}` : ""}`,
+    );
+    if (result.ok) return { pk: key, page: result.data || {} };
+  }
+  return { pk: preferredKey, page: null };
+}
+
+async function fetchStripeDeployStatus() {
+  const result = await stripeRequest(STRIPE_JS_DEPLOY_STATUS, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    timeout: 15000,
+  });
+  return result.data || {};
+}
+
+async function initPaymentPage(sessionId, { publishableKey = "", progress } = {}) {
+  const sid = String(sessionId || "").trim();
+  const pageUrl = `${CHECKOUT_STRIPE_ORIGIN}/c/pay/${sid}`;
+  const initUrl = `${CHECKOUT_STRIPE_ORIGIN}/api/payment-page/${encodeURIComponent(sid)}/init`;
+  let cookieHeader = "";
+  let html = "";
+
+  const pageResult = await stripeRequest(pageUrl, {
+    method: "GET",
+    headers: {
+      Accept: "text/html,application/xhtml+xml",
+      "Accept-Language": "en-US,en;q=0.9",
+      "User-Agent": STRIPE_UA,
+    },
+    timeout: 30000,
+    responseType: "text",
+  });
+  html = pageResult.text || (typeof pageResult.data === "string" ? pageResult.data : "");
+  cookieHeader = cookieHeaderFromAxios(pageResult.headers);
+  progress(
+    `hosted: checkout 页 http=${pageResult.status} cookies=${cookieHeader ? cookieHeader.split("; ").length : 0} html=${html.length}B`,
+  );
+
+  const fromHtml = extractPaymentPageInitFromHtml(html);
+  const attempts = [
+    checkoutPageHeaders(sid, cookieHeader ? { Cookie: cookieHeader } : {}),
+    checkoutPageHeaders(sid, {
+      Origin: CHECKOUT_STRIPE_ORIGIN,
+      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+    }),
+  ];
+  const keyQuery = String(
+    publishableKey || fromHtml?.publishable_key || "",
+  ).trim();
+  const urls = keyQuery
+    ? [`${initUrl}?key=${encodeURIComponent(keyQuery)}`, initUrl]
+    : [initUrl];
+
+  for (const url of urls) {
+    for (const headers of attempts) {
+      const result = await stripeRequest(url, {
+        method: "GET",
+        headers,
+        timeout: 30000,
+      });
+      progress(`hosted: payment-page init http=${result.status}`);
+      if (result.ok) {
+        return { ...result, html, cookieHeader };
+      }
+    }
+  }
+
+  if (fromHtml) {
+    progress(
+      `hosted: 从 checkout HTML 提取 init checksum=${fromHtml.init_checksum ? "yes" : "no"} pk=${fromHtml.publishable_key ? "yes" : "no"}`,
+    );
+    return { ok: true, status: 200, data: fromHtml, html, cookieHeader };
+  }
+
+  return {
+    ok: false,
+    status: pageResult.status || 403,
+    data: { error: "payment-page init 失败，无 HTML 可提取" },
+    html,
+    cookieHeader,
+  };
+}
+
+async function tryHostedApprove({
+  page,
+  accessToken,
+  accountId,
+  sessionId,
+  processorEntity,
+  progress,
+}) {
+  const referer = `${PLATFORM_BASE}/checkout/${processorEntity}/${sessionId}`;
+  const headers = {
+    accept: "application/json",
+    authorization: `Bearer ${String(accessToken || "").trim()}`,
+    "content-type": "application/json",
+  };
+  if (accountId) {
+    headers["chatgpt-account-id"] = accountId;
+    headers["openai-account-id"] = accountId;
+  }
+  let approveHeaders = headers;
+  try {
+    const challenge = await collectProtocolApiHeaders({
+      page,
+      accessToken,
+      accountId,
+      flow: "checkout_session_approval",
+      targetPath: APPROVE_PATH,
+      referer,
+    });
+    approveHeaders = challenge.headers;
+  } catch (err) {
+    progress(
+      `hosted: approve 风控跳过 ${String((err && err.message) || err).slice(0, 80)}`,
+    );
+  }
+  const result = await postSameOriginJson(page, {
+    path: APPROVE_PATH,
+    payload: { checkout_session_id: sessionId },
+    headers: approveHeaders,
+    referer,
+  });
+  progress(`hosted: approve http=${result.status}`);
+  return result;
+}
+
+async function completeHostedStripeConfirm({
+  page,
+  sessionId,
+  card,
+  billing,
+  publishableKey,
+  stripeCustomer,
+  amountTotal,
+  dueAmount,
+  dueCurrency,
+  holderName,
+  accessToken,
+  accountId,
+  processorEntity,
+  creditsPurchase,
+  progress,
+}) {
+  const locale = "en";
+  const stripeJsId = crypto.randomUUID();
+  const clientMode = resolveProtocolClientMode(billing);
+  const minor = Math.round(Number(amountTotal || dueAmount * 100) || 0);
+
+  progress("hosted: 初始化 Payment Page");
+  const initResult = await initPaymentPage(sessionId, {
+    publishableKey,
+    progress,
+  });
+  if (!initResult.ok) {
+    const detail = String(
+      initResult.data?.error ||
+        initResult.data?.message ||
+        formatApiError(initResult.status, initResult.data) ||
+        "",
+    ).trim();
+    progress(
+      `hosted: init 跳过，继续 elements/sessions http=${initResult.status} ${detail.slice(0, 180)}`,
+    );
+  }
+  const initData = initResult.data || {};
+  const checkoutConfigId = String(
+    initData.checkout_config_id ||
+      initData.checkoutConfigId ||
+      findIn(initData, ["checkout_config_id", "checkoutConfigId"]) ||
+      "",
+  ).trim();
+  const pmcId =
+    asNestedId(initData.payment_method_configuration) ||
+    asNestedId(initData.config?.payment_method_configuration) ||
+    findIn(initData, ["payment_method_configuration"]);
+  const deploy = await fetchStripeDeployStatus();
+  const stripeVersion = hostedStripeVersion(deploy);
+  progress(`hosted: Stripe.js 部署 ${stripeVersion}`);
+  const probed = await resolveHostedPublishableKey({
+    sessionId,
+    preferredKey: publishableKey,
+    stripeVersion,
+    progress,
+  });
+  const pk = probed.pk || publishableKey;
+  progress(`hosted: 使用 pk=${pkPrefix(pk)}`);
+
+  progress("hosted: Elements Session");
+  let elementsResult = await stripeRequest(
+    `${STRIPE_API_BASE}/elements/sessions`,
+    {
+      method: "POST",
+      headers: stripeHeaders(),
+      body: buildElementsSessionForm({
+        publishableKey: pk,
+        stripeVersion,
+        sessionId,
+        amount: minor,
+        currency: billing.currency,
+        clientMode,
+        pmcId,
+        stripeJsId,
+        locale,
+      }).toString(),
+    },
+  );
+  if (!elementsResult.ok) {
+    const qs = buildElementsSessionForm({
+      publishableKey: pk,
+      stripeVersion,
+      sessionId,
+      amount: minor,
+      currency: billing.currency,
+      clientMode,
+      pmcId,
+      stripeJsId,
+      locale,
+    });
+    elementsResult = await stripeRequest(
+      `${STRIPE_API_BASE}/elements/sessions?${qs}`,
+      { method: "GET", headers: stripeHeaders(), timeout: 20000 },
+    );
+  }
+  progress(
+    `hosted: Elements Session http=${elementsResult.status} ok=${elementsResult.ok}`,
+  );
+  const elementsData = elementsResult.data || {};
+  const elementsSessionId = elementsResult.ok
+    ? String(
+        elementsData.elements_session_id ||
+          elementsData.session_id ||
+          findIn(elementsData, ["elements_session_id", "session_id"]) ||
+          "",
+      ).trim()
+    : "";
+  const elementsConfigId = String(
+    elementsData.config_id ||
+      elementsData.session_config_id ||
+      checkoutConfigId ||
+      "",
+  ).trim();
+
+  progress("hosted: 令牌化卡片");
+  let confirmToken;
+  try {
+    confirmToken = await createConfirmationToken({
+      card,
+      billing,
+      publishableKey: pk,
+      stripeCustomer,
+      hosted: true,
+      stripeVersion,
+      elementsSessionId,
+      elementsConfigId,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      declined: Boolean(error?.declined),
+      fallback: !error?.declined,
+      holderName,
+      dueAmount,
+      dueCurrency,
+      error: String(error.message || error),
+    };
+  }
+  progress(`hosted: 令牌化完成 ${String(confirmToken).slice(0, 12)}`);
+
+  const confirmForm = buildPaymentPageConfirmForm({
+    confirmationToken: confirmToken,
+    publishableKey: pk,
+    stripeVersion,
+    expectedAmount: minor,
+    guid: stripeDeviceId(true),
+    muid: stripeDeviceId(true),
+    sid: stripeDeviceId(true),
+  });
+  progress("hosted: payment_pages/confirm");
+  const confirmResult = await stripeRequest(
+    `${STRIPE_API_BASE}/payment_pages/${encodeURIComponent(sessionId)}/confirm`,
+    {
+      method: "POST",
+      headers: stripeHeaders(),
+      body: confirmForm.toString(),
+    },
+  );
+  let state = paymentPageState(confirmResult.data);
+  const confirmError = confirmResult.data?.error || {};
+  progress(
+    `hosted: confirm http=${confirmResult.status} status=${state.status} pi=${state.paymentObjectStatus} ${String(confirmError.message || "").slice(0, 120)}`,
+  );
+  if (
+    confirmResult.status === 404 ||
+    confirmError.code === "resource_missing"
+  ) {
+    return {
+      success: false,
+      fallback: true,
+      holderName,
+      dueAmount,
+      dueCurrency,
+      error:
+        confirmError.message ||
+        `payment_pages 不存在该 session (${pkPrefix(pk)})`,
+    };
+  }
+  if (state.declined && !state.succeeded) {
+    return {
+      success: false,
+      declined: true,
+      holderName,
+      dueAmount,
+      dueCurrency,
+      error: stripeDeclineMessage(confirmError),
+    };
+  }
+
+  const pollForm = new URLSearchParams();
+  pollForm.append("key", pk);
+  pollForm.append("_stripe_version", stripeVersion);
+  const pollDeadline = Date.now() + 60000;
+  let approved = false;
+  while (
+    !state.succeeded &&
+    !state.requiresAction &&
+    !state.declined &&
+    Date.now() < pollDeadline
+  ) {
+    if (!approved && /open|requires_approval/i.test(state.status)) {
+      await tryHostedApprove({
+        page,
+        accessToken,
+        accountId,
+        sessionId,
+        processorEntity,
+        progress,
+      });
+      approved = true;
+    }
+    await sleepMs(2500);
+    const pollResult = await stripeRequest(
+      `${STRIPE_API_BASE}/payment_pages/${encodeURIComponent(sessionId)}/poll`,
+      {
+        method: "POST",
+        headers: stripeHeaders(),
+        body: pollForm.toString(),
+      },
+    );
+    state = paymentPageState(pollResult.data);
+    progress(`hosted: poll status=${state.status} pi=${state.paymentObjectStatus}`);
+  }
+
+  if (state.succeeded) {
+    const returnUrl = `${PLATFORM_BASE}/checkout/verify?stripe_session_id=${encodeURIComponent(sessionId)}&processor_entity=${encodeURIComponent(processorEntity)}`;
+    try {
+      const verifyPath = toSameOriginPath(returnUrl);
+      if (verifyPath) {
+        progress(`hosted: 回调 Verify ${verifyPath}`);
+        await getSameOriginJson(page, {
+          path: verifyPath,
+          headers: {
+            accept: "application/json",
+            authorization: `Bearer ${accessToken}`,
+          },
+        });
+      }
+      if (accountId && !creditsPurchase) {
+        await getSameOriginJson(page, {
+          path: `${SUBSCRIPTIONS_PATH}?account_id=${encodeURIComponent(accountId)}`,
+          headers: {
+            accept: "application/json",
+            authorization: `Bearer ${accessToken}`,
+            "chatgpt-account-id": accountId,
+            "openai-account-id": accountId,
+          },
+        });
+      }
+    } catch (_) {
+      /* verify is best-effort */
+    }
+    return {
+      success: true,
+      holderName,
+      dueAmount,
+      dueCurrency,
+      returnUrl,
+      creditsPurchase,
+    };
+  }
+  if (state.requiresAction) {
+    return {
+      success: false,
+      actionRequired: true,
+      fallback: true,
+      holderName,
+      dueAmount,
+      dueCurrency,
+      error: "需要完成银行卡 3D Secure 验证",
+    };
+  }
+  if (state.declined) {
+    return {
+      success: false,
+      declined: true,
+      holderName,
+      dueAmount,
+      dueCurrency,
+      error: "银行卡被拒绝",
+    };
+  }
+  return {
+    success: false,
+    fallback: true,
+    holderName,
+    dueAmount,
+    dueCurrency,
+    error: `hosted 未完成: status=${state.status || "timeout"}`,
   };
 }
 
@@ -967,6 +1667,39 @@ async function completeProtocolCheckout({
     });
   } catch (err) {
     return { success: false, fallback: true, error: err.message };
+  }
+
+  const hosted = isHostedStripeSession(ctx.sessionId, ctx.checkoutUrl);
+  if (hosted) {
+    progress(
+      "走协议支付(hosted): taxes → init → elements → token → payment_pages/confirm → poll",
+    );
+    return completeHostedStripeConfirm({
+      page,
+      sessionId: ctx.sessionId,
+      card: cardInfo,
+      billing: {
+        ...billing,
+        name: holderName,
+        country: String(billing.country || "US").toUpperCase(),
+        state: normalizeUsStateCode(billing.state),
+        currency: String(billing.currency || "usd").toLowerCase(),
+      },
+      publishableKey,
+      stripeCustomer,
+      amountTotal,
+      dueAmount,
+      dueCurrency,
+      holderName,
+      accessToken: token,
+      accountId: resolvedAccountId,
+      processorEntity: ctx.processorEntity,
+      creditsPurchase: Boolean(
+        billing.credits === true ||
+          isCreditsProtocolPlan(billing.planName || ctx.planName),
+      ),
+      progress,
+    });
   }
 
   progress("正在令牌化卡片...");
@@ -1154,4 +1887,7 @@ module.exports = {
   isHostedStripeSession,
   isCreditsProtocolPlan,
   resolveProtocolClientMode,
+  buildElementsSessionForm,
+  buildPaymentPageConfirmForm,
+  paymentPageState,
 };

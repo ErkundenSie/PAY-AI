@@ -28,6 +28,7 @@ const {
   completeProtocolCheckout,
   hydrateCheckoutFromUrl,
   isExpectedProtocolDueAmount,
+  isHostedStripeSession,
 } = require("./checkout-protocol");
 
 const MAX_CARD_ATTEMPTS = Number(process.env.PAYMENT_MAX_CARD_ATTEMPTS) || 3;
@@ -122,7 +123,15 @@ async function attemptCardPayment(
     page && typeof page.url === "function" ? page.url() : "",
   );
   if (canUseProtocolCheckout(checkoutContext, accessToken)) {
-    progress("走协议支付: taxes → token → confirm → PI");
+    const hosted = isHostedStripeSession(
+      checkoutContext.sessionId,
+      checkoutContext.checkoutUrl,
+    );
+    progress(
+      hosted
+        ? "走协议支付(hosted): taxes → init → elements → token → payment_pages/confirm → poll"
+        : "走协议支付: taxes → token → confirm → PI",
+    );
     try {
       const protocolResult = await completeProtocolCheckout({
         page,
@@ -163,7 +172,7 @@ async function attemptCardPayment(
     }
   } else {
     progress(
-      `协议不可用，走 UI 填表: token=${Boolean(String(accessToken || "").trim())} session=${Boolean(checkoutContext.sessionId)} hosted=${/checkout\.stripe\.com/i.test(String(checkoutContext.checkoutUrl || ""))}`,
+      `协议不可用，走 UI 填表: token=${Boolean(String(accessToken || "").trim())} session=${Boolean(checkoutContext.sessionId)} hosted=${isHostedStripeSession(checkoutContext.sessionId, checkoutContext.checkoutUrl)}`,
     );
   }
 
