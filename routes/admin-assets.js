@@ -418,6 +418,11 @@ function registerAdminAssetRoutes(app, deps) {
       await ensureStoreReady();
       const count = req.body?.count;
       const planType = req.body?.plan_type || "plus";
+      if (store.isHiddenCheckoutPlan(planType)) {
+        return res
+          .status(400)
+          .json({ success: false, message: "该套餐暂未开放" });
+      }
       const cardGroupId =
         req.body?.card_group_id ?? req.body?.cardGroupId ?? null;
       const proxyGroupId =
@@ -459,6 +464,11 @@ function registerAdminAssetRoutes(app, deps) {
     try {
       await ensureStoreReady();
       const planType = req.body?.plan_type || "plus";
+      if (store.isHiddenCheckoutPlan(planType)) {
+        return res
+          .status(400)
+          .json({ success: false, message: "该套餐暂未开放" });
+      }
       const cardGroupId =
         req.body?.card_group_id ?? req.body?.cardGroupId ?? null;
       const proxyGroupId =

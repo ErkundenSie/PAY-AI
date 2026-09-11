@@ -63,6 +63,10 @@ function isCreditsPlan(planType) {
   );
 }
 
+function isHiddenCheckoutPlan(planType) {
+  return isCreditsPlan(planType);
+}
+
 function normalizeCreditQuantity(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < CREDIT_QUANTITY_MIN) return 0;
@@ -80,7 +84,9 @@ function resolveCreditQuantity(planType, quantity) {
 }
 
 function listCheckoutPlans() {
-  return CHECKOUT_PLANS.map((plan) => ({ ...plan }));
+  return CHECKOUT_PLANS.filter((plan) => !isHiddenCheckoutPlan(plan.id)).map(
+    (plan) => ({ ...plan }),
+  );
 }
 
 function getCheckoutPlanNameMap() {
@@ -123,6 +129,7 @@ module.exports = {
   PLAN_TYPE_LABELS,
   isCreditsPlan,
   isGiftCreditsPlan,
+  isHiddenCheckoutPlan,
   normalizeCreditQuantity,
   resolveCreditQuantity,
   listCheckoutPlans,

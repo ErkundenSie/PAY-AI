@@ -6132,9 +6132,6 @@ vless://uuid@host:443?encryption=none&security=tls&type=tcp#备注"
                       <option value="plus">Plus — chatgptplusplan</option>
                       <option value="pro_5x">Pro 5x — chatgptprolite</option>
                       <option value="pro_20x">Pro 20x — chatgptpro</option>
-                      <option value="credits">
-                        Codex 点数 — chatgptbusiness_usage_based
-                      </option>
                     </select>
                   </div>
                   <div
@@ -6697,11 +6694,6 @@ vless://uuid@host:443?encryption=none&security=tls&type=tcp#备注"
                 <option value="plus" selected>Plus</option>
                 <option value="pro_5x">Pro 5x</option>
                 <option value="pro_20x">Pro 20x</option>
-                <option value="credits_250">Codex 250</option>
-                <option value="credits_500">Codex 500</option>
-                <option value="credits_1000">Codex 1000</option>
-                <option value="credits_1500">Codex 1500</option>
-                <option value="credits_2000">Codex 2000</option>
               </select>
               <input
                 type="number"
@@ -6799,36 +6791,6 @@ vless://uuid@host:443?encryption=none&security=tls&type=tcp#备注"
                 >
                   Pro 20x
                 </button>
-                <button
-                  class="filter-option"
-                  onclick="selectCdkPlanTypeFilter('credits_250', 'Codex 250')"
-                >
-                  Codex 250
-                </button>
-                <button
-                  class="filter-option"
-                  onclick="selectCdkPlanTypeFilter('credits_500', 'Codex 500')"
-                >
-                  Codex 500
-                </button>
-                <button
-                  class="filter-option"
-                  onclick="selectCdkPlanTypeFilter('credits_1000', 'Codex 1000')"
-                >
-                  Codex 1000
-                </button>
-                <button
-                  class="filter-option"
-                  onclick="selectCdkPlanTypeFilter('credits_1500', 'Codex 1500')"
-                >
-                  Codex 1500
-                </button>
-                <button
-                  class="filter-option"
-                  onclick="selectCdkPlanTypeFilter('credits_2000', 'Codex 2000')"
-                >
-                  Codex 2000
-                </button>
               </div>
             </div>
             <select
@@ -6886,8 +6848,7 @@ vless://uuid@host:443?encryption=none&security=tls&type=tcp#备注"
         <div class="page-header">
           <h1>账户管理</h1>
           <p>
-            粘贴 Session 后查询订阅套餐、到期时间、开通货币和 Codex
-            额度，并可开启/取消自动续费、重置额度。
+            粘贴 Session 后查询订阅套餐、到期时间、开通货币，并可开启/取消自动续费。
           </p>
         </div>
 
@@ -6942,15 +6903,6 @@ vless://uuid@host:443?encryption=none&security=tls&type=tcp#备注"
             >
               <i data-lucide="refresh-cw"></i>
               开启续费
-            </button>
-            <button
-              type="button"
-              class="btn"
-              id="reset_codex_quota_btn"
-              onclick="submitResetCodexQuotaPage()"
-            >
-              <i data-lucide="rotate-ccw"></i>
-              重置额度
             </button>
             <button
               type="button"

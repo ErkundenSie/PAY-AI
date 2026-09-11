@@ -3,6 +3,7 @@
 const {
   CREDIT_QUANTITY_MIN,
   isCreditsPlan,
+  isHiddenCheckoutPlan,
   normalizeCreditQuantity,
   resolveCreditQuantity,
   resolvePlanName,
@@ -17,6 +18,13 @@ describe("credit quantity", () => {
     expect(isCreditsPlan("credits_500")).toBe(true);
     expect(isCreditsPlan("gift")).toBe(true);
     expect(isCreditsPlan("plus")).toBe(false);
+  });
+
+  it("hides unfinished credits and gift plans from public entries", () => {
+    expect(isHiddenCheckoutPlan("credits")).toBe(true);
+    expect(isHiddenCheckoutPlan("credits_500")).toBe(true);
+    expect(isHiddenCheckoutPlan("gift")).toBe(true);
+    expect(isHiddenCheckoutPlan("plus")).toBe(false);
   });
 
   it("rounds to the 250 step and rejects values below min", () => {
@@ -35,8 +43,6 @@ describe("credit quantity", () => {
       "plus",
       "pro_5x",
       "pro_20x",
-      "credits",
-      "gift",
     ]);
     expect(resolvePlanName("plus")).toBe("chatgptplusplan");
     expect(resolvePlanName("credits_500")).toBe("chatgptbusiness_usage_based");

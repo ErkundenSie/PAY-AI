@@ -1365,6 +1365,12 @@ async function startPublicCheckoutPay(body = {}, options = {}) {
   }
 
   const planType = String(body.plan_type || "plus").trim() || "plus";
+  if (store.isHiddenCheckoutPlan(planType)) {
+    return {
+      status: 400,
+      payload: { success: false, error: "该套餐暂未开放" },
+    };
+  }
   const planNameOverride = body.plan_name ? String(body.plan_name).trim() : "";
   const resolvedPlanName = planNameOverride || store.resolvePlanName(planType);
   const creditQuantity = store.isCreditsPlan(planType)
@@ -5655,6 +5661,11 @@ async function handleActivationRequest(req, res) {
       return res
         .status(403)
         .json({ success: false, message: "CDK 无效、已使用或非自助激活码" });
+    }
+    if (store.isHiddenCheckoutPlan(cdkDetails.plan_type)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "该套餐暂未开放" });
     }
 
     const cdkCooldownMinutes = getRemainingCooldownMinutes(
