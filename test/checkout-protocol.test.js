@@ -171,6 +171,19 @@ describe("checkout protocol helpers", () => {
     expect(isExpectedProtocolDueAmount(0, "PHP")).toBe(false);
   });
 
+  it("accepts current PHP tax-free 5x due amount from taxes API", () => {
+    expect(isExpectedProtocolDueAmount(5794.64, "PHP", "chatgptprolite")).toBe(
+      true,
+    );
+    expect(isExpectedProtocolDueAmount(5794.64, "PHP", "pro_5x")).toBe(true);
+    expect(isExpectedProtocolDueAmount(5173.79, "PHP", "chatgptprolite")).toBe(
+      true,
+    );
+    expect(isExpectedProtocolDueAmount(6490, "PHP", "chatgptprolite")).toBe(
+      false,
+    );
+  });
+
   it("accepts any positive due amount for usage-based credits", () => {
     expect(
       isExpectedProtocolDueAmount(250, "PHP", "chatgptbusiness_usage_based"),

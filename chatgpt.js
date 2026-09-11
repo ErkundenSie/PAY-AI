@@ -2400,7 +2400,7 @@ class ChatGPTService {
     // 非 USD 币种的简单转换（实际金额由 Stripe 返回，这里仅用于记录参考）
     if (currency === "SGD") return Math.round(amount * 1.35 * 100) / 100;
     if (currency === "MYR") return Math.round(amount * 4.5 * 100) / 100;
-    if (currency === "PHP") return Math.round(amount * 56 * 100) / 100;
+    if (currency === "PHP") return Math.round(amount * 58 * 100) / 100;
     return amount;
   }
 }
